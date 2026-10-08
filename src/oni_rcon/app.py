@@ -820,9 +820,10 @@ class OniApp(App):
 
     def compose(self) -> ComposeResult:
         yield Static(id="masthead")
+        yield from self.compose_toolbar()
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
-                yield ListView(*[ListItem(c) for c in self.cards], id="stations")
+                yield from self.compose_stations()
                 yield Button("+ ADD SERVER", id="add-server", compact=True)
                 with Center():
                     yield Static(id="crest")
@@ -874,6 +875,18 @@ class OniApp(App):
                                            suggester=SuggestFromList(COMMANDS, case_sensitive=False))
                         yield Checkbox("RAW EVENTS", False, id="raw")
         yield Footer()
+
+    def compose_toolbar(self) -> ComposeResult:
+        yield from ()
+
+    def compose_stations(self) -> ComposeResult:
+        yield ListView(*[ListItem(c) for c in self.cards], id="stations")
+
+    def station_index(self, item: ListItem) -> int:
+        return list(self.query_one("#stations", ListView).children).index(item)
+
+    def station_number(self, station: Station) -> int:
+        return self.stations.index(station) + 1
 
     def on_mount(self) -> None:
         self.register_theme(ONI)
@@ -1235,7 +1248,7 @@ class OniApp(App):
         g.add_column(justify="right", no_wrap=True)
         n, mx = num(s.get("players")), num(s.get("max_players"))
         count = Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM)
-        g.add_row(Text(f"{glyph} ", color) + Text(f"{i + 1}  {st.label.upper()}", "bold"),
+        g.add_row(Text(f"{glyph} ", color) + Text(f"{self.station_number(st)}  {st.label.upper()}", "bold"),
                   Text.assemble((f"⚑ {st.alerts}  ", f"bold {RED}"), count) if st.alerts else count)
         if not st.online:  # why, in words to act on, and when it tries again
             left = st.retry_at - time.monotonic()
@@ -1495,8 +1508,9 @@ class OniApp(App):
     # --- input -----------------------------------------------------------------------------------------------
     @on(ListView.Highlighted, "#stations")
     def _station(self, e: ListView.Highlighted) -> None:
-        if e.list_view.index is not None and e.list_view.index != self.sel:
-            self.sel = e.list_view.index
+        index = self.station_index(e.item) if e.item is not None else None
+        if index is not None and index != self.sel:
+            self.sel = index
             self.cur.alerts = 0  # looked at now
             for t in self.query(Roster):
                 if t.row_count:

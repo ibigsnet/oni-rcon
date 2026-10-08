@@ -10,8 +10,12 @@ import urllib.error
 import urllib.request
 from textual import on, work
 from textual.binding import Binding
-from textual.widgets import Input, ListItem, ListView, Static, TabbedContent
+from textual.containers import Horizontal, Vertical
+from textual.widgets import Button, Input, ListView, Select, Static, TabbedContent
+from rich.text import Text
 from .app import OniApp, Station, Confirm, Form
+from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_count, matching_rows,
+                      server_tags, tagged_message)
 from .config import Server
 
 READS = frozenset('help status players maps modes nextmap vote bans vpn'.split())
@@ -90,8 +94,19 @@ class Fleet:
     async def submit(self, ident, operation, command=None):
         return await self.submit_many([ident], operation, command)
 
-    async def submit_many(self, identities, operation, command=None):
+    async def broadcast_tags(self,tags,message):
         await asyncio.to_thread(self.refresh)
+        known={tag for row in self.rows.values() for tag in server_tags(row)}|{'all'}
+        unknown=set(tags)-known
+        if unknown:raise ValueError('Unknown tag(s): '+', '.join('@'+tag for tag in sorted(unknown)))
+        selected=[row['id'] for row in self.rows.values()
+                  if ('all' in tags or set(tags)&server_tags(row)) and
+                  fleet_state(row,time.monotonic()-self.updated<=35)[0]=='online']
+        if not selected:return {'ok':False,'text':'No fresh, running servers match those tags; nothing sent.'}
+        return await self.submit_many(selected,'broadcast',message,refresh=False)
+
+    async def submit_many(self, identities, operation, command=None, *, refresh=True):
+        if refresh:await asyncio.to_thread(self.refresh)
         rows=[self.rows[ident] for ident in identities]
         body=dict(operation=operation,force=False,targets=[{k:row[k] for k in ('id','process_generation','config_hash')} for row in rows])
         if command is not None:body['command']=command
@@ -144,22 +159,177 @@ class FleetRcon:
 
 class FleetApp(OniApp):
     TITLE='IBIGS Reclaimer Fleet'
-    BINDINGS=[*[b for b in OniApp.BINDINGS if b.key!='ctrl+r'],Binding('f6','lifecycle','Container'),Binding('ctrl+r','refresh_fleet','Refresh fleet')]
+    BINDINGS=[*[b for b in OniApp.BINDINGS if b.key not in ('ctrl+r', *map(str,range(1,10)))],
+              Binding('f6','lifecycle','Container'),Binding('ctrl+r','refresh_fleet','Refresh fleet'),
+              Binding('ctrl+f','search_servers','Search',priority=True),
+              Binding('f7','sort_servers','Sort'),Binding('f8','filter_servers','Filter'),
+              *[Binding(str(i),f'visible_station({i-1})',show=False) for i in range(1,10)]]
+    CSS='''
+    #fleet-browser { height: 4; background: $panel; }
+    #fleet-controls { height: 3; }
+    #fleet-controls Select { height: 1; margin: 1 0; }
+    #fleet-search { width: 1fr; min-width: 16; }
+    #fleet-sort { width: 26; }
+    #fleet-node { width: 16; }
+    #fleet-state { width: 23; }
+    #fleet-status { height: 1; padding: 0 1; }
+    #fleet-summary { width: 24; color: $secondary; }
+    #fleet-target { width: 1fr; color: $text-muted; }
+    #fleet-target.-excluded { color: $warning; }
+    #fleet-reset { width: 7; min-width: 7; height: 1; border: none; padding: 0; }
+    #stations { height: 1fr; }
+    #add-server, #sidebar > Center { display: none; }
+    .-narrow #fleet-sort { width: 24; }
+    .-narrow #fleet-node { width: 13; }
+    .-narrow #fleet-state { width: 21; }
+    '''
 
-    def __init__(self, fleet):
+    def __init__(self, fleet, *, search='', node='all', state='all', sort='players'):
         self.fleet=fleet
-        servers=[Server(url='fleet://'+r['id'],name=self.label(r)) for r in sorted(fleet.rows.values(),key=lambda r:(r['node'],r['port']))]
+        self.catalog=dict(fleet.rows)
+        self.browse_search,self.browse_node,self.browse_state,self.browse_sort=search,node,state,sort
+        self.browser_ready=False
+        self.visible_ids=[]
+        self.server_items={}
+        self.browser_fresh=True
+        self.browser_nodes=sorted({r['node'] for r in self.catalog.values()})
+        servers=[Server(url='fleet://'+r['id'],name=self.label(r)) for r in matching_rows(fleet.rows.values(),sort=sort)]
         super().__init__(servers,by='fleet-console terminal',intro=False,updater=None,
                          rcon_factory=lambda *args:FleetRcon(fleet,*args),
-                         hint='All nodes · F6 container controls · Ctrl+R refresh · Ctrl+B broadcast. Intercepts shows management events; native kill/chat streaming is not connected in fleet mode.')
+                         hint='Ctrl+F search · F7 sort · F8 state filter · Enter selects a result · RESET clears filters. Sorting keeps the selected server. Native chat/kill streaming is not connected in fleet mode.')
+
+    def compose_toolbar(self):
+        with Vertical(id='fleet-browser'):
+            with Horizontal(id='fleet-controls'):
+                yield ServerSearch(self.browse_search,id='fleet-search',placeholder='Search names, maps, ports or @tags · Ctrl+F')
+                yield Select(SORTS,value=self.browse_sort,allow_blank=False,id='fleet-sort',compact=True)
+                yield Select([('All nodes','all'),*((n.upper(),n) for n in self.browser_nodes)],value=self.browse_node,allow_blank=False,id='fleet-node',compact=True)
+                yield Select(STATES,value=self.browse_state,allow_blank=False,id='fleet-state',compact=True)
+            with Horizontal(id='fleet-status'):
+                yield Static(id='fleet-summary')
+                yield Static(id='fleet-target')
+                yield Button('RESET',id='fleet-reset',compact=True)
+
+    def compose_stations(self):
+        for station,card in zip(self.stations,self.cards):
+            self.server_items[station.server.url.removeprefix('fleet://')]=ServerItem(station,card)
+        yield ServerList(*self.server_items.values(),id='stations')
+
+    def station_index(self,item):
+        return self.stations.index(item.station)
+
+    def station_number(self,station):
+        ident=station.server.url.removeprefix('fleet://')
+        return self.visible_ids.index(ident)+1 if ident in self.visible_ids else super().station_number(station)
+
+    def browser_summary(self):
+        if not self.browser_ready:return
+        self.query_one('#fleet-summary',Static).update(Text(f'{len(self.visible_ids)}/{len(self.stations)} servers shown'))
+        ident=self.cur.server.url.removeprefix('fleet://')
+        excluded=ident not in self.visible_ids
+        message=('No matches · ' if not self.visible_ids else '')+'Selected: '+self.cur.label
+        if excluded:message+=' · outside filter'
+        tags=sorted(server_tags(self.catalog.get(ident,{})))
+        if tags:message+=' · '+' '.join('@'+tag for tag in tags)
+        target=self.query_one('#fleet-target',Static)
+        target.update(Text(message,no_wrap=True,overflow='ellipsis'))
+        target.set_class(excluded,'-excluded')
+        target.tooltip=Text(message)
+
+    def apply_browser(self):
+        if not self.browser_ready:return
+        self.browser_fresh=time.monotonic()-self.fleet.updated<=35
+        rows=matching_rows(self.catalog.values(),search=self.browse_search,node=self.browse_node,
+                           state=self.browse_state,sort=self.browse_sort,snapshot_fresh=self.browser_fresh)
+        visible=[r['id'] for r in rows]
+        listing=self.query_one('#stations',ServerList)
+        selected=self.server_items[self.cur.server.url.removeprefix('fleet://')]
+        order=visible+sorted(set(self.server_items)-set(visible))
+        actual=[item.station.server.url.removeprefix('fleet://') for item in listing.children]
+        if visible!=self.visible_ids or order!=actual:
+            ranks={ident:i for i,ident in enumerate(order)}
+            # Clear the old highlight before moving DOM children. Programmatic
+            # sorting must never retarget a command or reset the player's panel.
+            with listing.prevent(ListView.Highlighted,ListView.Selected):
+                listing.index=None
+                listing.sort_children(key=lambda item:ranks[item.station.server.url.removeprefix('fleet://')])
+                for ident,item in self.server_items.items():
+                    item.display=ident in visible
+                    item.disabled=ident not in visible
+                listing.index=list(listing.children).index(selected) if selected.display else None
+            self.visible_ids=visible
+            for station in self.stations:self.paint_card(station)
+        self.browser_summary()
+
+    @on(Input.Changed,'#fleet-search')
+    @on(Select.Changed,'#fleet-sort')
+    @on(Select.Changed,'#fleet-node')
+    @on(Select.Changed,'#fleet-state')
+    def browser_changed(self,event):
+        if not self.browser_ready:return
+        self.browse_search=self.query_one('#fleet-search',Input).value
+        self.browse_sort=self.query_one('#fleet-sort',Select).value
+        self.browse_node=self.query_one('#fleet-node',Select).value
+        self.browse_state=self.query_one('#fleet-state',Select).value
+        self.apply_browser()
+
+    @on(Input.Submitted,'#fleet-search')
+    def search_result(self,event):
+        event.stop()
+        listing=self.query_one('#stations',ServerList)
+        listing.focus()
+        if listing.index is None:listing.action_first_server()
+
+    @on(Button.Pressed,'#fleet-reset')
+    def reset_browser(self,event=None):
+        self.query_one('#fleet-search',Input).value=''
+        self.query_one('#fleet-node',Select).value='all'
+        self.query_one('#fleet-state',Select).value='all'
+        self.browse_search,self.browse_node,self.browse_state='','all','all'
+        self.apply_browser()
+
+    def action_search_servers(self):
+        self.query_one('#fleet-search',Input).focus()
+
+    def action_sort_servers(self):
+        self.query_one('#fleet-sort',Select).focus()
+
+    def action_filter_servers(self):
+        self.query_one('#fleet-state',Select).focus()
+
+    def action_visible_station(self,index):
+        if index<len(self.visible_ids):
+            self.select_fleet_station(self.visible_ids[index])
+
+    def action_station(self,index):
+        # The command palette's captured index refers to the stable inventory.
+        if index<len(self.stations):
+            self.select_fleet_station(self.stations[index].server.url.removeprefix('fleet://'))
+
+    def select_fleet_station(self,ident):
+        if ident not in self.visible_ids:self.reset_browser()
+        listing=self.query_one('#stations',ServerList)
+        listing.index=list(listing.children).index(self.server_items[ident])
+
+    def paint_all(self,feed=True):
+        super().paint_all(feed=feed)
+        self.browser_summary()
+
+    def tick(self):
+        super().tick()
+        if self.is_running and self.browser_fresh!=(time.monotonic()-self.fleet.updated<=35):
+            self.apply_browser()
 
     @staticmethod
     def label(row):
         return f"{row['node'].upper()} · {row['name']}"+(' [dynamic]' if row.get('spare') else '')
 
-    def on_mount(self):
+    def on_mount(self,event):
+        event.prevent_default()
         super().on_mount()
         self.query_one('#op-password').disabled=True
+        self.browser_ready=True
+        self.apply_browser()
         self.set_interval(15,self.action_refresh_fleet)
 
     def fetch(self, station, *what):
@@ -190,18 +360,29 @@ class FleetApp(OniApp):
     async def action_refresh_fleet(self):
         try:
             await asyncio.to_thread(self.fleet.refresh)
+            self.catalog={ident:{**row,'_retired':True,'fresh':False} for ident,row in self.catalog.items()}
+            self.catalog.update(self.fleet.rows)
             known={s.rcon.ident for s in self.stations if s.rcon}
             for ident,row in sorted(self.fleet.rows.items()):
                 if ident in known:continue
                 server=Server(url='fleet://'+ident,name=self.label(row));station=Station(server,server.name)
                 card=Static(classes='card');self.stations.append(station);self.cards.append(card)
-                await self.query_one('#stations',ListView).append(ListItem(card))
+                item=ServerItem(station,card);self.server_items[ident]=item
+                await self.query_one('#stations',ListView).append(item)
                 station.rcon=self.rcon_factory(server.url,'',self.by,self.on_rcon_event,self.on_rcon_state)
                 station.worker=self.run_worker(station.rcon.run(),group='rcon',exit_on_error=False)
             for station in self.stations:
                 row=self.fleet.rows.get(station.rcon.ident)
                 station.label=self.label(row) if row else station.label.split(' [retired]')[0]+' [retired]'
-            self.poll_slow();self.paint_all()
+            nodes=sorted({r['node'] for r in self.catalog.values()})
+            if nodes!=self.browser_nodes:
+                self.browser_nodes=nodes
+                selector=self.query_one('#fleet-node',Select)
+                value=selector.value
+                with selector.prevent(Select.Changed):
+                    selector.set_options([('All nodes','all'),*((n.upper(),n) for n in nodes)])
+                    selector.value=value
+            self.apply_browser();self.poll_slow();self.paint_all()
         except Exception as exc:self.notify(str(exc),title='Fleet refresh unavailable',severity='warning')
 
     async def cmd(self, station, command, *args, **kwargs):
@@ -233,45 +414,86 @@ class FleetApp(OniApp):
 
     @on(Input.Submitted,'#cmd')
     def _command(self,event):
-        if event.value.strip().startswith('@all '):
-            self.notify('Use Ctrl+B for a fleet broadcast. Raw commands select one lobby at a time.',severity='warning')
-            event.input.value='';return
+        event.prevent_default()
+        if event.value.strip().startswith('@'):
+            event.input.value=''
+            try:
+                tags,command=tagged_message(event.value)
+                parts=shlex.split(command)
+                if not parts or parts[0].casefold()!='say' or len(parts)<2:
+                    raise ValueError('Tag targets support broadcasts only: @swat say Your message. Other commands select one server.')
+                self.send_tag_broadcast(tags,' '.join(parts[1:]))
+            except ValueError as exc:self.notify(str(exc),severity='warning')
+            return
         super()._command(event)
 
     @on(Input.Submitted,'#say')
     def _say(self,event):
-        if event.value.strip().startswith('@all '):
-            self.notify('Use Ctrl+B to submit one audited fleet broadcast.',severity='warning')
-            event.input.value='';return
+        event.prevent_default()
+        if event.value.strip().startswith('@'):
+            event.input.value=''
+            try:
+                tags,message=tagged_message(event.value)
+                self.send_tag_broadcast(tags,message)
+            except ValueError as exc:self.notify(str(exc),severity='warning')
+            return
         super()._say(event)
+
+    @work(group='tag-broadcast')
+    async def send_tag_broadcast(self,tags,message):
+        try:
+            reply=await self.fleet.broadcast_tags(tags,message)
+            self.notify(reply['text'],severity='information' if reply['ok'] else 'warning',timeout=15)
+        except Exception as exc:self.notify(str(exc),title='Broadcast not sent',severity='error')
 
     @work(exclusive=True,group='dialog')
     async def action_broadcast(self):
+        ident=self.cur.rcon.ident
+        tags=sorted({tag for row in self.fleet.rows.values() for tag in server_tags(row)})
+        tag_options=[('@'+tag+' ('+str(sum(tag in server_tags(r) and fleet_state(r,True)[0]=='online'
+                                             for r in self.fleet.rows.values()))+' running)','tag:'+tag) for tag in tags]
         result=await self.push_screen_wait(Form('IBIGS BROADCAST',
-            [('text','Message',''),('scope','Send to',[('Every running lobby','all'),(self.cur.label,'one')])],
+            [('text','Message',''),('scope','Send to',[(self.cur.label,'one'),('Every running lobby','all'),*tag_options])],
             verb='TRANSMIT',required=('text',)))
         if not result:return
-        targets=[s.rcon.ident for s in (self.stations if result['scope']=='all' else [self.cur]) if s.online]
-        if not targets:
-            self.notify('No connected lobbies selected.',severity='warning');return
-        reply=await self.fleet.submit_many(targets,'broadcast',result['text'])
-        self.notify(reply['text'],severity='information' if reply['ok'] else 'warning',timeout=20)
+        try:
+            if result['scope']=='one':reply=await self.fleet.submit(ident,'broadcast',result['text'])
+            else:reply=await self.fleet.broadcast_tags([result['scope'].removeprefix('tag:')],result['text'])
+            self.notify(reply['text'],severity='information' if reply['ok'] else 'warning',timeout=20)
+        except Exception as exc:self.notify(str(exc),title='Broadcast not sent',severity='error')
 
 
 def main():
     parser=argparse.ArgumentParser(description='IBIGS private Reclaimer fleet terminal on fleet-console')
     parser.add_argument('--list',action='store_true',help='list registered lobbies without opening the TUI')
     parser.add_argument('--probe',metavar='LOBBY_ID',help='read native status for one registered lobby')
+    parser.add_argument('--tags',action='store_true',help='list broadcast/search tags and running-server counts')
+    parser.add_argument('--search',default='',help='filter by name, node, map, mode or port; quotes group phrases')
+    parser.add_argument('--node',default='all',type=str.casefold,help='filter to one node, e.g. node-c or node-d')
+    parser.add_argument('--state',choices=[v for _,v in STATES],default='all',help='filter servers by state')
+    parser.add_argument('--sort',choices=[v for _,v in SORTS],default='players',help='sort servers (default: most players first)')
     args=parser.parse_args()
     fleet=Fleet();fleet.refresh()
-    if args.list:
-        for row in sorted(fleet.rows.values(),key=lambda r:(r['node'],r['port'])):
-            print(f"{row['id']:16} {str(row.get('players')):>3}/{row.get('runtime_cap') or row.get('configured_cap'):<3} {row.get('health','?'):12} {row['name']}")
-        print(f"{len(fleet.rows)} lobbies · {len({r['node'] for r in fleet.rows.values()})} nodes")
+    if args.node!='all' and args.node not in {r['node'] for r in fleet.rows.values()}:
+        parser.error('unknown node: '+args.node)
+    if args.tags:
+        tags=sorted({t for r in fleet.rows.values() for t in server_tags(r)})
+        for tag in tags:
+            rows=[r for r in fleet.rows.values() if tag in server_tags(r)]
+            running=sum(fleet_state(r,True)[0]=='online' for r in rows)
+            print(f'@{tag:30} {running:3} running / {len(rows)} registered')
+    elif args.list:
+        rows=matching_rows(fleet.rows.values(),search=args.search,node=args.node,state=args.state,sort=args.sort)
+        for row in rows:
+            count=live_count(row)
+            print(f"{row['id']:16} {str(count) if count is not None else '?':>3}/{row.get('runtime_cap') or row.get('configured_cap') or '?':<3} {row.get('health','?'):12} {row['name']}")
+        print(f"{len(rows)}/{len(fleet.rows)} lobbies shown · {len({r['node'] for r in rows})} nodes")
     elif args.probe:
         if args.probe not in fleet.rows:parser.error('unknown lobby')
         reply=asyncio.run(fleet.read(args.probe,'status'));print(json.dumps(reply));raise SystemExit(0 if reply.get('ok') else 1)
-    else:FleetApp(fleet).run()
+    else:
+        if not fleet.rows:parser.exit(message='No registered servers in the fleet snapshot.\n')
+        FleetApp(fleet,search=args.search,node=args.node,state=args.state,sort=args.sort).run()
 
 
 if __name__=='__main__':main()
