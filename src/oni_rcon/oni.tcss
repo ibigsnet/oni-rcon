@@ -6,13 +6,25 @@ Screen { background: $background; }
 
 #sidebar { width: 36; border-right: vkey $primary 40%; }
 #stations { height: 1fr; background: $background; }
+#stations { height: auto; max-height: 1fr; }
+/* no background transitions here: Textual doesn't repaint the card inside, so it keeps the old colour */
 #stations > ListItem { padding: 0 1; height: 3; border-bottom: hkey $panel-lighten-1; background: $background; }
+#stations > ListItem:hover { background: $primary 8%; }
 #stations > ListItem.-highlight { background: $primary 15%; }
 #stations:focus > ListItem.-highlight { background: $primary 25%; }
 .card { height: 2; }
+#add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
+#add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; text-style: bold; }
+#sidebar > Center { height: 1fr; align-vertical: middle; }
 #uplink { height: auto; padding: 1; border-top: hkey $primary 40%; }
 
 #tabs { width: 1fr; }
+/* under 140 columns (Windows Terminal opens at 120): a slimmer sidebar and player file */
+.-narrow #sidebar { width: 30; }
+.-narrow #dossier-box { min-width: 36; }
+.-narrow #player-actions { grid-size: 3; }
+#tabs TabPane.-from { offset-x: 4; }
+#tabs TabPane.-slide { transition: offset 220ms out_cubic; }
 DataTable, RichLog, #sitrep, #dossier-box {
     border: round $primary 35%;
     border-title-color: $primary;
@@ -20,12 +32,19 @@ DataTable, RichLog, #sitrep, #dossier-box {
     background: $background;
 }
 DataTable:focus, RichLog:focus, #dossier-box:focus-within { border: round $secondary; border-title-color: $secondary; }
+RichLog { border-subtitle-color: $warning; border-subtitle-style: bold; }
 DataTable > .datatable--header { background: $panel; color: $primary; text-style: bold; }
 DataTable > .datatable--cursor { background: $primary 30%; color: $foreground; }
 
 Assets { height: 1fr; }
 #players { width: 3fr; height: 1fr; }
 #dossier-box { width: 2fr; min-width: 44; height: 1fr; padding: 0 1; }
+#player-actions { height: auto; grid-size: 4; grid-gutter: 1 1; margin: 1 0; }
+#player-actions Button { width: 1fr; min-width: 0; }
+#raw-box { background: $background; border-top: hkey $primary 25%; padding: 0; }
+#raw-box CollapsibleTitle { color: $text-muted; padding: 0; }
+#raw-box CollapsibleTitle:hover, #raw-box CollapsibleTitle:focus { color: $secondary; background: transparent; }
+#raw-box Contents { padding: 0; }
 
 #filters { height: 1; margin: 0 1; }
 #filters Checkbox { height: 1; border: none; padding: 0 2 0 0; background: transparent; }
@@ -33,9 +52,11 @@ Assets { height: 1fr; }
 #say { margin: 0 0 0 0; }
 
 #ops-top { height: auto; }
-#sitrep { width: 1fr; height: auto; padding: 0 1; }
-#ops-grid { width: 2fr; height: auto; grid-size: 4; grid-gutter: 0 1; padding: 1 1 0 1; }
-#ops-grid Button { width: 1fr; min-width: 0; }
+#sitrep { width: 1fr; min-width: 40; height: auto; padding: 0 1; }
+#ops-panel { width: 2fr; height: auto; padding: 0 1; }
+.ops-head { color: $primary 70%; text-style: bold; margin-top: 1; }
+.ops-grid { height: auto; grid-size: 3; grid-gutter: 1 1; margin-top: 1; }
+.ops-grid Button { width: 1fr; min-width: 0; }
 #rotation { height: 1fr; min-height: 6; }
 
 Blacklist { height: 1fr; }
@@ -50,10 +71,21 @@ Blacklist { height: 1fr; }
 #raw { width: auto; }
 
 Button { text-style: bold; }
+Button:disabled { opacity: 45%; }
+.-hidden { display: none; }
 
 /* dialogs */
-ModalScreen { align: center middle; background: $background 75%; }
-.dialog { width: 68; height: auto; max-height: 90%; padding: 1 2; background: $surface; border: thick $primary; }
+ModalScreen { align: center middle; background: $background 75%; transition: background 200ms; }
+ModalScreen.-enter { background: $background 0%; }
+.dialog {
+    width: 68; height: auto; max-height: 90%; padding: 1 2; background: $surface; border: thick $primary;
+    transition: offset 220ms out_cubic;
+}
+ModalScreen.-enter .dialog { offset-y: 3; }
+.dialog-keys { color: $text-muted; margin-top: 1; text-align: right; }
+.dialog Input.-missing, .dialog Select.-missing { border: tall $error; background: $error 20%; }
+.dialog.help { width: 96; height: 90%; }
+#help-body { height: 1fr; scrollbar-size-vertical: 1; }
 .dialog.danger { border: thick $error; }
 .dialog-title { text-style: bold; color: $primary; margin-bottom: 1; }
 .danger .dialog-title { color: $error; }
@@ -70,3 +102,23 @@ ModalScreen { align: center middle; background: $background 75%; }
 #boot-emblem, #crest { width: auto; }
 #crest { margin: 1 0; }
 #boot-log { width: 64; height: auto; margin-top: 2; }
+
+/* setup */
+#setup { align-horizontal: center; padding: 0 2; }
+#setup-emblem { width: auto; }
+#setup-title { width: 100%; text-align: center; margin: 1 0; }
+#setup-form { width: 100; max-height: 1000; padding: 0 2; border-title-color: $primary; border-title-style: bold; }
+.setup-row { height: auto; }
+.setup-wide { width: 1fr; height: auto; }
+.setup-col2 { margin-left: 2; }
+.setup-narrow { width: 16; height: auto; margin-left: 2; }
+.hint { color: $text-muted; }
+#setup-ssh { margin-top: 1; background: $surface; padding: 0; border-top: none; }
+#setup-ssh CollapsibleTitle { color: $secondary; padding: 0; }
+#setup-ssh Contents { padding: 0 0 0 2; }
+#remember { background: transparent; border: none; padding: 0; margin: 1 2 0 0; width: auto; }
+#remember-hint { margin-top: 1; width: 1fr; }
+#setup-status { margin-top: 1; height: auto; }
+#setup-list { height: auto; }
+#setup-form .dialog-buttons { margin-top: 0; }
+.setup-gap { width: 1fr; }
