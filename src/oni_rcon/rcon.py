@@ -24,7 +24,7 @@ class Rcon:
                  ready: asyncio.Event | None = None):
         self.url, self.password, self.by = url, password, by
         self.on_event, self.on_state, self.ready = on_event, on_state, ready
-        self.state, self.detail, self.info = "offline", "", {}
+        self.state, self.detail, self.info = "connecting", "", {}
         self.ws = None
         self._ids = itertools.count(1)
         self._pending: dict[int, asyncio.Future] = {}
@@ -37,13 +37,16 @@ class Rcon:
         """Connect, sign in and pump messages; reconnect with backoff. Returns only when the sign-in is refused."""
         delay = 2
         while True:
-            if self.ready:
+            if self.ready and not self.ready.is_set():
+                self._set("connecting", "awaiting SSH tunnel")
                 await self.ready.wait()
             self._set("connecting")
             try:
                 async with connect(self.url, proxy=None, open_timeout=10, max_size=None) as ws:
                     await ws.send(json.dumps({"type": "auth", "password": self.password}))
                     reply = json.loads(await asyncio.wait_for(ws.recv(), 10))
+                    if not isinstance(reply, dict):
+                        raise ValueError("that port doesn't speak RCON")
                     if not reply.get("ok"):
                         # Never retry a refused sign-in: 5 wrong passwords in 10 min lock the address out.
                         self._set("denied", reply.get("error") or reply.get("text") or "sign-in refused")
@@ -51,10 +54,13 @@ class Rcon:
                     self.info, self.ws, delay = reply, ws, 2
                     self._set("online", f"v{reply.get('version', '?')}")
                     async for raw in ws:
-                        self._dispatch(json.loads(raw))
+                        if isinstance(msg := json.loads(raw), dict):
+                            self._dispatch(msg)
                     detail = "connection closed"
             except (OSError, TimeoutError, WebSocketException, ValueError) as e:
                 detail = str(e) or type(e).__name__
+            except Exception as e:  # a fault handling a message: drop the link and come back, rather than die online
+                detail = f"{type(e).__name__}: {e}"
             finally:
                 self.ws = None
                 for f in self._pending.values():
@@ -102,7 +108,7 @@ class Tunnel:
         self.dest, self.on_state = dest, on_state
         self.local = {r: free_port() for r in dict.fromkeys(remotes)}  # (host, port) -> local port
         self.ready = asyncio.Event()
-        self.state, self.detail = "down", ""
+        self.state, self.detail = "opening", ""
 
     def _set(self, state: str, detail: str = "") -> None:
         self.state, self.detail = state, detail

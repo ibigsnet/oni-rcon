@@ -5,10 +5,14 @@ import sys
 
 import pytest
 
-from oni_rcon.app import Boot, Form, Help, OniApp, emblem, explain, render_event, target_of
+from oni_rcon import app as appmod
+from oni_rcon.app import (Boot, Form, Help, OniApp, emblem, explain, redact_data, render_event, resolve, sides,
+                          target_of)
+from oni_rcon.art import biosig, decrypt, hbar, spark, split_bar
 from oni_rcon.config import Server, add_servers, load_config, parse_target, resolve_passwords
 from oni_rcon.demo import serve_fakes
-from oni_rcon.rcon import Rcon
+from oni_rcon.medals import Medals
+from oni_rcon.rcon import Rcon, Tunnel
 
 
 def test_targets():
@@ -18,6 +22,9 @@ def test_targets():
     assert parse_target("wss://rcon.example.org/s1").url == "wss://rcon.example.org/s1"
     with pytest.raises(ValueError):
         Server()
+    for bad in ("foo", "host:", "99999", "1.2.3.4:x"):
+        with pytest.raises(ValueError):
+            parse_target(bad)
 
 
 def test_config(tmp_path, monkeypatch):
@@ -200,3 +207,230 @@ def test_self_update(tmp_path, monkeypatch):
     assert "uv tool upgrade" in update.check(None)  # not a release build: say how
     rel["tag_name"] = "v0.0.1"
     assert update.check(exe) == ""
+
+
+def test_medals():
+    m = Medals()
+    assert m.kill("Viper", "Rook", 0) == []
+    assert m.kill("Viper", "Juno", 3) == ["DOUBLE KILL"]
+    assert m.kill("Viper", "Atlas", 6.5) == ["TRIPLE KILL"]  # each within 4 s of the one before
+    assert m.kill("Viper", "Rook", 20) == []
+    assert m.kill("Viper", "Juno", 40) == ["KILLING SPREE"]  # five without dying
+    assert m.kill("Rook", "Viper", 41) == ["KILLJOY"]  # and Rook ended it
+    assert "Viper" not in m.spree and m.earned["Viper"]["KILLING SPREE"] == 1
+    m.kill(None, "Rook", 42)  # a fall ends a spree too, and earns nobody anything
+    assert "Rook" not in m.spree
+    m.kill("Juno", "Atlas", 50)
+    m.new_game()
+    assert not m.spree and m.earned["Viper"]["DOUBLE KILL"] == 1  # medals stay for the session
+
+
+def test_art():
+    glyph = biosig("9bb183e1", "#4C8DFF")
+    assert glyph == biosig("9bb183e1", "#4C8DFF") and glyph.plain != biosig("9bb183e2", "#4C8DFF").plain
+    lines = glyph.plain.split("\n")
+    assert len(lines) == 6 and all(len(line) == 12 and line == line[::-1] for line in lines)  # mirrored
+    assert spark([0, 1, 2, 4]).plain == "▁▂▄█"
+    assert len(split_bar([(3, "red"), (1, "blue")], 24)) == 24 == len(split_bar([(0, "red"), (0, "blue")], 24))
+    assert hbar(.5, 10, "red").cell_len == 5 and hbar(1, 10, "red").cell_len == 10
+    assert decrypt("O N I", 1) == "O N I" and not any(c.isalpha() for c in decrypt("O N I", 0))
+    assert emblem(30, reveal=0).plain.strip() == "" and emblem(30, reveal=1).plain == emblem(30).plain
+
+
+def test_redaction():
+    data = {"address": "203.0.113.9:4000", "players": [{"ip": "203.0.113.4", "name": "Rook"}],
+            "note": "seen on 198.51.100.7 before", "ranges": 4}
+    shown = json.dumps(redact_data(data, True))
+    assert "203.0.113" not in shown and "198.51.100" not in shown and "Rook" in shown and '"ranges": 4' in shown
+    assert redact_data(data, False) is data
+    line = render_event("s1", {"event": "join", "name": "Rook", "player_id": "9bb183e11570266b42b38755cd37880e",
+                               "address": "203.0.113.4"}, {}).plain
+    assert "player_id=9bb183e1…" in line and "203.0.113.4" not in line
+
+
+def test_sides():
+    team = lambda t, score: {"team": t, "score": score}
+    assert sides([team("blue", 3), team("red", 5), team(1, 2)]) == [("red", 1, 5), ("blue", 2, 5)]  # engine order
+    assert sides([team(i, i) for i in range(4)]) == []  # a free-for-all: a team each
+    assert sides([{"score": 3}]) == []
+
+
+def test_engine_ids_read_when_they_arrive():
+    names = {3: "Drift", 4: "Lark"}
+    ev = resolve({"event": "kill", "killer": 4, "victim": 3, "weapon": "sword"}, names)
+    names[3] = "Newcomer"  # the engine hands a leaver's slot to the next player to join
+    assert render_event("s1", ev, names).plain.endswith("Lark ✕ Drift  [sword]")
+
+
+def test_rcon_waits_for_its_tunnel():
+    async def go():
+        (port, *_), keep = await serve_fakes(tick=False)
+        ready = asyncio.Event()
+        rc = Rcon(f"ws://127.0.0.1:{port}", "demo", "pytest", lambda *_: None, lambda *_: None, ready)
+        task = asyncio.create_task(rc.run())
+        await asyncio.sleep(0.2)
+        assert (rc.state, rc.detail) == ("connecting", "awaiting SSH tunnel")  # nothing has failed yet
+        ready.set()
+        while rc.state != "online":
+            await asyncio.sleep(0.01)
+        for ws in list(keep[0].clients):  # a message this client can't read is skipped; the link stays up
+            await ws.send("[1, 2]")
+        await asyncio.sleep(0.1)
+        assert rc.state == "online" and (await rc.call("status"))["ok"]
+        task.cancel()
+
+    asyncio.run(go())
+
+
+async def settle(app, pilot, *keys):
+    for _ in range(100):
+        await pilot.pause(0.05)
+        if all(st.online and all(k in st.data for k in keys) for st in app.stations):
+            return
+
+
+def plain(widget) -> str:
+    return str(widget.render())
+
+
+def test_app_keeps_the_selection_and_redacts():
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        fake = keep[0]
+        fake.bans["players"] += [{"id": f"{i:032x}", "name": f"Ban{i}", "reason": "x"} for i in range(4)]
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players", "bans", "vpn")
+            bans = app.query_one("#bans")
+            bans.move_cursor(row=3)
+            chosen = app.ban_rows[bans.selected]
+            fake.bans["players"].insert(0, {"id": "f" * 32, "name": "New", "reason": "y"})  # someone else bans
+            app.fetch(app.cur, "bans")
+            await pilot.pause(0.3)
+            assert bans.row_count == 7 and app.ban_rows[bans.selected] == chosen  # u still lifts the chosen ban
+            assert "192.0.2.44" not in str(app.query_one("#vpn").get_row_at(0))
+
+            await pilot.press("f5")
+            app.query_one("#cmd").value = "players"
+            await pilot.press("enter")
+            await pilot.pause(0.3)
+            log = "\n".join(line.text for line in app.query_one("#console-log").lines)
+            assert "player_id" in log and "203.0.113." not in log
+
+            other = app.stations[1]  # not the one being looked at
+            app.on_rcon_event(other.rcon, {"type": "event", "event": "cheat", "name": "Rook", "text": "speed"})
+            assert app.condition()[0] == "RED" and other.alerts == app.unseen == 1
+            await pilot.press("f2")  # every station's alerts are in the feed: seen
+            assert app.unseen == 0
+
+    asyncio.run(go())
+
+
+def test_markup_in_a_name_is_just_a_name():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        keep[0].players[0]["name"] = "[/]"
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players")
+            t = app.query_one("#players")
+            t.move_cursor(row=next(i for i, k in enumerate(t.ids) if app.row_players[k]["name"] == "[/]"))
+            t.focus()
+            await pilot.press("k")  # this crashed the console: the name was read as markup in the dialog title
+            await pilot.pause(0.2)
+            assert isinstance(app.screen, Form) and plain(app.screen.query_one(".dialog-title")) == "KICK · [/]"
+            app.on_rcon_event(app.stations[0].rcon, {"type": "event", "event": "chat", "channel": "all", "name": "[/]",
+                                                     "text": "admin [b]help[/b]"})
+            await pilot.pause(0.2)
+            assert app.is_running
+
+    asyncio.run(go())
+
+
+def test_boot_waits_for_the_tunnel(monkeypatch):
+    class SlowTunnel(Tunnel):
+        def __init__(self, dest, remotes, on_state):
+            super().__init__(dest, remotes, on_state)
+            self.local = {r: r[1] for r in remotes}  # no ssh: straight through to the fake server
+
+        async def run(self):
+            await asyncio.sleep(3)
+            self._set("up")
+            self.ready.set()
+            await asyncio.Future()
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        monkeypatch.setattr(appmod, "Tunnel", SlowTunnel)
+        app = OniApp([Server(port=p, password="demo", ssh="box") for p in ports], by="pytest")
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.pause(1.2)  # the log is out, the tunnel isn't
+            log = plain(app.screen.query_one("#boot-log"))
+            assert "AWAITING TUNNEL" in log and "NO CARRIER" not in log and "CLEARANCE" not in log
+            for _ in range(60):
+                await pilot.pause(0.1)
+                if "CLEARANCE" in (log := plain(app.screen.query_one("#boot-log"))):
+                    break
+            assert "GRANTED" in log
+
+    asyncio.run(go())
+
+
+def test_reconnect_takes_the_password_again():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = OniApp([Server(port=ports[0], password="wrong")], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if app.stations[0].rcon.state == "denied":
+                    break
+            app.op("reconnect")
+            await pilot.pause(0.2)
+            pw = app.screen.query_one("#field-pw")
+            assert isinstance(app.screen, Form) and pw.password  # typed masked
+            pw.value = "demo"
+            await pilot.press("enter")
+            await settle(app, pilot, "players")
+            assert app.stations[0].online
+
+    asyncio.run(go())
+
+
+def test_feed_holds_still_and_keeps_its_width(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "160")  # a terminal's width, which a headless console otherwise lacks
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.press("f2")
+            await pilot.pause(0.2)
+            await pilot.press("f1")  # shown once and hidden again: a plain RichLog wraps what it gets at 78
+            feed, st = app.query_one("#feed"), app.stations[0]
+            app.on_rcon_event(st.rcon, {"type": "event", "event": "join", "name": "Wrapper", "note": "x" * 50})
+            assert any("Wrapper" in line.text and "x" * 50 in line.text for line in feed.lines)  # ~97 wide, whole
+            await pilot.press("f2")
+            chat = lambda i: {"type": "event", "event": "chat", "channel": "all", "name": "Rook", "text": f"line {i}"}
+            for i in range(120):
+                app.on_rcon_event(st.rcon, chat(i))
+            await pilot.pause(0.3)
+            assert feed.is_vertical_scroll_end  # following the tail
+            feed.scroll_to(y=10, animate=False)
+            await pilot.pause(0.1)
+            for i in range(20):
+                app.on_rcon_event(st.rcon, chat(i))
+            await pilot.pause(0.3)
+            assert feed.scroll_y == 10  # reading back: new lines don't yank the view
+
+            await pilot.press("f5")
+            cmd = app.query_one("#cmd")
+            for line in ("status", "status", "players"):
+                cmd.value = line
+                await pilot.press("enter")
+            cmd.value = "half-typ"
+            await pilot.press("up", "up")
+            assert app.history == ["status", "players"] and cmd.value == "status"
+            await pilot.press("down", "down")
+            assert cmd.value == "half-typ"  # the draft comes back
+
+    asyncio.run(go())

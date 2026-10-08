@@ -8,11 +8,11 @@ Screen { background: $background; }
 #stations { height: 1fr; background: $background; }
 #stations { height: auto; max-height: 1fr; }
 /* no background transitions here: Textual doesn't repaint the card inside, so it keeps the old colour */
-#stations > ListItem { padding: 0 1; height: 3; border-bottom: hkey $panel-lighten-1; background: $background; }
+#stations > ListItem { padding: 0 1; height: 4; border-bottom: hkey $panel-lighten-1; background: $background; }
 #stations > ListItem:hover { background: $primary 8%; }
 #stations > ListItem.-highlight { background: $primary 15%; }
 #stations:focus > ListItem.-highlight { background: $primary 25%; }
-.card { height: 2; }
+.card { height: 3; }
 #add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
 #add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; text-style: bold; }
 #sidebar > Center { height: 1fr; align-vertical: middle; }
@@ -25,7 +25,7 @@ Screen { background: $background; }
 .-narrow #player-actions { grid-size: 3; }
 #tabs TabPane.-from { offset-x: 4; }
 #tabs TabPane.-slide { transition: offset 220ms out_cubic; }
-DataTable, RichLog, #sitrep, #dossier-box {
+DataTable, RichLog, #sitrep, #dossier-box, #theatre {
     border: round $primary 35%;
     border-title-color: $primary;
     border-title-style: bold;
@@ -57,7 +57,9 @@ Assets { height: 1fr; }
 .ops-head { color: $primary 70%; text-style: bold; margin-top: 1; }
 .ops-grid { height: auto; grid-size: 3; grid-gutter: 1 1; margin-top: 1; }
 .ops-grid Button { width: 1fr; min-width: 0; }
-#rotation { height: 1fr; min-height: 6; }
+#ops-bottom { height: 1fr; min-height: 6; }
+#rotation { width: 1fr; height: 1fr; }
+#theatre { width: 1fr; height: 1fr; padding: 0 1; }
 
 Blacklist { height: 1fr; }
 #bans { height: 2fr; }

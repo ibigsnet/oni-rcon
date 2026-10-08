@@ -39,7 +39,7 @@ def main() -> None:
             existing = []
             if path:
                 cfg_by, existing = load_config(path)
-            got, by = run_setup(path or user_config(), existing, a.by or cfg_by or getpass.getuser(),
+            got, by = run_setup(path or user_config(), existing, a.by or cfg_by or login(),
                                 ask_by=not (path or a.by))
             if got is None:
                 return
@@ -55,7 +55,10 @@ def main() -> None:
             servers = [Server(port=p, password="demo") for p in start_in_thread()]
             hint = hint or DEMO_HINT
         elif targets:
-            servers = [parse_target(t, ssh=a.ssh) for t in targets]
+            try:
+                servers = [parse_target(t, ssh=a.ssh) for t in targets]
+            except ValueError as e:
+                ap.error(str(e))
         else:
             cfg_by, servers = load_config(path)
             for s in servers:
@@ -63,11 +66,18 @@ def main() -> None:
         resolve_passwords(servers)
 
         from .app import OniApp
-        result = OniApp(servers, by=a.by or cfg_by or getpass.getuser(), intro=not a.no_intro, updater=updater,
+        result = OniApp(servers, by=a.by or cfg_by or login(), intro=not a.no_intro, updater=updater,
                         hint=hint).run()
         if result != "setup":
             return
         setup, updater = True, None  # + ADD SERVER: back to the setup screen, then round again; updates checked once
+
+
+def login() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:  # no login name to be had, as in some containers
+        return "operator"
 
 
 if __name__ == "__main__":
