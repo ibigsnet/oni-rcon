@@ -5,6 +5,7 @@ import contextlib
 import getpass
 import os
 import subprocess
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -97,14 +98,15 @@ def resolve_passwords(servers: list[Server]) -> None:
 
 
 def _run(cmd: str | list[str]) -> str:
-    # A string runs through the shell; a list runs as-is (no quoting surprises, works the same on Windows).
+    if not isinstance(cmd, list) or not cmd or not all(isinstance(arg, str) for arg in cmd):
+        raise SystemExit('password_command must be an explicit argument list; shell commands are disabled')
     try:
-        r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=60,
+        r = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=60,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as e:  # not installed, or waiting on something that never comes
         raise SystemExit(f"password_command failed: {e}") from None
     if r.returncode:
-        raise SystemExit(f"password_command exited {r.returncode}: {r.stderr.strip()}")
+        raise SystemExit(f"password_command exited {r.returncode}")
     return r.stdout.splitlines()[0] if r.stdout else ""
 
 
@@ -130,7 +132,13 @@ def add_servers(path: Path, servers: list[Server], by: str = "", remember: bool 
         text += f"ssh = {toml_str(s.ssh)}\n"  # always set, so a [defaults] tunnel doesn't apply to a direct server
         if remember and s.password:
             text += f"password = {toml_str(s.password)}\n"
-    path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
-    if remember:
-        with contextlib.suppress(OSError):  # owner-only on Linux and macOS; Windows profiles are per-user already
-            path.chmod(0o600)
+    fd, temporary = tempfile.mkstemp(prefix='.config-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            os.fchmod(output.fileno(), 0o600)
+            output.write(text if text.endswith('\n') else text+'\n')
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary,path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):os.unlink(temporary)

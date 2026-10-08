@@ -1,3 +1,5 @@
+> **IBIGS maintained copy:** On fleet-console run `oni-rcon`. See [IBIGS setup and limitations](IBIGS.md) and [source review](SECURITY-REVIEW.md). The upstream self-updater described below is disabled in this copy.
+
 # oni-rcon
 
 ![oni-rcon boot screen: the ONI emblem over the clearance check](docs/boot.png)

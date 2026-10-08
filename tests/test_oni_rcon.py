@@ -189,24 +189,15 @@ def test_setup_screen(tmp_path):
     asyncio.run(go())
 
 
-def test_self_update(tmp_path, monkeypatch):
+def test_self_update_is_disabled(tmp_path, monkeypatch):
     from oni_rcon import update
-    exe, old, build = tmp_path / "oni-rcon.exe", tmp_path / "oni-rcon.exe.old", b"new build"
-    exe.write_bytes(b"running build")
-    rel = {"tag_name": "v99.0.0", "assets": [{"name": "a", "size": len(build), "browser_download_url": "dl",
-                                              "digest": "sha256:" + hashlib.sha256(build).hexdigest()}]}
-    monkeypatch.setattr(update, "ASSET", "a")
-    monkeypatch.setattr(update, "fetch", lambda url, timeout=0: build if url == "dl" else json.dumps(rel).encode())
-    monkeypatch.delenv("ONI_RCON_NO_UPDATE", raising=False)
-    assert update.check(exe) == "Updated to v99.0.0. Restart oni-rcon to use it."
-    assert exe.read_bytes() == build and old.read_bytes() == b"running build"
-
-    rel["tag_name"], rel["assets"][0]["size"] = "v99.0.1", 1  # a cut-off download leaves the exe alone
-    assert "update failed" in update.check(exe)
-    assert exe.read_bytes() == build and not old.exists()  # last time's copy is cleared on the next start
-    assert "uv tool upgrade" in update.check(None)  # not a release build: say how
-    rel["tag_name"] = "v0.0.1"
+    import urllib.request
+    exe = tmp_path / "oni-rcon.exe"
+    exe.write_bytes(b"reviewed build")
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("network update")))
     assert update.check(exe) == ""
+    assert update.check(None) == ""
+    assert exe.read_bytes() == b"reviewed build"
 
 
 def test_medals():

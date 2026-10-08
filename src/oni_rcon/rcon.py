@@ -42,10 +42,10 @@ class Rcon:
                 await self.ready.wait()
             self._set("connecting")
             try:
-                async with connect(self.url, proxy=None, open_timeout=10, max_size=None) as ws:
+                async with connect(self.url, proxy=None, open_timeout=10, max_size=1024*1024) as ws:
                     await ws.send(json.dumps({"type": "auth", "password": self.password}))
                     reply = json.loads(await asyncio.wait_for(ws.recv(), 10))
-                    if not isinstance(reply, dict):
+                    if not isinstance(reply, dict) or reply.get('type') != 'auth':
                         raise ValueError("that port doesn't speak RCON")
                     if not reply.get("ok"):
                         # Never retry a refused sign-in: 5 wrong passwords in 10 min lock the address out.
@@ -105,6 +105,8 @@ class Tunnel:
     """One `ssh -N -L ...` per destination, forwarding every server behind it; restarted if ssh exits."""
 
     def __init__(self, dest: str, remotes: list[tuple[str, int]], on_state: Callable):
+        if not dest or dest.startswith('-') or any(ord(c)<33 or ord(c)==127 for c in dest):
+            raise ValueError('invalid SSH destination')
         self.dest, self.on_state = dest, on_state
         self.local = {r: free_port() for r in dict.fromkeys(remotes)}  # (host, port) -> local port
         self.ready = asyncio.Event()
@@ -120,6 +122,7 @@ class Tunnel:
             self._set("down", "no ssh client on PATH")
             return
         args = [ssh, "-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",
+                "-o", "StrictHostKeyChecking=yes",
                 "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"]
         for (host, port), local in self.local.items():
             args += ["-L", f"127.0.0.1:{local}:{host}:{port}"]

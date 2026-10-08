@@ -754,7 +754,8 @@ class Feed(RichLog):
                 0 if self.show_vertical_scrollbar else self.styles.scrollbar_size_vertical)
         elif width is None and tabs > self.inset:  # as wide as the line, up to what's there once shown
             console = self.app.console
-            width = min(measure_renderables(console, console.options, [content]).maximum, tabs - self.inset)
+            available = tabs - self.inset
+            width = min(measure_renderables(console, console.options.update(width=available), [content]).maximum, available)
         if not self.auto_scroll:
             self.unread += 1
             self.border_subtitle = f"▼ {self.unread} NEW  ·  End to follow"
@@ -792,9 +793,10 @@ class OniApp(App):
     ]
 
     def __init__(self, servers: list[Server], by: str, intro: bool = True, updater: Callable[[], str] | None = None,
-                 hint: str = ""):
+                 hint: str = "", rcon_factory=Rcon):
         super().__init__()
         self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
+        self.rcon_factory = rcon_factory
         self.frame, self.lit = 0, set()  # lit: cards mid-pulse
         self.stations = [Station(s, s.name or s.where) for s in servers]
         self.cards = [Static(classes="card") for _ in servers]
@@ -909,7 +911,7 @@ class OniApp(App):
                 url, ready = f"ws://127.0.0.1:{tun.local[(s.host, s.port)]}", tun.ready
             else:
                 url = f"ws://[{s.host}]:{s.port}" if ":" in s.host else f"ws://{s.host}:{s.port}"
-            st.rcon = Rcon(url, s.password, self.by, self.on_rcon_event, self.on_rcon_state, ready)
+            st.rcon = self.rcon_factory(url, s.password, self.by, self.on_rcon_event, self.on_rcon_state, ready)
             st.worker = self.run_worker(st.rcon.run(), group="rcon", exit_on_error=False)
 
         self.set_interval(1, self.tick)
