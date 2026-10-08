@@ -6,9 +6,10 @@ import sys
 import pytest
 
 from oni_rcon import app as appmod
-from oni_rcon.app import Boot, Form, OniApp, emblem, redact_data, render_event, resolve, sides, target_of
+from oni_rcon.app import (Boot, Form, Help, OniApp, emblem, explain, redact_data, render_event, resolve, sides,
+                          target_of)
 from oni_rcon.art import biosig, decrypt, hbar, spark, split_bar
-from oni_rcon.config import Server, load_config, parse_target, resolve_passwords
+from oni_rcon.config import Server, add_servers, load_config, parse_target, resolve_passwords
 from oni_rcon.demo import serve_fakes
 from oni_rcon.medals import Medals
 from oni_rcon.rcon import Rcon, Tunnel
@@ -35,6 +36,31 @@ def test_config(tmp_path, monkeypatch):
     resolve_passwords(servers)
     assert by == "op" and [s.ssh for s in servers] == ["box", ""]
     assert [s.password for s in servers] == ["42", "fromenv"]
+
+
+def test_add_servers(tmp_path):
+    p = tmp_path / "new" / "config.toml"
+    add_servers(p, [Server(port=11774, name='Say "hi" \\ 🎮', password="pw")], by="op")
+    add_servers(p, [Server(url="wss://x.example/s"), Server(host="::1", port=5, ssh="box", password="secret")],
+                remember=False)
+    by, servers = load_config(p)
+    assert by == "op" and [s.where for s in servers] == ["127.0.0.1:11774", "wss://x.example/s", "::1:5 via ssh box"]
+    assert servers[0].name == 'Say "hi" \\ 🎮' and servers[0].password == "pw" and not servers[2].password
+
+    # appended to a hand-written file: its comments stay, and a [defaults] tunnel doesn't leak into a direct server
+    p.write_text('# mine\n[defaults]\nssh = "game-box"\n[[server]]\nport = 1\n')
+    add_servers(p, [Server(port=2, password="x")])
+    assert p.read_text().startswith("# mine")
+    assert [s.ssh for s in load_config(p)[1]] == ["game-box", ""]
+
+
+def test_explain():
+    assert explain("[Errno 111] Connect call failed ('127.0.0.1', 1); retry in 4s") .startswith("Nothing answered")
+    assert explain("[Errno -2] Name or service not known; retry in 2s", short=True) == "UNKNOWN HOST"
+    assert "password" in explain("Wrong password.", "denied")
+    assert explain("something new; retry in 8s") == "something new"
+    assert explain("[WinError 1225] The remote computer refused the network connection", short=True) == \
+        "NOTHING ON THAT PORT"  # Windows words it differently
 
 
 def test_emblem_fits():
@@ -98,12 +124,68 @@ def test_app_against_fakes():
                     break
             assert app.stations[0].label == "Slayer"  # common "Demo Ops | " prefix stripped
             assert app.query_one("#players").row_count == len(app.stations[0].players) > 0
+            assert app.query_one("#op-passvote").disabled  # no vote under way
+
+            await pilot.click("#pl-tell")  # the player file's buttons open the same dialogs as the keys
+            await pilot.pause()
+            assert isinstance(app.screen, Form)
+            await pilot.press("escape")
+            await pilot.press("question_mark")
+            await pilot.pause()
+            assert isinstance(app.screen, Help)
+            await pilot.press("escape")
+            await pilot.pause()
+
+            app.on_rcon_event(app.stations[1].rcon, {"type": "event", "event": "chat", "text": "admin [b]help"})
+            assert app.stations[1].alerts == 1  # counted on the station not being looked at
+            await pilot.press("2")
+            await pilot.pause()
+            assert app.stations[1].alerts == 0
+            await pilot.press("1")
             await pilot.press("f5")
             app.query_one("#cmd").focus()
             app.query_one("#cmd").value = "say hello there"
             await pilot.press("enter")
             await pilot.pause(0.3)
             assert any("hello there" in str(e.get("text")) for _, e in app.feed)
+    asyncio.run(go())
+
+
+def test_setup_screen(tmp_path):
+    from textual.widgets import Button
+
+    from oni_rcon.wizard import SetupApp, target
+    assert target("10.0.0.5", "11774") == "10.0.0.5:11774" and target("box:5", "11774") == "box:5"
+    assert target("::1", "5") == "[::1]:5" and target("wss://h/s", "11774") == "wss://h/s"
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        cfg = tmp_path / "config.toml"
+        app = SetupApp(cfg, [], "op", ask_by=True)
+        async with app.run_test(size=(120, 60)) as pilot:
+            # by keyboard and waiting on the test itself: clicks and polling budgets depend on the runner's speed
+            status = lambda: str(app.query_one("#setup-status").render())
+
+            async def test_and_add(password: str) -> None:
+                app.query_one("#password").value = password
+                app.query_one("#password").focus()
+                await pilot.press("enter")
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+
+            assert app.query_one("#start").disabled  # nothing to start with yet
+            app.query_one("#port").value = str(ports[0])
+            await test_and_add("wrong")
+            assert "refused the password" in status() and not app.added, status()
+            await test_and_add("demo")
+            assert app.added, status()
+            assert app.query_one("#port").value == str(ports[0] + 1)  # the next server on the box, probably
+            app.query_one("#start", Button).press()
+            await pilot.pause()
+        assert [s.port for s in app.return_value] == [ports[0]]
+        by, servers = load_config(cfg)
+        assert by == "op" and servers[0].password == "demo"
     asyncio.run(go())
 
 
@@ -235,11 +317,11 @@ def test_app_keeps_the_selection_and_redacts():
             log = "\n".join(line.text for line in app.query_one("#console-log").lines)
             assert "player_id" in log and "203.0.113." not in log
 
-            st = app.stations[0]
-            app.on_rcon_event(st.rcon, {"type": "event", "event": "cheat", "name": "Rook", "text": "speed"})
-            assert app.condition()[0] == "RED" and app.alerts == 1
-            await pilot.press("f2")  # seen
-            assert app.alerts == 0
+            other = app.stations[1]  # not the one being looked at
+            app.on_rcon_event(other.rcon, {"type": "event", "event": "cheat", "name": "Rook", "text": "speed"})
+            assert app.condition()[0] == "RED" and other.alerts == app.unseen == 1
+            await pilot.press("f2")  # every station's alerts are in the feed: seen
+            assert app.unseen == 0
 
     asyncio.run(go())
 

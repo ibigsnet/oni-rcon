@@ -1,6 +1,7 @@
 """Which servers to manage, how to reach them, and where each password comes from."""
 from __future__ import annotations
 
+import contextlib
 import getpass
 import os
 import subprocess
@@ -105,3 +106,31 @@ def _run(cmd: str | list[str]) -> str:
     if r.returncode:
         raise SystemExit(f"password_command exited {r.returncode}: {r.stderr.strip()}")
     return r.stdout.splitlines()[0] if r.stdout else ""
+
+
+def toml_str(s: str) -> str:
+    """A TOML basic string. Not json.dumps: JSON escapes astral characters as surrogate pairs, which TOML rejects."""
+    out = "".join(f"\\u{ord(c):04x}" if ord(c) < 0x20 or ord(c) == 0x7F else "\\" + c if c in '"\\' else c for c in s)
+    return f'"{out}"'
+
+
+def add_servers(path: Path, servers: list[Server], by: str = "", remember: bool = True) -> None:
+    """Append [[server]] blocks, so the comments and settings already in the file stay as they were."""
+    new = not path.is_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = "" if new else path.read_text(encoding="utf-8")
+    if new:
+        text = ("# oni-rcon servers, written by the setup screen. Edit freely: oni-rcon.example.toml lists every option.\n"
+                + (f"by = {toml_str(by)}\n" if by else ""))
+    for s in servers:
+        text += "\n[[server]]\n"
+        if s.name:
+            text += f"name = {toml_str(s.name)}\n"
+        text += f"url = {toml_str(s.url)}\n" if s.url else f"host = {toml_str(s.host)}\nport = {s.port}\n"
+        text += f"ssh = {toml_str(s.ssh)}\n"  # always set, so a [defaults] tunnel doesn't apply to a direct server
+        if remember and s.password:
+            text += f"password = {toml_str(s.password)}\n"
+    path.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    if remember:
+        with contextlib.suppress(OSError):  # owner-only on Linux and macOS; Windows profiles are per-user already
+            path.chmod(0o600)

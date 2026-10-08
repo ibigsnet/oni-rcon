@@ -1,12 +1,17 @@
-"""oni-rcon [targets...] [-c CONFIG] [--ssh DEST] [--by NAME] [--demo]"""
+"""oni-rcon [targets...] [-c CONFIG] [--ssh DEST] [--by NAME] [--demo] [--setup]"""
 from __future__ import annotations
 
 import argparse
 import getpass
 import sys
+from pathlib import Path
 
 from . import __version__, update
 from .config import Server, default_config, load_config, parse_target, resolve_passwords, user_config
+
+DEMO_HINT = ("Three pretend servers to look around. Click a player, try the buttons, and press ? for a guide. "
+             "When you're ready, + ADD SERVER (left) connects your own.")
+NEW_HINT = "You're in. Click a player for what you can do, or press ? for a guide."
 
 
 def main() -> None:
@@ -17,37 +22,55 @@ def main() -> None:
     ap.add_argument("--ssh", metavar="DEST", default="", help="reach the targets through an SSH tunnel to DEST")
     ap.add_argument("--by", help="your name in the server's admin log (default: config `by`, then your login)")
     ap.add_argument("--demo", action="store_true", help="run against three simulated servers, no setup needed")
+    ap.add_argument("--setup", action="store_true", help="add servers with the setup screen")
     ap.add_argument("--no-intro", action="store_true", help="skip the boot sequence")
     ap.add_argument("-V", "--version", action="version", version=f"oni-rcon {__version__}")
     a = ap.parse_args()
 
-    cfg_by, path = "", None
-    if not (a.demo or a.targets):
-        path = a.config or default_config()
-        if not path:
+    setup, demo, targets, updater = a.setup, a.demo, a.targets, update.check
+    typed: dict[str, str] = {}  # passwords given to the setup screen but not saved: good for this session
+    while True:
+        hint = ""
+        cfg_by, path = "", Path(a.config) if a.config else default_config()
+        if setup or not (demo or targets or path):
             if not sys.stdin.isatty():
                 ap.error("no targets and no config file; try `oni-rcon --demo`, or `oni-rcon HOST:PORT` with the game port")
-            # a double-clicked exe gets no arguments: offer the demo instead of an error in a window that closes
-            try:
-                input(f"No servers set up yet. Put them in {user_config()} (see the README), or run oni-rcon HOST:PORT.\n"
-                      "Press Enter to look around the demo, or close this window. ")
-            except (EOFError, KeyboardInterrupt):
+            from .wizard import setup as run_setup
+            existing = []
+            if path:
+                cfg_by, existing = load_config(path)
+            got, by = run_setup(path or user_config(), existing, a.by or cfg_by or login(),
+                                ask_by=not (path or a.by))
+            if got is None:
                 return
-            a.demo = True
-    if a.demo:
-        from .demo import start_in_thread
-        servers = [Server(port=p, password="demo") for p in start_in_thread()]
-    elif a.targets:
-        try:
-            servers = [parse_target(t, ssh=a.ssh) for t in a.targets]
-        except ValueError as e:
-            ap.error(str(e))
-    else:
-        cfg_by, servers = load_config(path)
-    resolve_passwords(servers)
+            setup = False
+            if got == "demo":
+                demo, hint = True, DEMO_HINT
+            else:  # the servers were added to the config; passwords not kept there are only in memory
+                demo, targets, hint, path = False, [], NEW_HINT, path or user_config()
+                typed.update({s.where: s.password for s in got})
+                a.by = a.by or by
+        if demo:
+            from .demo import start_in_thread
+            servers = [Server(port=p, password="demo") for p in start_in_thread()]
+            hint = hint or DEMO_HINT
+        elif targets:
+            try:
+                servers = [parse_target(t, ssh=a.ssh) for t in targets]
+            except ValueError as e:
+                ap.error(str(e))
+        else:
+            cfg_by, servers = load_config(path)
+            for s in servers:
+                s.password = s.password or typed.get(s.where, "")
+        resolve_passwords(servers)
 
-    from .app import OniApp
-    OniApp(servers, by=a.by or cfg_by or login(), intro=not a.no_intro, updater=update.check).run()
+        from .app import OniApp
+        result = OniApp(servers, by=a.by or cfg_by or login(), intro=not a.no_intro, updater=updater,
+                        hint=hint).run()
+        if result != "setup":
+            return
+        setup, updater = True, None  # + ADD SERVER: back to the setup screen, then round again; updates checked once
 
 
 def login() -> str:
