@@ -23,7 +23,9 @@ jobs:
       - shell: bash
         run: |
           printf 'from oni_rcon.__main__ import main\n\nmain()\n' > launch.py
-          uv run --with pyinstaller pyinstaller --onefile --name oni-rcon --collect-data oni_rcon \
+          icon=()
+          if [ "$RUNNER_OS" = Windows ]; then icon=(--icon packaging/oni-rcon.ico); fi  # ELF files carry no icon
+          uv run --with pyinstaller pyinstaller --onefile --name oni-rcon --collect-data oni_rcon "${icon[@]}" \
             --collect-submodules textual --collect-submodules websockets launch.py
           mv dist/oni-rcon* "${{ matrix.asset }}"
           # the self-updater compares this against the tag: a mismatch would update itself on every start

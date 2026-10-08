@@ -9,8 +9,9 @@ allowances and a raw command console, wrapped in Office of Naval Intelligence, S
 ![Assets tab: players table and personnel dossier](docs/assets.png)
 
 **[Download for Windows](https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-windows-x64.exe)** · [Linux](https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-linux-x64) ·
-or `uv tool install git+https://github.com/viik2k/oni-rcon`. Run it with no servers set up (or with `--demo`) to look
-around three simulated ones.
+or `uv tool install git+https://github.com/viik2k/oni-rcon`. The first time it opens a setup screen: type your server's
+address and RCON password, it tests them, and you're in. Or choose **Try the demo** to look around three simulated
+servers first.
 
 ## What it does
 
@@ -24,7 +25,14 @@ around three simulated ones.
 
 Also:
 
-- **Many servers at once.** The sidebar holds one card per server, and `1`–`9` jumps between them.
+- **No config file needed.** The setup screen adds servers for you and tests each one first. **+ ADD SERVER** in the
+  sidebar brings it back later.
+- **Point and click.** Every action has a button, every button explains itself when the mouse rests on it, and `?`
+  opens a plain-words guide to the whole console.
+- **Errors you can act on.** A server that won't connect says why ("Nothing answered on that port", "SSH refused your
+  key") and counts down to its next try.
+- **Many servers at once.** The sidebar holds one card per server, and `1`–`9` jumps between them. A server you aren't
+  looking at pulses red and keeps a ⚑ count when someone there calls for an admin.
 - **Broadcast to one server or all.** `Ctrl+B`.
 - **Command palette.** `Ctrl+P`.
 - **Player addresses are redacted by default.** Press `x` to reveal them, which helps when you stream or share screenshots.
@@ -42,7 +50,8 @@ Also:
 You need a Project Reclaimer dedicated server with RCON turned on (tested against 0.9.7).
 
 **Windows:** download [`oni-rcon-windows-x64.exe`](https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-windows-x64.exe) and double-click it. The build
-isn't code-signed, so SmartScreen may stop it the first time: choose **More info**, then **Run anyway**.
+isn't code-signed, so SmartScreen may stop it the first time: choose **More info**, then **Run anyway**. The setup screen
+takes it from there.
 
 **Linux:**
 
@@ -82,6 +91,14 @@ real value in an `.env` that never goes into Git. Each server listens on its own
 that, set `rcon_port` (and optionally `rcon_password`) in that server's `[[server]]` block. Restart the server.
 
 ## Connect
+
+The easy way is the setup screen: it opens by itself the first time, from **+ ADD SERVER** in the sidebar, or with
+`oni-rcon --setup`. It adds each server to your config file (below), keeps any comments and settings already there,
+and saves the password only if you leave **Remember the password** ticked.
+
+![Setup screen: address, port and RCON password, tested before it's saved](docs/setup.png)
+
+From the command line:
 
 ```
 oni-rcon 11774                                # a server on this machine
@@ -145,8 +162,10 @@ port = 11775
 | `Ctrl+B` | broadcast |
 | `Ctrl+R` | refresh now |
 | `Ctrl+P` | command palette |
+| `?` | the field manual: what everything does, in plain words |
 | `x` | show or hide player addresses |
 | `/` | jump to the input line |
+| `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
 | `Esc`, `Enter` or `Space` | skip the boot sequence (`--no-intro` skips it for good) |
@@ -167,6 +186,8 @@ uv run oni-rcon --demo
 ```
 
 The demo servers (`oni_rcon/demo.py`) speak the same protocol as a real server and are what the tests run against.
+Animations follow Textual's `TEXTUAL_ANIMATIONS` (`none`, `basic` or `full`), so `TEXTUAL_ANIMATIONS=none oni-rcon`
+turns them off.
 
 To release, bump `__version__` in `src/oni_rcon/__init__.py`, commit, and push a matching tag (`git tag v0.2.0 &&
 git push --tags`). The release workflow builds the Windows and Linux binaries and publishes them, and running copies
@@ -176,7 +197,8 @@ pick the new version up on their next start.
 
 oni-rcon is an unofficial, fan-made tool. It is not affiliated with or endorsed by Microsoft, Halo Studios or the
 Project Reclaimer team. Halo and related names are trademarks of Microsoft Corporation, and the ONI styling is a fan
-tribute: the emblem in the interface is a fan-made pixel rendition. oni-rcon contains no game files.
+tribute: the emblem in the interface is a fan-made pixel rendition, and the Windows icon is the ONI emblem. oni-rcon
+contains no game files.
 
 ## Licence
 

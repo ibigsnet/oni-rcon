@@ -20,12 +20,13 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
+from textual.color import Color
 from textual.containers import Center, Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen, Screen
 from textual.suggester import SuggestFromList
 from textual.theme import Theme
-from textual.widgets import (Button, Checkbox, DataTable, Footer, Input, Label, ListItem, ListView, OptionList,
-                             RichLog, Select, Static, TabbedContent, TabPane)
+from textual.widgets import (Button, Checkbox, Collapsible, DataTable, Footer, Input, Label, ListItem, ListView,
+                             OptionList, RichLog, Select, Static, TabbedContent, TabPane)
 from textual.widgets.option_list import Option
 from textual.worker import WorkerState
 
@@ -52,6 +53,7 @@ KIND = {"chat": "chat", "kill": "combat", "join": "traffic", "leave": "traffic",
 GLYPH = {"chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□",
          "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡"}
 STATE = {"online": ("◉", GREEN), "connecting": ("◌", AMBER), "offline": ("○", RED), "denied": ("⊘", RED)}
+SPIN = "◐◓◑◒"
 PANE_FOCUS = {"assets": "#players", "intercepts": "#feed", "operations": "#op-load", "blacklist": "#bans",
               "console": "#cmd"}
 ALERT = re.compile(r"\b(admins?|mods?|hack\w*|cheat\w*|aimbot|wallhack)\b", re.I)
@@ -60,11 +62,94 @@ OPS = [("load", "LOAD MAP+MODE", "primary"), ("map", "CHANGE MAP", "default"), (
        ("nextmap", "QUEUE NEXT", "default"), ("endround", "END ROUND", "warning"), ("endgame", "END GAME", "error"),
        ("shuffle", "SHUFFLE TEAMS", "default"), ("teamcount", "TEAM COUNT", "default"),
        ("startvote", "CALL VOTE", "default"), ("passvote", "PASS VOTE", "success"),
-       ("cancelvote", "CANCEL VOTE", "warning"), ("broadcast", "BROADCAST", "primary"),
+       ("cancelvote", "CANCEL VOTE", "default"), ("broadcast", "BROADCAST", "primary"),
        ("servername", "RENAME", "default"), ("password", "JOIN PASSWORD", "default"),
        ("maxping", "PING LIMIT", "default"), ("reconnect", "RECONNECT", "default")]
+OP_GROUPS = [("MATCH", ["load", "map", "mode", "nextmap", "endround", "endgame"]),
+             ("TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]),
+             ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect"])]
 BAN_OPS = [("newban", "NEW BAN", "error"), ("unban", "UNBAN  u", "warning"), ("vpnallow", "VPN ALLOW  a", "default"),
            ("vpnrevoke", "VPN REVOKE  r", "default"), ("vpncheck", "CHECK IP", "default")]
+PLAYER_OPS = [("tell", "TELL", "t"), ("kick", "KICK", "k"), ("ban", "BAN", "b"), ("mute", "MUTE", "m"),
+              ("team", "TEAM", "j"), ("vpnallow", "VPN OK", "v"), ("copy", "COPY ID", "y")]
+
+# What each control does, in plain words: shown when the mouse rests on it.
+TIPS = {
+    "op-load": "Pick a map and a mode and switch to them now. Ends the current game.",
+    "op-map": "Switch to another map, keeping the current mode. Ends the current game.",
+    "op-mode": "Switch to another mode, keeping the current map. Ends the current game.",
+    "op-nextmap": "Choose what plays after this game, without interrupting it.",
+    "op-endround": "End this round as if its time ran out.",
+    "op-endgame": "End the whole game now, with the scores as they stand.",
+    "op-shuffle": "Mix the players up across the teams.",
+    "op-teamcount": "Spread the players over 2 to 8 teams.",
+    "op-startvote": "Ask the players to vote: end the round, shuffle, kick someone, and more.",
+    "op-passvote": "Pass the vote that's under way, whatever the count.",
+    "op-cancelvote": "Call off the vote that's under way.",
+    "op-broadcast": "Send a [Server] message to everyone in this or every server.  Ctrl+B",
+    "op-servername": "Change the name in the server browser, until the server restarts.",
+    "op-password": "Make players type a password to join (or remove it).",
+    "op-maxping": "Stop players with a high ping from joining.",
+    "op-reconnect": "Drop this connection and sign in again.",
+    "bl-newban": "Ban a player ID, an IP address or a whole range.",
+    "bl-unban": "Lift the selected ban.  Key: u",
+    "bl-vpnallow": "Let a player or address join through a VPN.  Key: a",
+    "bl-vpnrevoke": "Take back the selected VPN allowance.  Key: r",
+    "bl-vpncheck": "Check whether an address looks like a VPN.",
+    "pl-tell": "Send a private message only they can see.  Key: t",
+    "pl-kick": "Remove them from the game. They can rejoin after a short wait.  Key: k",
+    "pl-ban": "Keep them out, for a while or for good.  Key: b",
+    "pl-mute": "Silence their text and voice chat (or lift it).  Key: m",
+    "pl-team": "Move them to another team.  Key: j",
+    "pl-vpnallow": "Let them join through a VPN.  Key: v",
+    "pl-copy": "Copy their player ID, for a ban list or a report.  Key: y",
+    "add-server": "Add another server with the setup screen.",
+    "f-local": "Show only what happens on the selected server.",
+    "raw": "Also print every event the servers push, as raw data.",
+}
+TAB_TIPS = {"assets": "Players on the selected server: click one for their file and actions.",
+            "intercepts": "Live chat, kills, joins and moderation from every server, and a box to talk back.",
+            "operations": "Change the map or mode, end rounds, run votes, and server settings.",
+            "blacklist": "Bans, and players allowed to join through a VPN.",
+            "console": "Type server commands directly. For when a button doesn't cover it."}
+
+# A connection failure in words to act on: (what the error says, card text, the full explanation)
+EXPLAIN = [
+    (("ssh: connect to host", "could not resolve hostname"), "SSH CAN'T REACH THE BOX",
+     "SSH couldn't reach that machine. Check the user@host spelling, and that SSH runs there."),
+    (("host key verification",), "SSH DOESN'T KNOW THE BOX",
+     "SSH hasn't seen that machine before. Connect once with ssh in a terminal to trust it, then retry."),
+    (("permission denied", "publickey"), "SSH REFUSED YOUR KEY",
+     "SSH refused your key. Load it into your SSH agent, or name it in ~/.ssh/config."),
+    (("no ssh client",), "SSH NOT INSTALLED", "There's no SSH on this computer, so the tunnel can't open."),
+    (("connect call failed", "connection refused", "refused the network connection", "errno 111", "10061", "1225"),
+     "NOTHING ON THAT PORT",
+     "Nothing answered on that port. Is the server running, with an RCON password set in dedicated.toml?"),
+    (("name or service not known", "getaddrinfo", "nodename nor servname", "no address associated", "11001"),
+     "UNKNOWN HOST", "Can't find that host name. Check the spelling."),
+    (("network is unreachable", "no route to host"), "NO ROUTE", "Can't reach that network. Check your connection or VPN."),
+    (("timed out", "timeout", "10060", "semaphore"), "NO ANSWER",
+     "No answer. Check the address and port, and any firewall in between."),
+    (("invalid http", "did not receive a valid http", "rejected websocket", "invalid status"), "NOT AN RCON PORT",
+     "Something answered, but it isn't RCON. RCON listens on the game port."),
+    (("isn't a valid uri", "invalid uri", "scheme isn't"), "BAD LINK", "That isn't a valid ws:// or wss:// link."),
+    (("connection closed", "connection lost", "no close frame"), "CONNECTION DROPPED", "The connection dropped."),
+]
+
+
+def explain(detail: str, state: str = "offline", short: bool = False) -> str:
+    """Why a station isn't online, for someone who has never seen a socket error."""
+    d = re.sub(r";?\s*retry in \d+s$", "", detail or "").strip()
+    low = d.lower()
+    if state == "denied":
+        if any(k in low for k in ("too many", "locked", "lockout")):
+            return "LOCKED OUT" if short else "Locked out after too many wrong passwords. Wait ten minutes, then retry."
+        return "PASSWORD REFUSED" if short else ("The server refused the password. Check it against dedicated.toml "
+                                                 "[rcon]. Five wrong tries in ten minutes lock you out for a while.")
+    for keys, card, text in EXPLAIN:
+        if any(k in low for k in keys):
+            return card if short else text
+    return (d.upper() or "NO CARRIER") if short else d or "Not connected."
 
 # The ONI emblem, traced into pixel grids (largest first); tones 1 dark face, 2 rays, 3 bright face.
 EMBLEMS = [b.split() for b in re.sub(r"(?m)^#.*\n", "", Path(__file__).with_name("emblem.txt")
@@ -208,6 +293,11 @@ class Station:
     prev: str = ""
     data: dict = field(default_factory=dict)  # last good `data` per read command (status, players, bans, ...)
     inflight: set = field(default_factory=set)
+    alerts: int = 0  # calls for an admin and anti-cheat hits not yet looked at
+    flash: float = 0.0  # the card pulses until this monotonic time
+    retry_at: float = 0.0  # when the next reconnect attempt goes out
+    first_seen: dict = field(default_factory=dict)  # player key -> when their row first appeared
+    painted: bool = False  # players drawn once: anyone new after this gets a NEW flag
 
     @property
     def online(self) -> bool:
@@ -223,7 +313,19 @@ class Station:
 
 
 # --- dialogs ------------------------------------------------------------------------------------------------------
-class Confirm(ModalScreen[bool]):
+class Dialog(ModalScreen):
+    """A modal that dims the screen behind it as its box rises into place (the -enter transitions in oni.tcss)."""
+    DEFAULT_CLASSES = "-enter"
+
+    @staticmethod
+    def keys(*hints: str) -> Static:
+        return Static(Text("   ·   ".join(hints), DIM), classes="dialog-keys")
+
+    def on_mount(self) -> None:
+        self.call_after_refresh(self.remove_class, "-enter")
+
+
+class Confirm(Dialog):
     BINDINGS = [Binding("escape", "dismiss(False)", show=False)]
 
     def __init__(self, title: str, body: str, verb: str = "EXECUTE", danger: bool = True):
@@ -237,6 +339,7 @@ class Confirm(ModalScreen[bool]):
             with Horizontal(classes="dialog-buttons"):
                 yield Button("ABORT", id="no")
                 yield Button(self.verb, id="yes", variant="error" if self.danger else "primary")
+            yield self.keys("Esc cancel", "← → choose", "Enter confirm")
 
     def on_mount(self) -> None:
         self.query_one("#no").focus()  # the safe choice is the default
@@ -246,7 +349,7 @@ class Confirm(ModalScreen[bool]):
         self.dismiss(e.button.id == "yes")
 
 
-class Form(ModalScreen[dict | None]):
+class Form(Dialog):
     """fields: (key, label, default) where a list default is a Select of (label, value) and anything else an Input."""
     BINDINGS = [Binding("escape", "dismiss(None)", show=False)]
 
@@ -261,7 +364,7 @@ class Form(ModalScreen[dict | None]):
             if self.note:
                 yield Static(self.note, classes="dialog-body")
             for key, label, default in self.fields:
-                yield Label(label)
+                yield Label(label + ("  (required)" if key in self.required else ""))
                 if isinstance(default, list):
                     yield Select(default, allow_blank=False, id=f"field-{key}")
                 else:
@@ -269,6 +372,7 @@ class Form(ModalScreen[dict | None]):
             with Horizontal(classes="dialog-buttons"):
                 yield Button("ABORT", id="no")
                 yield Button(self.verb, id="yes", variant="error" if self.danger else "primary")
+            yield self.keys("Esc cancel", "Tab next field", "Enter " + self.verb.lower())
 
     def on_mount(self) -> None:
         self.query("Input, Select").first().focus()
@@ -289,12 +393,15 @@ class Form(ModalScreen[dict | None]):
             vals[key] = v.strip() if isinstance(v, str) else ""
         missing = [k for k in self.required if not vals[k]]
         if missing:
-            self.notify(f"{missing[0]} is required", severity="warning")
+            box = self.query_one(f"#field-{missing[0]}")
+            box.focus()
+            box.add_class("-missing")  # a red flash on the empty box says which one
+            self.set_timer(0.6, lambda: box.remove_class("-missing"))
         else:
             self.dismiss(vals)
 
 
-class Pick(ModalScreen[str | None]):
+class Pick(Dialog):
     """A filterable list; returns the chosen value, or None when aborted."""
     BINDINGS = [Binding("escape", "dismiss(None)", show=False), Binding("down", "focus_list", show=False)]
 
@@ -306,8 +413,9 @@ class Pick(ModalScreen[str | None]):
         with Vertical(classes="dialog pick"):
             yield Static(self.t, classes="dialog-title")
             if len(self.opts) > 8:
-                yield Input(placeholder="filter…", id="pick-filter")
+                yield Input(placeholder="type to filter…", id="pick-filter")
             yield OptionList(id="pick-list")
+            yield self.keys("Esc cancel", "↑ ↓ move", "Enter or click to choose")
 
     def on_mount(self) -> None:
         self.fill("")
@@ -343,6 +451,67 @@ class Pick(ModalScreen[str | None]):
         self.dismiss(self.shown[int(e.option.id)][1])
 
 
+GUIDE = [
+    ("GETTING AROUND", [
+        ("Servers", "Your servers are on the left. Click one, or press 1 to 9. A green ◉ is connected; a red ○ "
+                    "says why it isn't, and retries by itself."),
+        ("Tabs", "F1 to F5, or click the names along the top."),
+        ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
+    ]),
+    ("F1  ASSETS  ·  the players", [
+        ("Pick a player", "Click a row, or move with ↑ ↓. Their file opens on the right, with buttons to tell, kick, "
+                          "ban, mute, move or allow them through a VPN."),
+        ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  y copy their ID"),
+        ("Flags", "ADM an admin  ·  MUT muted  ·  KIA dead right now  ·  NEW just joined"),
+    ]),
+    ("F2  INTERCEPTS  ·  what's happening", [
+        ("The feed", "Chat, kills, joins, kicks and bans from every server, newest at the bottom. Scroll up to read "
+                     "back; it holds still until you press End."),
+        ("Talk back", "Type in the box at the bottom to chat as [Server]. Start with @all to reach every server."),
+        ("Alerts", "Chat asking for an admin, or naming a cheat, pops up and beeps. Servers you aren't looking at "
+                   "show a ⚑ count until you open them."),
+    ]),
+    ("F3  OPERATIONS  ·  running the match", [
+        ("Buttons", "Change map or mode, queue what plays next, end the round, shuffle teams, run votes, broadcast, "
+                    "and server settings. Anything that ends a game asks first."),
+    ]),
+    ("F4  BLACKLIST  ·  bans", [
+        ("Lists", "Every ban by player, address and device, and who may join through a VPN. Pick a row, then UNBAN "
+                  "or REVOKE."),
+    ]),
+    ("F5  CONSOLE  ·  typing commands", [
+        ("Commands", "For anything without a button. Type help for the server's list; ↑ ↓ bring back earlier ones."),
+    ]),
+    ("SAFETY", [
+        ("Addresses", "Player IPs are hidden. Press x to show them, and again to hide them before you stream."),
+        ("Confirming", "Risky actions ask first, and the safe choice (ABORT) is already selected."),
+        ("Passwords", "A refused password is never retried by itself: five wrong tries lock you out."),
+    ]),
+]
+
+
+class Help(Dialog):
+    BINDINGS = [Binding("escape,question_mark,q", "dismiss", show=False)]
+
+    def compose(self) -> ComposeResult:
+        parts = []
+        for section, rows in GUIDE:
+            g = Table.grid(padding=(0, 2))
+            g.add_column(style=CYAN, no_wrap=True, width=14)
+            g.add_column()
+            for k, v in rows:
+                g.add_row(k, Text(v, WHITE))
+            parts += [Text(section, f"bold {AMBER}"), g, Text()]
+        with Vertical(classes="dialog help"):
+            yield Static("FIELD MANUAL", classes="dialog-title")
+            with VerticalScroll(id="help-body"):
+                yield Static(Group(*parts))
+            yield self.keys("Esc or ? close", "↑ ↓ scroll", "Ctrl+P every action")
+
+    def on_mount(self) -> None:
+        self.query_one("#help-body").focus()
+
+
 class Boot(Screen):
     """The splash: types out the clearance check while the stations sign in. Any key skips it."""
     BINDINGS = [Binding("escape,enter,space", "skip", "Skip")]
@@ -358,43 +527,69 @@ class Boot(Screen):
             with Center():  # align centres children as one block, and the emblem is full width
                 yield Static(id="boot-log")
 
+    REVEAL = 0.8  # seconds for the scan line to draw the emblem
+
+    def __init__(self):
+        super().__init__()
+        self.t0, self.done, self.art, self.drawn = time.monotonic(), None, Text(), -1
+
     def on_mount(self) -> None:
-        self.t0, self.done = time.monotonic(), None
+        self.query_one("#boot-log").styles.height = len(self.app.stations) + 5  # fixed, so lines don't shift it
         self.set_interval(0.07, self.tick)
         self.on_resize()
 
-    def on_resize(self) -> None:  # leave room for the title and a log line per station
-        self.query_one("#boot-emblem", Static).update(emblem(self.app.size.height - 12 - len(self.app.stations)))
+    def on_resize(self) -> None:  # leave room for the title, a log line per station and the progress bar
+        self.art, self.drawn = emblem(self.app.size.height - 14 - len(self.app.stations)), -1
+        self.paint_emblem(time.monotonic() - self.t0)
+
+    def paint_emblem(self, el: float) -> None:
+        """Draw the emblem top down behind a scan line; the whole of it at once with animations off."""
+        lines = self.art.split("\n") if self.art.plain else []
+        n = len(lines) if self.app.animation_level != "full" else min(len(lines), int(len(lines) * el / self.REVEAL))
+        if n == self.drawn:
+            return
+        self.drawn, w = n, len(lines[0]) if lines else 0
+        rest = [Text("━" * w, CYAN)] + [Text(" " * w)] * (len(lines) - n - 1) if n < len(lines) else []
+        self.query_one("#boot-emblem", Static).update(Text("\n").join(lines[:n] + rest))
 
     @staticmethod
     def dotted(k: str, v: str, color: str) -> Text:
-        return Text(f"> {k} ", WHITE) + Text("." * max(3, 46 - len(k)), DIM) + Text(f" {v}\n", f"bold {color}")
+        dots = max(3, min(46 - len(k), 59 - len(k) - len(v)))  # a long value takes from the dots, not the next line
+        return Text(f"> {k} ", WHITE) + Text("." * dots, DIM) + Text(f" {v}\n", f"bold {color}")
 
     def tick(self) -> None:
         app, el = self.app, time.monotonic() - self.t0
+        self.paint_emblem(el)
         steps = int(el / 0.22)
         head = [("AUTHENTICATING OPERATOR", app.by.upper(), AMBER),
                 ("OPENING SECURE CHANNELS", f"{len(app.stations)} STATION{'S' * (len(app.stations) != 1)}", AMBER)]
-        out = Text()
+        out, progress = Text(), len(head[:steps])
         for k, v, c in head[:steps]:
             out += self.dotted(k, v, c)
         for i, st in enumerate(app.stations[:max(0, steps - len(head))]):
             state = st.rcon.state if st.rcon else "connecting"
-            v, c = {"online": ("SECURE", GREEN), "denied": ("DENIED", RED), "offline": ("NO CARRIER", RED)}.get(
-                state, (f"{self.SPIN[int(el * 8) % 4]} HANDSHAKE", AMBER))
+            v, c = {"online": ("SECURE", GREEN), "denied": ("DENIED", RED)}.get(
+                state, (app.why(st), RED) if state == "offline" else (f"{self.SPIN[int(el * 8) % 4]} HANDSHAKE", AMBER))
             out += self.dotted(f"[{i + 1}] {st.label.upper()[:34]}", v, c)
+            progress += state != "connecting"
         settled = all(st.rcon and st.rcon.state != "connecting" for st in app.stations)
         if steps > len(head) + len(app.stations) and settled or el > 15:
             ok = any(st.online for st in app.stations)
             out += self.dotted("CLEARANCE", "GRANTED" if ok else "NO STATION REACHABLE", GREEN if ok else RED)
+            progress += 1
             self.done = self.done or time.monotonic()
             if time.monotonic() - self.done > 1.1:
                 self.action_skip()
+        else:  # the prompt blinks while it works
+            out += Text("> ", WHITE) + Text("█" if int(el * 3) % 2 == 0 else " ", AMBER) + Text("\n")
+        filled = round(60 * progress / (len(head) + len(app.stations) + 1))
+        out += Text("\n") + Text("▰" * filled, AMBER) + Text("▱" * (60 - filled), DIM)
         self.query_one("#boot-log", Static).update(out)
 
     def action_skip(self) -> None:
         if self.app.screen is self:
             self.app.pop_screen()
+            self.app.welcome()
 
 
 class Assets(Horizontal):
@@ -407,6 +602,28 @@ class Assets(Horizontal):
 class Blacklist(Vertical):
     BINDINGS = [Binding("n", "app.bl('newban')", "New ban"), Binding("u", "app.bl('unban')", "Unban"),
                 Binding("a", "app.bl('vpnallow')", "VPN allow"), Binding("r", "app.bl('vpnrevoke')", "VPN revoke")]
+
+
+class Feed(RichLog):
+    """A log that follows new lines only while it's scrolled to the bottom: reading back isn't yanked away."""
+    unread = 0
+
+    def watch_scroll_y(self, old: float, new: float) -> None:
+        super().watch_scroll_y(old, new)
+        if new < old or self.is_vertical_scroll_end:  # only a person scrolls up; the bottom resumes following
+            self.auto_scroll = self.is_vertical_scroll_end
+            if self.auto_scroll and self.unread:
+                self.unread, self.border_subtitle = 0, ""
+
+    def write(self, content, *args, **kw):
+        if not self.auto_scroll:
+            self.unread += 1
+            self.border_subtitle = f"▼ {self.unread} NEW  ·  End to follow"
+        return super().write(content, *args, **kw)
+
+    def clear(self):
+        self.unread, self.border_subtitle, self.auto_scroll = 0, "", True
+        return super().clear()
 
 
 class CommandInput(Input):
@@ -429,13 +646,15 @@ class OniApp(App):
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
         Binding("f5", "tab('console')", "Console"), Binding("ctrl+b", "broadcast", "Broadcast"),
         Binding("ctrl+r", "refresh", "Refresh"), Binding("x", "redact", "Redact"),
-        Binding("slash", "focus_input", "Type", show=False),
+        Binding("question_mark", "help", "Help"), Binding("slash", "focus_input", "Type", show=False),
         *[Binding(str(i), f"station({i - 1})", show=False) for i in range(1, 10)],
     ]
 
-    def __init__(self, servers: list[Server], by: str, intro: bool = True, updater: Callable[[], str] | None = None):
+    def __init__(self, servers: list[Server], by: str, intro: bool = True, updater: Callable[[], str] | None = None,
+                 hint: str = ""):
         super().__init__()
-        self.by, self.intro, self.updater = by, intro, updater
+        self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
+        self.frame, self.lit = 0, set()  # lit: cards mid-pulse
         self.stations = [Station(s, s.name or s.where) for s in servers]
         self.cards = [Static(classes="card") for _ in servers]
         self.sel, self.redact, self.raw_events = 0, True, False
@@ -457,38 +676,50 @@ class OniApp(App):
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
                 yield ListView(*[ListItem(c) for c in self.cards], id="stations")
+                yield Button("+ ADD SERVER", id="add-server", compact=True)
                 with Center():
                     yield Static(id="crest")
                 yield Static(id="uplink")
             with TabbedContent(id="tabs", initial="assets"):
-                with TabPane("ASSETS", id="assets"):
+                with TabPane("[dim]F1[/] ASSETS", id="assets"):
                     with Assets():
                         yield DataTable(id="players", cursor_type="row", zebra_stripes=True)
                         with VerticalScroll(id="dossier-box"):
                             yield Static(id="dossier")
-                with TabPane("INTERCEPTS", id="intercepts"):
+                            with Grid(id="player-actions"):
+                                for op, label, _ in PLAYER_OPS:
+                                    yield Button(label, id=f"pl-{op}", compact=True,
+                                                 variant="error" if op in ("kick", "ban") else "default")
+                            with Collapsible(title="RAW DATA", id="raw-box"):
+                                yield Static(id="dossier-raw")
+                with TabPane("[dim]F2[/] INTERCEPTS", id="intercepts"):
                     with Horizontal(id="filters"):
                         for cat in CATS:
                             yield Checkbox(cat.upper(), True, id=f"f-{cat}")
                         yield Checkbox("THIS STATION ONLY", False, id="f-local")
-                    yield RichLog(id="feed", wrap=True, max_lines=3000)
-                    yield Input(id="say", placeholder="» say to this station   ·   @all <text> transmits to every station")
-                with TabPane("OPERATIONS", id="operations"):
+                    yield Feed(id="feed", wrap=True, max_lines=3000)
+                    yield Input(id="say", placeholder="» type to chat as [Server] on this server   ·   start with @all "
+                                                      "to reach every server")
+                with TabPane("[dim]F3[/] OPERATIONS", id="operations"):
                     with Horizontal(id="ops-top"):
                         yield Static(id="sitrep")
-                        with Grid(id="ops-grid"):
-                            for op, label, variant in OPS:
-                                yield Button(label, id=f"op-{op}", variant=variant)
+                        with Vertical(id="ops-panel"):
+                            ops = {op: (label, variant) for op, label, variant in OPS}
+                            for group, names in OP_GROUPS:
+                                yield Static(group, classes="ops-head")
+                                with Grid(classes="ops-grid"):
+                                    for op in names:
+                                        yield Button(ops[op][0], id=f"op-{op}", variant=ops[op][1], compact=True)
                     yield DataTable(id="rotation", cursor_type="none", zebra_stripes=True)
-                with TabPane("BLACKLIST", id="blacklist"):
+                with TabPane("[dim]F4[/] BLACKLIST", id="blacklist"):
                     with Blacklist():
                         yield DataTable(id="bans", cursor_type="row", zebra_stripes=True)
                         yield DataTable(id="vpn", cursor_type="row", zebra_stripes=True)
                         with Horizontal(classes="bar"):
                             for op, label, variant in BAN_OPS:
                                 yield Button(label, id=f"bl-{op}", variant=variant)
-                with TabPane("CONSOLE", id="console"):
-                    yield RichLog(id="console-log", wrap=True, max_lines=5000)
+                with TabPane("[dim]F5[/] CONSOLE", id="console"):
+                    yield Feed(id="console-log", wrap=True, max_lines=5000)
                     with Horizontal(id="console-bar"):
                         yield CommandInput(id="cmd", placeholder="command   ·   @all <command> runs on every station   ·   ↑↓ history",
                                            suggester=SuggestFromList(COMMANDS, case_sensitive=False))
@@ -507,6 +738,11 @@ class OniApp(App):
                            "#sitrep": "SITREP", "#rotation": "ROTATION", "#bans": "BLACKLIST",
                            "#vpn": "VPN ALLOWANCES", "#console-log": "COMMAND LOG"}.items():
             self.query_one(sel).border_title = title
+        for wid, tip in TIPS.items():
+            self.query_one(f"#{wid}").tooltip = tip
+        tabs = self.query_one(TabbedContent)
+        for pane, tip in TAB_TIPS.items():
+            tabs.get_tab(pane).tooltip = tip
         self.log_cmd(Text("ONI remote console. Commands go to the selected station; `@all` prefixes run on every "
                           "station; `help` asks the server; `clear` clears this log.", DIM))
 
@@ -532,9 +768,12 @@ class OniApp(App):
         self.set_interval(1, self.paint_masthead)
         self.set_interval(3, self.poll_fast)
         self.set_interval(15, self.poll_slow)
+        self.set_interval(0.15, self.animate_cards)
         self.paint_all()
         if self.intro:
             self.push_screen(Boot())
+        else:
+            self.welcome()
         self.on_resize()
         if self.updater:
             self.run_worker(self.check_update, thread=True, exit_on_error=False)
@@ -543,9 +782,17 @@ class OniApp(App):
         if msg := self.updater():
             self.call_from_thread(self.notify, msg, title="UPDATE", timeout=20)
 
+    def welcome(self) -> None:
+        """Once the boot screen is gone: a pointer for someone new, if __main__ asked for one."""
+        if self.hint:
+            self.notify(self.hint, title="WELCOME, OPERATOR", timeout=15)
+            self.hint = ""
+
     def on_resize(self) -> None:
+        self.set_class(self.size.width < 140, "-narrow")  # on the app: the boot screen may be the one on top
+        self.paint_masthead()
         # the sidebar crest takes what the station cards and uplink leave, and goes when that's too little
-        free = self.size.height - 9 - len(self.tunnels) - 3 * len(self.stations)
+        free = self.size.height - 10 - len(self.tunnels) - 3 * len(self.stations)
         crest = self.query_one("#crest", Static)
         crest.update(art := emblem(min(free, 16), 32))
         crest.display = bool(art.plain)
@@ -561,10 +808,12 @@ class OniApp(App):
             self.log_event(st, {"event": "uplink", "text": f"SECURE  {detail}"})
         elif state == "denied":
             self.log_event(st, {"event": "uplink", "text": f"SIGN-IN REFUSED: {detail}"})
-            self.notify(f"{detail}\nNot retried (wrong passwords lock you out). Fix the password, then RECONNECT.",
-                        title=f"{st.label} · SIGN-IN REFUSED", severity="error", timeout=20)
+            self.notify(f"{explain(detail, state)}\nNot retried by itself. Fix the password, then RECONNECT (F3).",
+                        title=f"{st.label} · SIGN-IN REFUSED", severity="error", timeout=20, markup=False)
         elif state == "offline" and st.prev == "online":
             self.log_event(st, {"event": "uplink", "text": f"LOST  {detail}"})
+        retry = re.search(r"retry in (\d+)s", detail) if state == "offline" else None
+        st.retry_at = time.monotonic() + int(retry[1]) if retry else 0.0
         if state != "connecting":
             st.prev = state
         self.paint_card(st)
@@ -574,6 +823,9 @@ class OniApp(App):
             return
         if state == "down":
             self.log_event(None, {"event": "uplink", "text": f"SSH {tun.dest} DOWN  {detail}"})
+            for st in self.stations:  # their own state stays "offline: waiting for the tunnel"; say why
+                if st.server.ssh == tun.dest and not st.server.url and not st.online:
+                    self.paint_card(st)
         self.paint_uplink()
 
     def on_worker_state_changed(self, e) -> None:
@@ -637,7 +889,8 @@ class OniApp(App):
         if show_data and r.get("data") is not None:
             self.log_cmd(JSON.from_data(r["data"]))
         if toast or not ok:
-            self.notify(text, title=f"{st.label} · {command.upper()}", severity="information" if ok else "error")
+            self.notify(text, title=f"{st.label} · {command.upper()}", severity="information" if ok else "error",
+                        markup=False)
         return r
 
     def send(self, st: Station, command: str, *args: str, then: tuple = (), **kw) -> None:
@@ -657,12 +910,12 @@ class OniApp(App):
         kind, text = ev.get("event"), str(ev.get("text", ""))
         if kind == "chat" and ev.get("channel") != "server" and ALERT.search(text):
             self.notify(f"{who(pick(ev, 'name', 'player'), st.names)}: {text}", title=f"CALL FOR ADMIN · {st.label}",
-                        severity="warning", timeout=12)
-            self.bell()
+                        severity="warning", timeout=12, markup=False)  # player text: brackets aren't markup
+            self.alert(st)
         elif kind == "cheat":
             self.notify(render_event("", ev, st.names, self.redact).plain[24:], title=f"ANTI-CHEAT · {st.label}",
-                        severity="error", timeout=12)
-            self.bell()
+                        severity="error", timeout=12, markup=False)
+            self.alert(st)
         if kind in ("join", "leave", "refused", "kick", "ban", "mute", "unmute", "control"):
             self.fetch(st, "players", "status")
         if kind in ("ban", "unban"):
@@ -671,6 +924,13 @@ class OniApp(App):
             self.fetch(st, "vote")
         if kind == "control":
             self.fetch(st, "nextmap")
+
+    def alert(self, st: Station) -> None:
+        """Beep, pulse the station's card, and count it there until someone opens that station."""
+        self.bell()
+        st.flash = time.monotonic() + 3
+        if st is not self.cur:
+            st.alerts += 1
 
     def log_event(self, st: Station | None, ev: dict) -> None:
         self.feed.append((st, ev))
@@ -712,34 +972,79 @@ class OniApp(App):
             return
         online = sum(st.online for st in self.stations)
         assets = sum(st.data.get("status", {}).get("players") or 0 for st in self.stations if st.online)
+        alerts = sum(st.alerts for st in self.stations)
         g = Table.grid(expand=True)
         for j in ("left", "center", "right"):
             g.add_column(justify=j, no_wrap=True)
-        g.add_row(Text("▲ ", AMBER) + Text("OFFICE OF NAVAL INTELLIGENCE", f"bold {AMBER}") + Text("  ·  SECTION III", DIM),
-                  Text(f"{online}/{len(self.stations)} STATIONS SECURE  ·  {assets} ASSETS IN THEATRE",
-                       CYAN if online else RED),
-                  Text("TOP SECRET // ", f"bold {RED}") + Text(f"OPERATOR {self.by.upper()}  ")
+        wide = self.size.width >= 140  # else just the essentials, so nothing gets cut mid-word
+        g.add_row(Text("▲ ", AMBER) + Text("OFFICE OF NAVAL INTELLIGENCE" if wide else "ONI", f"bold {AMBER}")
+                  + Text("  ·  SECTION III" if wide else "", DIM),
+                  Text(f"{online}/{len(self.stations)} STATIONS SECURE  ·  {assets} ASSETS"
+                       + " IN THEATRE" * wide, CYAN if online else RED)
+                  + (Text(f"  ·  ⚑ {alerts} ALERT{'S' * (alerts != 1)}", f"bold {RED}") if alerts else Text()),
+                  Text("TOP SECRET // " if wide else "", f"bold {RED}") + Text(f"OPERATOR {self.by.upper()}  ")
                   + Text(time.strftime("%H:%M:%S"), DIM))
         self.query_one("#masthead", Static).update(g)
+
+    def why(self, st: Station, short: bool = True) -> str:
+        """Why a station isn't online, looking through to its SSH tunnel when that's what's down."""
+        rc = st.rcon
+        if rc is None or rc.state == "connecting":
+            return "CONNECTING…" if short else "Connecting…"
+        tun = self.tunnels.get(st.server.ssh) if st.server.ssh and not st.server.url else None
+        if tun and tun.state != "up" and rc.state == "offline":
+            return explain(tun.detail, short=short) if tun.detail else "OPENING SSH TUNNEL" if short else \
+                "Opening the SSH tunnel…"
+        return explain(rc.detail, rc.state, short=short)
 
     def paint_card(self, st: Station) -> None:
         i = self.stations.index(st)
         s = st.data.get("status", {})
         state = st.rcon.state if st.rcon else "connecting"
         glyph, color = STATE[state]
+        if self.animation_level != "none":
+            if state == "connecting":
+                glyph = SPIN[self.frame % 4]
+            elif state == "online" and self.frame % 20 < 2:
+                color = "#B4F5D0"  # a heartbeat: brighter for a moment every few seconds
         g = Table.grid(expand=True, padding=(0, 1), pad_edge=False)
         g.add_column(no_wrap=True, overflow="ellipsis", ratio=1)
         g.add_column(justify="right", no_wrap=True)
         n, mx = s.get("players"), s.get("max_players")
+        count = Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM)
         g.add_row(Text(f"{glyph} ", color) + Text(f"{i + 1}  {st.label.upper()}", "bold"),
-                  Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM))
+                  Text(f"⚑ {st.alerts}  ", f"bold {RED}") + count if st.alerts else count)
         if st.online:
             sub = Text("   " + " · ".join(str(x).replace("_", " ") for x in (s.get("map"), s.get("mode")) if x), DIM)
             phase = Text(str(s.get("phase") or "").replace("_", " ").upper(), GREEN if s.get("phase") == "in_game" else DIM)
         else:
-            sub, phase = Text("   " + (st.rcon.detail if st.rcon else ""), color), Text("")
+            left = st.retry_at - time.monotonic()
+            sub = Text("   " + self.why(st), color if state != "connecting" else AMBER)
+            phase = Text(f"↻ {int(left) + 1}s", DIM) if left > 0 else Text("F3 ↻", DIM) if state == "denied" else Text()
         g.add_row(sub, phase)
         self.cards[i].update(g)
+
+    def animate_cards(self) -> None:
+        """The 0.15 s frame: spinners, the online heartbeat, retry countdowns, and alert pulses."""
+        if not self.is_running:
+            return
+        self.frame += 1
+        now, moving = time.monotonic(), self.animation_level != "none"
+        for i, (st, card) in enumerate(zip(self.stations, self.cards)):
+            pulsing = moving and st.flash > now
+            if pulsing:  # red swelling and fading, about once a second
+                card.parent.styles.background = Color.parse(RED).with_alpha(0.1 + 0.3 * abs(self.frame % 6 - 3) / 3)
+                self.lit.add(i)
+            elif i in self.lit:
+                card.parent.styles.clear_rule("background")
+                self.lit.discard(i)
+                pulsing = True  # one last repaint, back to the stylesheet's colour
+            if pulsing:
+                card.notify_style_update()  # the card caches its parent's colour; a CSS transition can't do this
+            state = st.rcon.state if st.rcon else "connecting"
+            if (pulsing or moving and (state == "connecting" or state == "online" and self.frame % 20 in (0, 2))
+                    or state != "online" and self.frame % 7 == 0):
+                self.paint_card(st)
 
     def paint_uplink(self) -> None:
         t = Text.assemble(("OPERATOR  ", DIM), (self.by, f"bold {AMBER}"), "\n")
@@ -756,7 +1061,8 @@ class OniApp(App):
         keep = self.selected_key(t)
         t.clear()
         self.row_players = {}
-        players = sorted(self.cur.players, key=lambda p: (team_of(p), -(pick(p, "score", default=0) or 0)))
+        st, now = self.cur, time.monotonic()
+        players = sorted(st.players, key=lambda p: (team_of(p), -(pick(p, "score", default=0) or 0)))
         for i, p in enumerate(players):
             team, color = team_of(p), TEAM_COLOR.get(team_of(p), WHITE)
             k, d = pick(p, "kills"), pick(p, "deaths")
@@ -767,17 +1073,20 @@ class OniApp(App):
             if p.get("muted"):
                 flags.append("MUT ", RED)
             if p.get("alive") is False:
-                flags.append("KIA", DIM)
+                flags.append("KIA ", DIM)
             key = target_of(p)
             key = key if key not in self.row_players else f"{key}~{i}"
             self.row_players[key] = p
+            if now - st.first_seen.setdefault(key, now if st.painted else 0.0) < 12:
+                flags.append("NEW", f"bold {GREEN}")
             t.add_row(str(pick(p, "number", default="")), Text(str(pick(p, "name", default="?")), f"bold {color}"),
                       Text(team.upper() or "—", TEAM_COLOR.get(team, DIM)), str(pick(p, "score", default="—")),
                       str(k if k is not None else "—"), str(d if d is not None else "—"), kd,
                       bar(p.get("health")), bar(p.get("shields")), flags, key=key)
         if keep in self.row_players:
             t.move_cursor(row=t.get_row_index(keep), animate=False)
-        mx = self.cur.data.get("players", {}).get("max_players") or self.cur.data.get("status", {}).get("max_players")
+        st.painted = st.painted or "players" in st.data  # everyone here at the first look isn't news
+        mx = st.data.get("players", {}).get("max_players") or st.data.get("status", {}).get("max_players")
         t.border_title = f"ASSETS IN THEATRE · {len(players)}/{mx or '?'}"
         self.paint_dossier()
 
@@ -792,10 +1101,19 @@ class OniApp(App):
 
     def paint_dossier(self) -> None:
         box, p = self.query_one("#dossier", Static), self.cur_player()
+        self.query_one("#player-actions").display = self.query_one("#raw-box").display = bool(p)
         if not p:
-            msg = "NO ASSETS IN THEATRE" if self.cur.online else "STATION OFFLINE"
-            box.update(Text(f"\n\n{msg}\n\nPlayers appear here as they join.", DIM, justify="center"))
+            if self.cur.online:
+                msg = Text.assemble(("NO ASSETS IN THEATRE\n\n", f"bold {DIM}"),
+                                    ("Nobody is playing on this server right now.\nPlayers appear here as they join.", DIM))
+            else:
+                msg = Text.assemble(("STATION OFFLINE\n\n", f"bold {RED}"), (self.why(self.cur, short=False), WHITE),
+                                    ("\n\nIt retries by itself. To retry now: F3, then RECONNECT.", DIM))
+            box.update(Text("\n\n") + msg)
+            box.styles.text_align = "center"
             return
+        box.styles.text_align = "left"
+        self.query_one("#pl-mute", Button).label = "UNMUTE" if p.get("muted") else "MUTE"
         team = team_of(p)
         g = Table.grid(padding=(0, 2))
         g.add_column(style=DIM, no_wrap=True)
@@ -818,9 +1136,8 @@ class OniApp(App):
         for a, b in rows:
             g.add_row(a, b if isinstance(b, Text) else Text(str(b)))
         raw = {k: redact_addr(v, True) if self.redact and k in ("address", "ip") else v for k, v in p.items()}
-        box.update(Group(Text("PERSONNEL FILE", f"bold {AMBER}") + Text("  //  CLASSIFIED", f"bold {RED}"), Text(), g,
-                         Text(), Text("t tell · k kick · b ban · m mute · j team · v vpn-allow · y copy ID", DIM),
-                         Text(), Text("RAW", DIM), JSON.from_data(raw)))
+        box.update(Group(Text("PERSONNEL FILE", f"bold {AMBER}") + Text("  //  CLASSIFIED", f"bold {RED}"), Text(), g))
+        self.query_one("#dossier-raw", Static).update(JSON.from_data(raw))
 
     def paint_ops(self) -> None:
         st = self.cur
@@ -845,6 +1162,11 @@ class OniApp(App):
                      ("VOTE", json.dumps(vote.get("vote")) if vote.get("vote") else "none under way")]:
             g.add_row(a, b if isinstance(b, Text) else Text(str(b)))
         self.query_one("#sitrep", Static).update(g)
+        voting = bool(vote.get("vote")) if "vote" in st.data else None  # unknown until the first fetch: leave on
+        for op, *_ in OPS:  # greyed out when it can't work right now, so nobody wonders why nothing happened
+            off = (op != "reconnect" and not st.online or op in ("passvote", "cancelvote") and voting is False
+                   or op == "startvote" and voting is True)
+            self.query_one(f"#op-{op}", Button).disabled = off
         t = self.query_one("#rotation", DataTable)
         t.clear()
         for i, e in enumerate(st.data.get("nextmap", {}).get("rotation") or [], 1):
@@ -874,6 +1196,9 @@ class OniApp(App):
             t.add_row(target, str(pick(e, "note", default="")), key=key)
         t.border_title = (f"VPN ALLOWANCES · blocking {'ON' if v.get('block_vpn') else 'OFF'}"
                           + (f" · {v['ranges']} ranges" if isinstance(v.get("ranges"), int) else ""))
+        for op, *_ in BAN_OPS:
+            self.query_one(f"#bl-{op}", Button).disabled = not self.cur.online or (
+                op == "unban" and not self.ban_rows or op == "vpnrevoke" and not self.vpn_rows)
 
     def repaint_feed(self) -> None:
         log = self.query_one("#feed", RichLog)
@@ -890,12 +1215,25 @@ class OniApp(App):
     def _station(self, e: ListView.Highlighted) -> None:
         if e.list_view.index is not None and e.list_view.index != self.sel:
             self.sel = e.list_view.index
+            self.cur.alerts = 0  # looked at now
             self.paint_all()
             self.fetch(self.cur, "status", "players", "nextmap", "vote", "bans", "vpn")
 
     @on(DataTable.RowHighlighted, "#players")
     def _row(self, _) -> None:
         self.paint_dossier()
+
+    @on(TabbedContent.TabActivated)
+    def _slide_in(self, e: TabbedContent.TabActivated) -> None:
+        """The new tab's content glides in from the right. A slide, not a fade: opacity changes get cached into the
+        logs' rendered lines and leave them dim."""
+        pane = e.pane
+        pane.add_class("-from")  # jumps there: only -slide carries the transition
+
+        def glide() -> None:
+            pane.add_class("-slide").remove_class("-from")
+            self.set_timer(0.3, lambda: pane.remove_class("-slide"))
+        self.call_after_refresh(glide)
 
     @on(Checkbox.Changed)
     def _check(self, e: Checkbox.Changed) -> None:
@@ -914,6 +1252,8 @@ class OniApp(App):
         text, e.input.value = e.value.strip(), ""
         targets = self.stations if text.startswith("@all ") else [self.cur]
         text = text.removeprefix("@all ").strip()
+        if text and not any(st.online for st in targets):
+            self.notify("Not connected, so nothing was sent.", severity="warning")
         for st in targets:
             if text and st.online:
                 self.send(st, "say", text, toast=False)
@@ -925,6 +1265,7 @@ class OniApp(App):
             return
         self.history.append(line)
         self.hpos = len(self.history)
+        self.query_one("#console-log", RichLog).scroll_end(animate=False)  # you'll want to see the reply
         if line == "clear":
             self.query_one("#console-log", RichLog).clear()
             return
@@ -946,10 +1287,28 @@ class OniApp(App):
             self.op(bid[3:])
         elif bid.startswith("bl-"):
             self.bl(bid[3:])
+        elif bid.startswith("pl-"):
+            self.action_player(bid[3:])
+        elif bid == "add-server":
+            self.action_add_server()
 
     def action_tab(self, tab: str) -> None:
         self.query_one(TabbedContent).active = tab
-        self.query_one(PANE_FOCUS[tab]).focus()  # else focus left in the old pane pulls the tabs back to it
+        w = self.query_one(PANE_FOCUS[tab])
+        if w.disabled:  # a greyed-out button can't take focus: the pane's first one that can, else the server list
+            w = next(iter(self.query_one(f"#{tab}").query("Button:enabled")), self.query_one("#stations"))
+        w.focus()  # else focus left in the old pane pulls the tabs back to it
+
+    def action_help(self) -> None:
+        if not isinstance(self.screen, Help):
+            self.push_screen(Help())
+
+    @work(exclusive=True, group="dialog")
+    async def action_add_server(self) -> None:
+        if await self.push_screen_wait(Confirm(
+                "ADD A SERVER", "Opens the setup screen. Connections close while you're there and reopen when you "
+                                "come back.", verb="OPEN SETUP", danger=False)):
+            self.exit("setup")
 
     def action_station(self, i: int) -> None:
         if i < len(self.stations):
@@ -984,6 +1343,8 @@ class OniApp(App):
         for op, label, _ in BAN_OPS:
             yield SystemCommand(f"Blacklist: {label.split('  ')[0].title()}", op, lambda op=op: self.bl(op))
         yield SystemCommand("Toggle address redaction", "hide or show player IPs", self.action_redact)
+        yield SystemCommand("Help: field manual", "what everything does, in plain words  (?)", self.action_help)
+        yield SystemCommand("Add a server", "open the setup screen", self.action_add_server)
 
     # --- actions with dialogs (workers, so they can await the dialog) -----------------------------------------
     @work(exclusive=True, group="dialog")
