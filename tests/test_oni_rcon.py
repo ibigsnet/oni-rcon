@@ -194,12 +194,20 @@ def test_setup_emblem_moves_aside_when_short(tmp_path):
 
     async def go():
         app = SetupApp(tmp_path / "config.toml", [], "op", ask_by=True)
+
+        async def where() -> str:  # fit_emblem runs after a refresh, so wait on it rather than a fixed pause
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if app.query_one("#setup-side").display:
+                    return "side"
+                if str(app.query_one("#setup-emblem").content):
+                    return "top"
+            return "none"
+
         async with app.run_test(size=(120, 60)) as pilot:
-            await pilot.pause()
-            assert app.query_one("#setup-emblem").display and not app.query_one("#setup-side").display
+            assert await where() == "top"
             await pilot.resize_terminal(120, 30)  # Windows Terminal's default: no rows spare, but columns are
-            await pilot.pause()
-            assert app.query_one("#setup-side").display and not app.query_one("#setup-emblem").display
+            assert await where() == "side" and not app.query_one("#setup-emblem").display
     asyncio.run(go())
 
 def test_self_update(tmp_path, monkeypatch):

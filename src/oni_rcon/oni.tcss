@@ -110,7 +110,7 @@ ModalScreen.-enter .dialog { offset-y: 3; }
 #setup { align-horizontal: center; padding: 0 2; }
 #setup-emblem { width: auto; }
 #setup-main { width: auto; height: auto; }
-#setup-side { width: auto; margin: 1 2 0 0; }
+#setup-side { width: auto; margin: 1 2 0 0; display: none; }  /* fit_emblem shows it */
 #setup-title { width: 100%; text-align: center; margin: 1 0; }
 #setup-form { width: 100; max-height: 1000; padding: 0 2; border-title-color: $primary; }
 .setup-row { height: auto; }
