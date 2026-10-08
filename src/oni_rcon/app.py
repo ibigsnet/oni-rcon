@@ -242,9 +242,9 @@ def team_strip(teams: list, width: int = 24) -> Text | None:
     parts = [(max(score, 0), TEAM_COLOR.get(team, WHITE)) for team, _, score in teams]
     if len(teams) == 2:
         (a, _, sa), (b, _, sb) = teams
-        return Text.assemble((f" {a.upper()} {sa} ", f"bold {parts[0][1]}"), split_bar(parts, width),
-                             (f" {sb} {b.upper()} ", f"bold {parts[1][1]}"))
-    names = Text("  ").join(Text(f"{t.upper()} {s}", f"bold {c}") for (t, _, s), (_, c) in zip(teams, parts))
+        return Text.assemble((f" {a.upper()} {sa} ", parts[0][1]), split_bar(parts, width),
+                             (f" {sb} {b.upper()} ", parts[1][1]))
+    names = Text("  ").join(Text(f"{t.upper()} {s}", c) for (t, _, s), (_, c) in zip(teams, parts))
     return Text(" ") + names + Text(" ") + split_bar(parts, width) + Text(" ")
 
 
@@ -305,21 +305,21 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
     if kind == "chat":
         ch = str(ev.get("channel", "all"))
         if ch == "server":
-            line.append("[SERVER] ", f"bold {AMBER}")
+            line.append("[SERVER] ", AMBER)
             line.append(redact_text(str(ev.get("text", "")), redact), AMBER)
         else:
             team = str(pick(ev, "team", default=ch.removeprefix("team").strip())).lower()
             line.append(f"[{ch.upper()}] ", DIM)
-            line.append(who(pick(ev, "name", "player", "from", "sender"), names), f"bold {TEAM_COLOR.get(team, WHITE)}")
+            line.append(who(pick(ev, "name", "player", "from", "sender"), names), TEAM_COLOR.get(team, WHITE))
             line.append(": " + redact_text(str(ev.get("text", "")), redact))
     elif kind == "kill":
         killer, victim = pick(ev, "killer"), pick(ev, "victim")
         k, v = who(killer, names), who(victim, names)
         if killer is None or k == v:
-            line.append(v, "bold")
+            line.append(v, WHITE)
             line.append(" died", DIM)
         else:
-            line.append(k, "bold")
+            line.append(k, WHITE)
             line.append(" ✕ ", RED)
             line.append(v)
         how = pick(ev, "weapon", "damage", "cause", "how")
@@ -327,13 +327,13 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
             line.append(f"  [{how}]", DIM)
         for medal in ev.get("_medals") or ():  # padded with blank braille, not spaces: wrap between pills only
             line.append("  ")
-            line.append(f"\u2800{medal}\u2800".replace(" ", "\u2800"), f"bold {INK} on {GOLD}")
+            line.append(f"\u2800{medal}\u2800".replace(" ", "\u2800"), f"{INK} on {GOLD}")
     else:
-        line.append(kind.upper(), f"bold {CATS[cat]}")
+        line.append(kind.upper(), CATS[cat])
         rest = {k: v for k, v in ev.items() if k not in ("type", "event", "time")}
         name = rest.pop("name", None) or rest.pop("player", None)
         if name is not None:
-            line.append(f"  {who(name, names)}", "bold")
+            line.append(f"  {who(name, names)}", WHITE)
         text = rest.pop("text", None)
         if text:
             line.append(f"  {redact_text(str(text), redact)}")
@@ -360,14 +360,14 @@ def vote_text(v) -> Text:
         return Text("none under way", DIM)
     if not isinstance(v, dict):
         return Text(json.dumps(v))
-    t = Text(str(pick(v, "subject", "type", "kind", default="vote")).upper(), f"bold {AMBER}")
+    t = Text(str(pick(v, "subject", "type", "kind", default="vote")).upper(), AMBER)
     if target := pick(v, "target", "player", "name"):
         t.append(f" {target}")
     yes, no = num(pick(v, "yes", "for")), num(pick(v, "no", "against"))
     if yes is not None or no is not None:
         yes, no = yes or 0, no or 0
-        t += Text.assemble(("\nYES ", DIM), (f"{yes} ", f"bold {GREEN}"), split_bar([(yes, GREEN), (no, RED)], 6),
-                           (f" {no}", f"bold {RED}"), (" NO", DIM))
+        t += Text.assemble(("\nYES ", DIM), (f"{yes} ", GREEN), split_bar([(yes, GREEN), (no, RED)], 6),
+                           (f" {no}", RED), (" NO", DIM))
     return t
 
 
@@ -597,14 +597,20 @@ class Help(Dialog):
     BINDINGS = [Binding("escape,question_mark,q", "dismiss", show=False)]
 
     def compose(self) -> ComposeResult:
-        parts = []
+        crest = Table.grid(padding=(0, 3))
+        crest.add_column()
+        crest.add_column(vertical="middle")
+        crest.add_row(emblem(8, 16), Text.assemble(("OFFICE OF NAVAL INTELLIGENCE\n", AMBER),
+                                                   ("SECTION THREE  ·  REMOTE CONSOLE TERMINAL\n\n", DIM),
+                                                   ("Every key, button and readout, in plain words.", WHITE)))
+        parts = [crest, Text()]
         for section, rows in GUIDE:
             g = Table.grid(padding=(0, 2))
             g.add_column(style=CYAN, no_wrap=True, width=14)
             g.add_column()
             for k, v in rows:
                 g.add_row(k, Text(v, WHITE))
-            parts += [Text(section, f"bold {AMBER}"), g, Text()]
+            parts += [Text(section, AMBER), g, Text()]
         with Vertical(classes="dialog help"):
             yield Static("FIELD MANUAL", classes="dialog-title")
             with VerticalScroll(id="help-body"):
@@ -643,7 +649,7 @@ class Boot(Screen):
     @staticmethod
     def dotted(k: str, v: str, color: str) -> Text:
         dots = max(3, min(46 - len(k), 59 - len(k) - len(v)))  # a long value takes from the dots, not the next line
-        return Text(f"> {k} ", WHITE) + Text("." * dots, DIM) + Text(f" {v}\n", f"bold {color}")
+        return Text(f"> {k} ", WHITE) + Text("." * dots, DIM) + Text(f" {v}\n", color)
 
     def tick(self) -> None:
         app, el = self.app, time.monotonic() - self.t0
@@ -655,8 +661,8 @@ class Boot(Screen):
                 emblem(rows, reveal=t / 0.9, scan=(t - 0.8) / 0.9 if 0.8 < t < 1.7 else None))
             self.drawn = rows
         self.query_one("#boot-title", Static).update(Text.assemble(
-            ("\n" + decrypt(self.HEADING, t / 0.8, int(t / 0.07)) + "\n", f"bold {AMBER}"),
-            ("SECTION THREE  ·  REMOTE CONSOLE TERMINAL  ·  ", DIM), ("TOP SECRET", f"bold {RED}")))
+            ("\n" + decrypt(self.HEADING, t / 0.8, int(t / 0.07)) + "\n", AMBER),
+            ("SECTION THREE  ·  REMOTE CONSOLE TERMINAL  ·  ", DIM), ("TOP SECRET", RED)))
 
         spin = SPIN[int(el * 8) % 4]
         log = [("AUTHENTICATING OPERATOR", app.by.upper(), AMBER, True),
@@ -1078,7 +1084,7 @@ class OniApp(App):
         ok = bool(r.get("ok"))
         text = redact_text(str(r.get("text") or ("done" if ok else "failed")), self.redact)
         self.log_cmd(Text(time.strftime("%H:%M:%S "), DIM) + Text(f"{st.label} ", CYAN)
-                     + Text(redact_text(f"» {' '.join([command, *map(q, args)])}", self.redact), "bold"))
+                     + Text(redact_text(f"» {' '.join([command, *map(q, args)])}", self.redact), WHITE))
         self.log_cmd(Text(f"  {text}", GREEN if ok else RED))
         if show_data and r.get("data") is not None:
             self.log_cmd(JSON.from_data(redact_data(r["data"], self.redact)))
@@ -1194,7 +1200,7 @@ class OniApp(App):
         rate = sum(sum(st.rate(1, 60)) for st in self.stations)
         live = any(st.online for st in self.stations)
         self.query_one("#feed").border_title = Text.assemble(
-            ("SIGINT FEED  ", f"bold {AMBER}"),
+            ("SIGINT FEED  ", AMBER),
             ("●" if live else "○", RED if live and time.time() % 2 < 1 else blend(RED, INK, .4) if live else DIM),
             (f" LIVE · {rate}/min" if live else " NO SIGNAL", DIM))
 
@@ -1208,13 +1214,13 @@ class OniApp(App):
         g = Table.grid(expand=True)
         for j in ("left", "center", "right"):
             g.add_column(justify=j, no_wrap=True)
-        g.add_row(Text("▲ ", AMBER) + Text("OFFICE OF NAVAL INTELLIGENCE" if wide else "ONI", f"bold {AMBER}")
+        g.add_row(Text("▲ ", AMBER) + Text("OFFICE OF NAVAL INTELLIGENCE" if wide else "ONI", AMBER)
                   + Text("  ·  SECTION III" if self.size.width >= 160 else "", DIM),
                   Text.assemble((f" CONDITION {cond}" + (f" · ⚑ {unseen}" if unseen else "") + " ",
-                                 f"bold {INK} on {color}"),
+                                 f"{INK} on {color}"),
                                 (f"  {online}/{len(self.stations)} {'STATIONS SECURE' if wide else 'SECURE'}  ·  "
                                  f"{assets} ASSETS", CYAN if online else RED)),
-                  Text("TOP SECRET // " if wide else "", f"bold {RED}") + Text(f"OPERATOR {self.by.upper()}  ")
+                  Text("TOP SECRET // " if wide else "", RED) + Text(f"OPERATOR {self.by.upper()}  ")
                   + Text(time.strftime("%H:%M:%S"), DIM))
         self.query_one("#masthead", Static).update(g)
 
@@ -1233,8 +1239,8 @@ class OniApp(App):
         g.add_column(justify="right", no_wrap=True)
         n, mx = num(s.get("players")), num(s.get("max_players"))
         count = Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM)
-        g.add_row(Text(f"{glyph} ", color) + Text(f"{i + 1}  {st.label.upper()}", "bold"),
-                  Text.assemble((f"⚑ {st.alerts}  ", f"bold {RED}"), count) if st.alerts else count)
+        g.add_row(Text(f"{glyph} ", color) + Text(f"{i + 1}  {st.label.upper()}", WHITE),
+                  Text.assemble((f"⚑ {st.alerts}  ", RED), count) if st.alerts else count)
         if not st.online:  # why, in words to act on, and when it tries again
             left = st.retry_at - time.monotonic()
             g.add_row(Text("   " + self.why(st), color if state != "connecting" else AMBER),
@@ -1272,7 +1278,7 @@ class OniApp(App):
                 self.paint_card(st)
 
     def paint_uplink(self) -> None:
-        t = Text.assemble(("OPERATOR  ", DIM), (self.by, f"bold {AMBER}"), "\n")
+        t = Text.assemble(("OPERATOR  ", DIM), (self.by, AMBER), "\n")
         for dest, tun in self.tunnels.items():
             glyph, color = {"up": ("◉", GREEN), "opening": ("◌", AMBER)}.get(tun.state, ("○", RED))
             t.append(f"SSH {dest}  ", DIM)
@@ -1292,7 +1298,7 @@ class OniApp(App):
             kd = f"{k / max(d, 1):.2f}" if isinstance(k, int) and isinstance(d, int) else "—"
             flags = Text()
             if (spree := st.medals.spree.get(name, 0)) >= SPREE:
-                flags.append(f"★{spree} ", f"bold {GOLD}")
+                flags.append(f"★{spree} ", GOLD)
             if p.get("admin"):
                 flags.append("ADM ", AMBER)
             if p.get("muted"):
@@ -1303,8 +1309,8 @@ class OniApp(App):
             key = key if key not in self.row_players else f"{key}~{i}"
             self.row_players[key] = p
             if now - st.first_seen.setdefault(key, now if st.painted else 0.0) < 12:
-                flags.append("NEW", f"bold {GREEN}")
-            rows.append((key, [str(pick(p, "number", default="")), Text(name, f"bold {TEAM_COLOR.get(team, WHITE)}"),
+                flags.append("NEW", GREEN)
+            rows.append((key, [str(pick(p, "number", default="")), Text(name, TEAM_COLOR.get(team, WHITE)),
                                Text(team.upper() or "—", TEAM_COLOR.get(team, DIM)), str(pick(p, "score", default="—")),
                                str(k if k is not None else "—"), str(d if d is not None else "—"), kd,
                                bar(p.get("health")), bar(p.get("shields")), flags]))
@@ -1324,10 +1330,10 @@ class OniApp(App):
         self.query_one("#player-actions").display = self.query_one("#raw-box").display = bool(p)
         if not p:
             if self.cur.online:
-                msg = Text.assemble(("NO ASSETS IN THEATRE\n\n", f"bold {DIM}"),
+                msg = Text.assemble(("NO ASSETS IN THEATRE\n\n", DIM),
                                     ("Nobody is playing on this server right now.\nPlayers appear here as they join.", DIM))
             else:
-                msg = Text.assemble(("STATION OFFLINE\n\n", f"bold {RED}"), (self.why(self.cur, short=False), WHITE),
+                msg = Text.assemble(("STATION OFFLINE\n\n", RED), (self.why(self.cur, short=False), WHITE),
                                     ("\n\nIt retries by itself. To retry now: F3, then RECONNECT.", DIM))
             box.update(Text("\n\n") + msg)
             box.styles.text_align = "center"
@@ -1347,13 +1353,13 @@ class OniApp(App):
                 g.add_row(a, b if isinstance(b, Text) else Text(str(b)))
             return g
         glyph, head = biosig(str(pick(p, "player_id", "id", default=name)), color), facts([
-            ("CALLSIGN", Text(name, f"bold {color}")),
+            ("CALLSIGN", Text(name, color)),
             ("SERVICE TAG", pick(p, "service_tag", "tag", default="—")),
             ("TEAM", Text(team.upper() or "—", TEAM_COLOR.get(team, DIM))),
             ("STATUS", " · ".join(["ALIVE" if p.get("alive") else "KIA" if p.get("alive") is False else "—"]
                                   + ["ADMIN"] * bool(p.get("admin")) + ["MUTED"] * bool(p.get("muted")))),
             ("SCORE", f"{pick(p, 'score', default='—')}    K {k if k is not None else '—'} / D {d if d is not None else '—'}"),
-            ("STREAK", Text(f"★ {spree} without dying", f"bold {GOLD}") if spree >= SPREE
+            ("STREAK", Text(f"★ {spree} without dying", GOLD) if spree >= SPREE
              else Text(f"{spree} without dying") if spree else Text("—", DIM))])
         if self.query_one("#dossier-box").content_size.width in range(1, 46):  # narrow: the glyph above the file
             head = Group(glyph, Text(), head)
@@ -1371,7 +1377,7 @@ class OniApp(App):
             rows.append(("GUESTS", str(len(guests) if isinstance(guests, list) else guests)))
         if earned:
             rows.append(("MEDALS", Text(" · ".join(f"{m} ×{n}" if n > 1 else m for m, n in earned.most_common()), GOLD)))
-        box.update(Group(Text("PERSONNEL FILE", f"bold {AMBER}") + Text("  //  CLASSIFIED", f"bold {RED}"), Text(),
+        box.update(Group(Text("PERSONNEL FILE", AMBER) + Text("  //  CLASSIFIED", RED), Text(),
                          head, Text(), facts(rows)))
         self.query_one("#dossier-raw", Static).update(JSON.from_data(redact_data(p, self.redact)))
 
@@ -1383,7 +1389,7 @@ class OniApp(App):
         g = Table.grid(padding=(0, 2))
         g.add_column(style=DIM, no_wrap=True)
         g.add_column()
-        for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), f"bold {AMBER}")),
+        for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), AMBER)),
                      ("UPLINK", f"{st.server.where}   v{info.get('version', '?')}"),
                      ("PUBLIC ADDRESS", Text(redact_addr(s.get("address"), self.redact), RED if self.redact else WHITE)),
                      ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)),
@@ -1410,7 +1416,7 @@ class OniApp(App):
             mp, md = str(pick(e, "map", "base_map", default="?")), str(pick(e, "mode", "game", default="?"))
             now = not marked and mp.lower().replace(" ", "_") == here
             marked |= now
-            style = f"bold {AMBER}" if now else ""
+            style = AMBER if now else ""
             rows.append((str(i), [Text("▶" if now else str(i), style), Text(mp, style), Text(md, style)]))
         self.query_one("#rotation", Roster).fill(rows)
 
@@ -1428,14 +1434,14 @@ class OniApp(App):
             top = max(max(s, 0) for *_, s in teams) or 1
             for team, n, score in teams:
                 c = TEAM_COLOR.get(team, WHITE)
-                g.add_row(Text(team.upper(), f"bold {c}"), Text(f"{n} ON FIELD", DIM), Text(str(score), f"bold {c}"),
+                g.add_row(Text(team.upper(), c), Text(f"{n} ON FIELD", DIM), Text(str(score), c),
                           hbar(max(score, 0) / top, width, c))
         else:  # free for all: the five best
             best = sorted(players, key=lambda p: -(num(pick(p, "score")) or 0))[:5]
             top = max(num(pick(best[0], "score")) or 0, 1)
             for p in best:
                 score = num(pick(p, "score")) or 0
-                g.add_row(Text(str(pick(p, "name", default="?")), "bold"), Text(""), Text(str(score), f"bold {AMBER}"),
+                g.add_row(Text(str(pick(p, "name", default="?")), WHITE), Text(""), Text(str(score), AMBER),
                           hbar(max(score, 0) / top, width, AMBER))
         leaders = sorted(players, key=lambda p: -(num(pick(p, "score")) or 0))[:3]
         lines = [Text("TOP GUNS  ", DIM) + Text(" · ").join(
@@ -1443,7 +1449,7 @@ class OniApp(App):
                  TEAM_COLOR.get(team_of(p), WHITE)) for p in leaders)]
         sprees = sorted(((n, name) for name, n in st.medals.spree.items() if n >= SPREE), reverse=True)
         if sprees:
-            lines.append(Text("ON A SPREE  ", DIM) + Text(" · ").join(Text(f"{name} ★{n}", f"bold {GOLD}")
+            lines.append(Text("ON A SPREE  ", DIM) + Text(" · ").join(Text(f"{name} ★{n}", GOLD)
                                                                     for n, name in sprees[:4]))
         self.query_one("#theatre", Static).update(Group(g, *lines))
 
@@ -1461,7 +1467,7 @@ class OniApp(App):
                 left = until(pick(e, "expires", "until"))
                 rows.append((key, [Text(kind, color), shown, str(pick(e, "name", default="")),
                                    str(pick(e, "reason", default="")),
-                                   Text(left, f"bold {RED}" if left == "PERMANENT" else DIM if left == "expired" else AMBER),
+                                   Text(left, RED if left == "PERMANENT" else DIM if left == "expired" else AMBER),
                                    str(pick(e, "by", "group", default=""))]))
         t = self.query_one("#bans", Roster)
         t.fill(rows)
@@ -1693,7 +1699,7 @@ class OniApp(App):
             if f is not None:
                 self.send(st, "mute", t, *opt(f["time"]), *opt(f["reason"]), then=("players",))
         elif what == "team":
-            team = await self.push_screen_wait(Pick(f"MOVE {name} TO", [(Text(c.upper(), f"bold {TEAM_COLOR[c]}"), c)
+            team = await self.push_screen_wait(Pick(f"MOVE {name} TO", [(Text(c.upper(), TEAM_COLOR[c]), c)
                                                                          for c in TEAMS]))
             if team:
                 self.send(st, "team", t, team, then=("players",))
@@ -1704,7 +1710,7 @@ class OniApp(App):
                 self.send(st, "vpnallow", t, *opt(f["note"]), then=("vpn",))
 
     def entries(self, st: Station, what: str) -> list:
-        return [(Text.assemble((str(pick(e, "name", default="?")), "bold"), (f"  {e.get('kind', '')}", DIM),
+        return [(Text.assemble((str(pick(e, "name", default="?")), WHITE), (f"  {e.get('kind', '')}", DIM),
                                (f"  {e.get('reference', '')}", DIM)), str(pick(e, "reference", "name")))
                 for e in st.data.get(what, {}).get("entries") or []]
 
