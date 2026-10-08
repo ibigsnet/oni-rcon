@@ -145,6 +145,8 @@ def test_app_against_fakes():
 
 
 def test_setup_screen(tmp_path):
+    from textual.widgets import Button
+
     from oni_rcon.wizard import SetupApp, target
     assert target("10.0.0.5", "11774") == "10.0.0.5:11774" and target("box:5", "11774") == "box:5"
     assert target("::1", "5") == "[::1]:5" and target("wss://h/s", "11774") == "wss://h/s"
@@ -154,25 +156,26 @@ def test_setup_screen(tmp_path):
         cfg = tmp_path / "config.toml"
         app = SetupApp(cfg, [], "op", ask_by=True)
         async with app.run_test(size=(120, 60)) as pilot:
-            await pilot.pause(0.2)  # the emblem settles into the rows the form leaves
+            # by keyboard and waiting on the test itself: clicks and polling budgets depend on the runner's speed
             status = lambda: str(app.query_one("#setup-status").render())
+
+            async def test_and_add(password: str) -> None:
+                app.query_one("#password").value = password
+                app.query_one("#password").focus()
+                await pilot.press("enter")
+                await pilot.pause()
+                await app.workers.wait_for_complete()
+                await pilot.pause()
+
             assert app.query_one("#start").disabled  # nothing to start with yet
             app.query_one("#port").value = str(ports[0])
-            app.query_one("#password").value = "wrong"
-            assert await pilot.click("#add")
-            for _ in range(100):
-                await pilot.pause(0.05)
-                if status().startswith("✗"):
-                    break
-            assert "refused the password" in status() and not app.added
-            app.query_one("#password").value = "demo"
-            assert await pilot.click("#add")
-            for _ in range(100):
-                await pilot.pause(0.05)
-                if app.added:
-                    break
+            await test_and_add("wrong")
+            assert "refused the password" in status() and not app.added, status()
+            await test_and_add("demo")
+            assert app.added, status()
             assert app.query_one("#port").value == str(ports[0] + 1)  # the next server on the box, probably
-            assert await pilot.click("#start")
+            app.query_one("#start", Button).press()
+            await pilot.pause()
         assert [s.port for s in app.return_value] == [ports[0]]
         by, servers = load_config(cfg)
         assert by == "op" and servers[0].password == "demo"
