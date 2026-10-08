@@ -11,7 +11,7 @@ from rich.text import Text
 AMBER, CYAN, RED, GREEN, DIM, WHITE, GREY = "#D9A441", "#4FC3D9", "#E5484D", "#5FB98A", "#5C6773", "#D6DCE4", "#8B95A1"
 GOLD, INK, FAINT = "#FFD27A", "#06080B", "#1C242E"
 
-# The ONI emblem, traced into pixel grids (largest first); tones 1 dark face, 2 rays, 3 bright face, 4 the boot scan.
+# The ONI emblem, traced into pixel grids (largest first, 48 down to 12 px); tones 1 dark face, 2 rays, 3 bright face, 4 the boot scan.
 EMBLEMS = [b.split() for b in re.sub(r"(?m)^#.*\n", "", Path(__file__).with_name("emblem.txt")
                                      .read_text(encoding="utf-8")).strip().split("\n\n")]
 TONES = {"1": "#2C2415", "2": "#6F5626", "3": AMBER, "4": GOLD}

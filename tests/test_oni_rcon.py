@@ -64,11 +64,11 @@ def test_explain():
 
 
 def test_emblem_fits():
-    for rows, cols in [(30, 999), (20, 999), (16, 32), (12, 24)]:
+    for rows, cols in [(30, 999), (20, 999), (16, 32), (12, 24), (8, 16), (6, 12)]:
         lines = emblem(rows, cols).split("\n")
         assert 0 < len(lines) <= rows and all(len(line) <= cols for line in lines)
         assert len({len(line) for line in lines}) == 1  # one block: the rows stay aligned when centred
-    assert emblem(11).plain == ""
+    assert emblem(5).plain == "" and emblem(99, 11).plain == ""
 
 
 def test_event_lines():
@@ -188,6 +188,27 @@ def test_setup_screen(tmp_path):
         assert by == "op" and servers[0].password == "demo"
     asyncio.run(go())
 
+
+def test_setup_emblem_moves_aside_when_short(tmp_path):
+    from oni_rcon.wizard import SetupApp
+
+    async def go():
+        app = SetupApp(tmp_path / "config.toml", [], "op", ask_by=True)
+
+        async def where() -> str:  # fit_emblem runs after a refresh, so wait on it rather than a fixed pause
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if app.query_one("#setup-side").display:
+                    return "side"
+                if str(app.query_one("#setup-emblem").content):
+                    return "top"
+            return "none"
+
+        async with app.run_test(size=(120, 60)) as pilot:
+            assert await where() == "top"
+            await pilot.resize_terminal(120, 30)  # Windows Terminal's default: no rows spare, but columns are
+            assert await where() == "side" and not app.query_one("#setup-emblem").display
+    asyncio.run(go())
 
 def test_self_update(tmp_path, monkeypatch):
     from oni_rcon import update

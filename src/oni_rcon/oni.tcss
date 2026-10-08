@@ -14,7 +14,7 @@ Screen { background: $background; }
 #stations:focus > ListItem.-highlight { background: $primary 25%; }
 .card { height: 3; }
 #add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
-#add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; text-style: bold; }
+#add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; }
 #sidebar > Center { height: 1fr; align-vertical: middle; }
 #uplink { height: auto; padding: 1; border-top: hkey $primary 40%; }
 
@@ -28,12 +28,11 @@ Screen { background: $background; }
 DataTable, RichLog, #sitrep, #dossier-box, #theatre {
     border: round $primary 35%;
     border-title-color: $primary;
-    border-title-style: bold;
     background: $background;
 }
 DataTable:focus, RichLog:focus, #dossier-box:focus-within { border: round $secondary; border-title-color: $secondary; }
-RichLog { border-subtitle-color: $warning; border-subtitle-style: bold; }
-DataTable > .datatable--header { background: $panel; color: $primary; text-style: bold; }
+RichLog { border-subtitle-color: $warning; }
+DataTable > .datatable--header { background: $panel; color: $primary; text-style: none; }
 DataTable > .datatable--cursor { background: $primary 30%; color: $foreground; }
 
 Assets { height: 1fr; }
@@ -54,7 +53,7 @@ Assets { height: 1fr; }
 #ops-top { height: auto; }
 #sitrep { width: 1fr; min-width: 40; height: auto; padding: 0 1; }
 #ops-panel { width: 2fr; height: auto; padding: 0 1; }
-.ops-head { color: $primary 70%; text-style: bold; margin-top: 1; }
+.ops-head { color: $primary 70%; margin-top: 1; }
 .ops-grid { height: auto; grid-size: 3; grid-gutter: 1 1; margin-top: 1; }
 .ops-grid Button { width: 1fr; min-width: 0; }
 #ops-bottom { height: 1fr; min-height: 6; }
@@ -72,7 +71,9 @@ Blacklist { height: 1fr; }
 #cmd { width: 1fr; }
 #raw { width: auto; }
 
-Button { text-style: bold; }
+/* no bold anywhere: in most terminal fonts it reads heavy, so colour carries the emphasis instead */
+Button, Button:disabled { text-style: none; }
+FooterKey .footer-key--key, Toast .toast--title, Tab.-active { text-style: none; }
 Button:disabled { opacity: 45%; }
 .-hidden { display: none; }
 
@@ -89,7 +90,7 @@ ModalScreen.-enter .dialog { offset-y: 3; }
 .dialog.help { width: 96; height: 90%; }
 #help-body { height: 1fr; scrollbar-size-vertical: 1; }
 .dialog.danger { border: thick $error; }
-.dialog-title { text-style: bold; color: $primary; margin-bottom: 1; }
+.dialog-title { color: $primary; margin-bottom: 1; }
 .danger .dialog-title { color: $error; }
 .dialog-body { color: $text-muted; margin-bottom: 1; }
 .dialog Label { color: $secondary; margin-top: 1; }
@@ -108,8 +109,10 @@ ModalScreen.-enter .dialog { offset-y: 3; }
 /* setup */
 #setup { align-horizontal: center; padding: 0 2; }
 #setup-emblem { width: auto; }
+#setup-main { width: auto; height: auto; }
+#setup-side { width: auto; margin: 1 2 0 0; display: none; }  /* fit_emblem shows it */
 #setup-title { width: 100%; text-align: center; margin: 1 0; }
-#setup-form { width: 100; max-height: 1000; padding: 0 2; border-title-color: $primary; border-title-style: bold; }
+#setup-form { width: 100; max-height: 1000; padding: 0 2; border-title-color: $primary; }
 .setup-row { height: auto; }
 .setup-wide { width: 1fr; height: auto; }
 .setup-col2 { margin-left: 2; }
