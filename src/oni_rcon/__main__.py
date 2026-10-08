@@ -38,14 +38,23 @@ def main() -> None:
         from .demo import start_in_thread
         servers = [Server(port=p, password="demo") for p in start_in_thread()]
     elif a.targets:
-        servers = [parse_target(t, ssh=a.ssh) for t in a.targets]
+        try:
+            servers = [parse_target(t, ssh=a.ssh) for t in a.targets]
+        except ValueError as e:
+            ap.error(str(e))
     else:
         cfg_by, servers = load_config(path)
     resolve_passwords(servers)
 
     from .app import OniApp
-    OniApp(servers, by=a.by or cfg_by or getpass.getuser(), intro=not a.no_intro,
-           updater=update.check).run()
+    OniApp(servers, by=a.by or cfg_by or login(), intro=not a.no_intro, updater=update.check).run()
+
+
+def login() -> str:
+    try:
+        return getpass.getuser()
+    except Exception:  # no login name to be had, as in some containers
+        return "operator"
 
 
 if __name__ == "__main__":

@@ -34,6 +34,8 @@ def parse_target(target: str, **common) -> Server:
     if "://" in target:
         return Server(url=target, **common)
     host, _, port = target.rpartition(":")
+    if not (port.isdigit() and 0 < int(port) < 65536):
+        raise ValueError(f"{target!r} isn't PORT, HOST:PORT, [IPv6]:PORT or a ws(s):// URL")
     return Server(host=host.strip("[]") or "127.0.0.1", port=int(port), **common)
 
 
@@ -51,8 +53,11 @@ def default_config() -> Path | None:
 
 def load_config(path: Path) -> tuple[str, list[Server]]:
     """Returns (moderator name, servers). [defaults] applies to every [[server]] unless it sets the key itself."""
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise SystemExit(f"{path}: {e}") from None
     base = data.get("defaults", {})
     try:
         servers = [Server(**{**base, **s}) for s in data.get("server", [])]
@@ -81,7 +86,10 @@ def resolve_passwords(servers: list[Server]) -> None:
             s.password = os.environ["ONI_RCON_PASSWORD"]
         else:
             if typed is None:
-                typed = getpass.getpass("RCON password (used for every server without its own): ")
+                try:
+                    typed = getpass.getpass("RCON password (used for every server without its own): ")
+                except (EOFError, KeyboardInterrupt):
+                    raise SystemExit("no RCON password given") from None
             s.password = typed
         if not s.password:
             raise SystemExit(f"{s.where}: empty RCON password")
@@ -89,7 +97,11 @@ def resolve_passwords(servers: list[Server]) -> None:
 
 def _run(cmd: str | list[str]) -> str:
     # A string runs through the shell; a list runs as-is (no quoting surprises, works the same on Windows).
-    r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+    try:
+        r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=60,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as e:  # not installed, or waiting on something that never comes
+        raise SystemExit(f"password_command failed: {e}") from None
     if r.returncode:
         raise SystemExit(f"password_command exited {r.returncode}: {r.stderr.strip()}")
     return r.stdout.splitlines()[0] if r.stdout else ""

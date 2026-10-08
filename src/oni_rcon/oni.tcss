@@ -6,14 +6,14 @@ Screen { background: $background; }
 
 #sidebar { width: 36; border-right: vkey $primary 40%; }
 #stations { height: 1fr; background: $background; }
-#stations > ListItem { padding: 0 1; height: 3; border-bottom: hkey $panel-lighten-1; background: $background; }
+#stations > ListItem { padding: 0 1; height: 4; border-bottom: hkey $panel-lighten-1; background: $background; }
 #stations > ListItem.-highlight { background: $primary 15%; }
 #stations:focus > ListItem.-highlight { background: $primary 25%; }
-.card { height: 2; }
+.card { height: 3; }
 #uplink { height: auto; padding: 1; border-top: hkey $primary 40%; }
 
 #tabs { width: 1fr; }
-DataTable, RichLog, #sitrep, #dossier-box {
+DataTable, RichLog, #sitrep, #dossier-box, #theatre {
     border: round $primary 35%;
     border-title-color: $primary;
     border-title-style: bold;
@@ -34,8 +34,10 @@ Assets { height: 1fr; }
 
 #ops-top { height: auto; }
 #sitrep { width: 1fr; height: auto; padding: 0 1; }
-#ops-grid { width: 2fr; height: auto; grid-size: 4; grid-gutter: 0 1; padding: 1 1 0 1; }
+#ops-side { width: 2fr; height: auto; }
+#ops-grid { height: auto; grid-size: 4; grid-gutter: 0 1; padding: 1 1 0 1; }
 #ops-grid Button { width: 1fr; min-width: 0; }
+#theatre { height: auto; margin: 1 1 0 1; padding: 0 1; }
 #rotation { height: 1fr; min-height: 6; }
 
 Blacklist { height: 1fr; }

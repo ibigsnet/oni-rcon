@@ -16,25 +16,32 @@ around three simulated ones.
 
 | Tab | |
 |---|---|
-| **F1 Assets** | Live player table per server: team, score, K/D, health and shield bars, admin and dead flags. The dossier panel shows the selected player's file and raw JSON. `t` tell · `k` kick · `b` ban · `m` mute · `j` team · `v` VPN allow · `y` copy ID |
-| **F2 Intercepts** | One feed from every server: chat (team and server), kills with weapon, joins, leaves, kicks, bans, votes and game phases. Filter by chat, combat, traffic, moderation or ops. Chat that mentions admins or cheating raises a toast and the terminal bell |
-| **F3 Operations** | Sitrep for the selected server, the playlist rotation, and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
+| **F1 Assets** | Live player table per server: team, score, K/D, health and shield bars, admin, dead and spree flags, and the score race between the teams along the bottom. The dossier shows the selected player's file, a biometric glyph drawn from their player ID, the medals they've earned and the raw JSON. `t` tell · `k` kick · `b` ban · `m` mute · `j` team · `v` VPN allow · `y` copy ID |
+| **F2 Intercepts** | One feed from every server: chat (team and server), kills with weapon, joins, leaves, kicks, bans, votes and game phases. Kills carry their Halo 3 medals: double kill through killionaire, killing spree through invincible, and killjoy. Filter by chat, combat, traffic, moderation or ops; scroll up to read back and it holds still. Chat that mentions admins or cheating raises a toast and the terminal bell |
+| **F3 Operations** | Sitrep for the selected server with the vote under way and its tally; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies |
 
 Also:
 
-- **Many servers at once.** The sidebar holds one card per server, and `1`–`9` jumps between them.
+- **Many servers at once.** The sidebar holds one card per server, and `1`–`9` jumps between them. Each card shows
+  how full the server is and a trace of its activity over the last 100 seconds.
+- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down; RED when a call for an
+  admin or an anti-cheat hit comes in, until you've looked at the Intercepts tab.
 - **Broadcast to one server or all.** `Ctrl+B`.
 - **Command palette.** `Ctrl+P`.
-- **Player addresses are redacted by default.** Press `x` to reveal them, which helps when you stream or share screenshots.
+- **Player addresses are redacted by default,** in the tables, the feed, the toasts and the console's replies and raw
+  events. Press `x` to reveal them. This helps when you stream or share screenshots.
 - **SSH tunnels are built in.** One `ssh -L` per host carries every server on it, and it reconnects with backoff.
 - **Destructive actions ask first.** The confirm button defaults to ABORT.
-- **A refused password is never retried.** The server locks an address out after 5 wrong passwords in 10 minutes, so oni-rcon won't trip it.
+- **A refused password is never retried.** The server locks an address out after 5 wrong passwords in 10 minutes, so
+  oni-rcon won't trip it. RECONNECT on F3 asks for the password again before it tries.
+- **Medals count what the console has seen.** They're worked out from the kill feed, so a spree that started before
+  oni-rcon connected isn't known, and a reconnect starts everyone's spree over.
 
 <p>
-  <img src="docs/intercepts.png" alt="Intercepts tab: one feed of chat, kills and joins from every server" width="49%">
-  <img src="docs/operations.png" alt="Operations tab: sitrep, rotation and server controls" width="49%">
+  <img src="docs/intercepts.png" alt="Intercepts tab: one feed of chat, kills, medals and joins from every server" width="49%">
+  <img src="docs/operations.png" alt="Operations tab: sitrep, theatre, rotation and server controls" width="49%">
 </p>
 
 ## Install
@@ -149,7 +156,7 @@ port = 11775
 | `/` | jump to the input line |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
-| `Esc`, `Enter` or `Space` | skip the boot sequence (`--no-intro` skips it for good) |
+| any key | skip the boot sequence; `F1`–`F5` also open that tab (`--no-intro` skips it for good) |
 | `Ctrl+Q` | quit |
 
 ## Field names

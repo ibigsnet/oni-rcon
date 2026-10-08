@@ -21,14 +21,15 @@ MAPS = ["guardian", "the_pit", "narrows", "construct", "valhalla", "sandtrap", "
 MODES = ["Slayer", "Team Slayer", "Capture the Flag", "Oddball", "King of the Hill", "Territories", "Assault", "SWAT"]
 TEAMS = ["red", "blue"]
 WEAPONS = ["battle rifle", "sniper rifle", "shotgun", "energy sword", "frag grenade", "rocket launcher", "melee"]
-CHAT = ["gg", "nice shot", "who has sniper?", "lag on blue base", "admin someone is spawn camping", "rematch?",
-        "ez", "push top mid", "anyone up for MLG after?", "wp all"]
+CHAT = ["gg", "nice shot", "who has sniper?", "lag on blue base", "rematch?", "ez", "push top mid",
+        "anyone up for MLG after?", "wp all"]
+CALLS = ["admin someone is spawn camping", "is there a mod on? red is hacking"]  # raise the console's alert
 SERVERS = [("Demo Ops | Slayer", 16, 9), ("Demo Ops | Big Team Battle", 32, 17), ("Demo Ops | MLG 4v4", 8, 6)]
 
 
 class Fake:
     def __init__(self, name: str, password: str, max_players: int, crowd: int):
-        self.password, self.clients, self.engine = password, set(), 0
+        self.password, self.clients, self.engine, self.skill = password, set(), 0, {}
         self.status = {"name": name, "address": "203.0.113.7:49176", "map": random.choice(MAPS), "mode": "Team Slayer",
                        "phase": "in_game", "max_players": max_players, "players": 0, "password_required": False,
                        "max_ping": 0, "hidden": False, "anti_cheat": "enforce", "anti_cheat_active": True,
@@ -40,10 +41,12 @@ class Fake:
                      "ips": [{"ip": "198.51.100.0/24", "reason": "ban evasion", "expires": time.time() + 86400 * 6}],
                      "devices": []}
         self.allowed = [{"target": "192.0.2.44", "note": "mobile hotspot"}]
-        self.vote = None
+        self.vote, self.vote_at = None, 0.0
+        self.hot = (None, 0.0)  # the last killer and when: some go on a roll, for multi-kills
 
     def _player(self, name: str) -> dict:
         self.engine += 1
+        self.skill[self.engine] = random.lognormvariate(0, 0.7)  # a few players carry the lobby, for sprees
         k, d = random.randint(0, 25), random.randint(0, 18)
         return {"number": 0, "name": name, "player_id": "%032x" % random.getrandbits(128),
                 "address": f"203.0.113.{random.randint(2, 250)}", "admin": name == "Bravo", "muted": False,
@@ -156,7 +159,9 @@ class Fake:
             return ok(f"Accepted: {cmd} {' '.join(args)}.")
         if cmd in ("endround", "endgame", "shuffle", "teamcount", "passvote", "cancelvote", "startvote"):
             if cmd == "startvote":
-                self.vote = {"subject": args[0] if args else "?", "yes": 0, "no": 0}
+                self.vote = {"subject": args[0] if args else "?", "yes": 0, "no": 0,
+                             **({"target": args[1]} if len(args) > 1 else {})}
+                self.vote_at = time.monotonic()
             elif cmd in ("passvote", "cancelvote"):
                 self.vote = None
             await self.emit("vote" if "vote" in cmd else "control", text=f"{cmd} {' '.join(args)} by {by}".strip())
@@ -176,38 +181,75 @@ class Fake:
         return no(f"Unknown command '{cmd}'; help lists them.")
 
     async def tick(self):
-        """Keeps the feed alive: kills, chat, and the odd join or leave."""
+        """Keeps the feed alive: firefights, chat, votes, and the odd join or leave."""
         while True:
             await asyncio.sleep(random.uniform(0.8, 3.0))
-            alive = [p for p in self.players]
+            alive = [p for p in self.players if p["alive"]]
             roll = random.random()
             if roll < 0.62 and len(alive) > 1:
-                k, v = random.sample(alive, 2)
+                k = self._killer(alive)
+                v = random.choice([p for p in alive if p["team"] != k["team"]] or [p for p in alive if p is not k])
                 k["kills"] += 1; k["score"] += 1; v["deaths"] += 1
-                v["alive"], v["seconds_since_last_death"] = False, 0
+                k["shields"] = round(random.uniform(0, .6), 2)  # it was a fight
+                v.update(alive=False, health=0.0, shields=0.0, seconds_since_last_death=0)
+                self.hot = (k, time.monotonic())
                 await self.emit("kill", killer=k["engine_id"], victim=v["engine_id"], weapon=random.choice(WEAPONS))
             elif roll < 0.88 and alive:
                 p = random.choice(alive)
                 await self.emit("chat", channel=random.choice(["all", f"team {p['team']}"]), name=p["name"],
-                                team=p["team"], text=random.choice(CHAT))
+                                team=p["team"], text=random.choice(CALLS if random.random() < .015 else CHAT))
             elif roll < 0.94 and len(self.players) < self.status["max_players"]:
                 spare = [n for n in CALLSIGNS if n not in {p["name"] for p in self.players}]
                 if spare:
                     p = self._player(random.choice(spare))
                     self.players.append(p)
                     await self.emit("join", name=p["name"], player_id=p["player_id"], address=p["address"])
-            elif roll < 0.99 and len(self.players) > 2:
+            elif roll < 0.997 and len(self.players) > 2:
                 p = random.choice(self.players)
                 self.players.remove(p)
                 await self.emit("leave", name=p["name"], reason="quit")
             else:
                 await self.emit("cheat", name=random.choice(alive)["name"] if alive else "?",
                                 text="speed out of range (sample)")
+            await self._vote()
+            alive = [p for p in alive if p["alive"]]
+            for p in random.sample(alive, min(len(alive), random.randint(0, 3))):  # crossfire
+                hit = random.uniform(.2, .9)
+                p["health"] = round(max(.05, p["health"] - max(0.0, hit - p["shields"])), 2)
+                p["shields"] = round(max(0.0, p["shields"] - hit), 2)
             for p in self.players:
-                if not p["alive"] and random.random() < 0.5:
-                    p.update(alive=True, health=1.0, shields=1.0)
+                if not p["alive"]:
+                    if random.random() < 0.5:
+                        p.update(alive=True, health=1.0, shields=1.0)
+                else:  # shields recharge quickly, health slowly
+                    p.update(shields=round(min(1.0, p["shields"] + .25), 2), health=round(min(1.0, p["health"] + .08), 2))
                 p["seconds_since_last_death"] += 2
             self._renumber()
+
+    def _killer(self, alive: list) -> dict:
+        k, at = self.hot
+        if any(p is k for p in alive) and time.monotonic() - at < 3.5 and random.random() < 0.35:
+            return k
+        return random.choices(alive, [self.skill[p["engine_id"]] for p in alive])[0]
+
+    async def _vote(self):
+        """Votes fill up and close; now and then a player calls one."""
+        if self.vote:
+            self.vote["yes"] += random.choice([0, 0, 1, 1, 2])
+            self.vote["no"] += random.choice([0, 0, 0, 1])
+            need = len(self.players) // 2 + 1
+            if self.vote["yes"] >= need or time.monotonic() - self.vote_at > 30:
+                result = "passed" if self.vote["yes"] >= need else "failed"
+                await self.emit("vote", text=f"vote to {self.vote['subject']} {result} "
+                                             f"({self.vote['yes']} to {self.vote['no']})")
+                self.vote = None
+        elif random.random() < 0.012 and len(self.players) > 2:
+            caller, target = random.sample(self.players, 2)
+            subject = random.choice(["shuffle", "endround", "kick"])
+            self.vote = {"subject": subject, "yes": 1, "no": 0, **({"target": target["name"]} if subject == "kick" else {})}
+            self.vote_at = time.monotonic()
+            await self.emit("vote", name=caller["name"], text=f"called a vote to {subject}"
+                                                              + (f" {target['name']}" if subject == "kick" else ""))
 
 
 async def serve_fakes(password: str = "demo", tick: bool = True, specs=SERVERS) -> tuple[list[int], list]:
