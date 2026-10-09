@@ -24,7 +24,7 @@ The container is built locally as `ibigs/reclaimer-terminal`, uses an immutable 
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.6.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.0), upstream commit `e5772fe56a558f164f6a55d270795d8bc8104718`. This source version is `0.6.0+ibigs.1`. It supersedes the reviewed 0.4 integration `52e7b69d0515d658845e8b8199edf618cc6a088b`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.6.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.0), upstream commit `e5772fe56a558f164f6a55d270795d8bc8104718`. This source version is `0.6.0+ibigs.2` (0.6.0+ibigs.1 plus F7 start/stop/restart for customer lobbies, 2026-10-09). It supersedes the reviewed 0.4 integration `52e7b69d0515d658845e8b8199edf618cc6a088b`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
