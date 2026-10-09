@@ -37,11 +37,14 @@ from textual.worker import WorkerState
 from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, gauge, hbar,
                   spark, split_bar)
 from .config import Server, remember_forge_key
-from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, ForgeClient, ForgeError, ForgeSetup, Secret, author_of,
-                    compat_of, compatible, kind_of, latest_of, listing_id, owner_of, ratings_of, recent_of, scrub,
-                    scrub_data, title_of, version_id, version_label, versions_of)
+from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, ForgeClient, ForgeError, ForgeSetup, Secret, Unverified,
+                    author_of, compat_of, compatible, is_withdrawn, kind_of, latest_of, listing_id, owner_of,
+                    ratings_of, recent_of, scrub, scrub_data, title_of, utc_iso, version_id, version_label,
+                    versions_of)
+from .install import InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .rcon import Rcon, Tunnel
+from .state import ForgeState, norm, refs_of
 
 ONI = Theme(name="oni", primary=AMBER, secondary=CYAN, accent=CYAN, warning="#E8A33D", error=RED, success=GREEN,
             foreground=WHITE, background=INK, surface="#0B0F14", panel="#111821", dark=True)
@@ -128,6 +131,8 @@ TIPS = {
     "pl-copy": "Copy their player ID, for a ban list or a report.  Key: y",
     "add-server": "Add another server with the setup screen.",
     "f-local": "Show only what happens on the selected server.",
+    "fg-install": "Put the selected version on this server, every file checked against Forge's manifest.  Key: i",
+    "fg-load": "Load the installed map or gametype now, once the server lists it. Ends the current game.  Key: l",
     "fg-key": "Load your own ReclaimerForge API key.  Key: k",
     "fg-more": "Fetch the next page of the catalog.  Key: n",
     "forge-sort": "How the catalog is ordered.  Key: s",
@@ -645,6 +650,11 @@ GUIDE = [
     ("F6  FORGE  ·  community content", [
         ("The catalog", "Maps, gametypes and playlists from ReclaimerForge. s changes the order, w the time window "
                         "it counts over, and / searches. Pick one for its file and its versions; n fetches more."),
+        ("Install", "i puts the selected version on this server. Every file is checked against Forge's manifest "
+                    "before it's copied into the server's content_dir and again once it's there, and replacing "
+                    "anything asks first. ◉ marks what's installed here; ▲ means a newer version is out."),
+        ("Load now", "l loads an installed map or gametype, once the server lists it. Whether a server picks up new "
+                     "content without a restart is up to the server, so installing never loads anything by itself."),
         ("Your key", "Forge takes your own API key: k loads one. It's only ever sent to reclaimerforge.net, and it's "
                      "never shown on screen."),
         ("Thanks", CREDIT),
@@ -791,7 +801,8 @@ class Blacklist(Vertical):
 
 
 class ForgePane(Vertical):
-    BINDINGS = [Binding("s", "app.forge('sort')", "Sort"), Binding("w", "app.forge('window')", "Window"),
+    BINDINGS = [Binding("i", "app.forge('install')", "Install"), Binding("l", "app.forge('load')", "Load now"),
+                Binding("s", "app.forge('sort')", "Sort"), Binding("w", "app.forge('window')", "Window"),
                 Binding("n", "app.forge('more')", "More"), Binding("y", "app.forge('copy')", "Copy ID"),
                 Binding("k", "app.forge('key')", "Key")]
 
@@ -939,6 +950,7 @@ class OniApp(App):
         super().__init__()
         self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
         self.fsetup = forge or ForgeSetup()
+        self.fstate = ForgeState(self.fsetup.state_dir / "forge-state.json" if self.fsetup.state_dir else None)
         self.forge: ForgeClient | None = None
         self.listings: list[dict] = []  # the catalog as fetched, in its order
         self.listing_rows: dict[str, dict] = {}
@@ -1042,6 +1054,8 @@ class OniApp(App):
                                 yield Static(id="listing")
                                 yield Roster(id="versions", cursor_type="row", zebra_stripes=True)
                                 with Grid(id="forge-actions"):
+                                    yield Button("INSTALL  i", id="fg-install", variant="primary", compact=True)
+                                    yield Button("LOAD NOW  l", id="fg-load", compact=True)
                                     yield Button("KEY  k", id="fg-key", compact=True)
                                     yield Button("MORE  n", id="fg-more", compact=True)
                                 with Collapsible(title="RAW DATA", id="forge-raw-box"):
@@ -2217,8 +2231,15 @@ class OniApp(App):
             self.paint_listing()
 
     def forge_mark(self, x: dict) -> Text:
-        """The catalog's first column: where this listing stands on the selected server."""
-        return Text("")
+        """The catalog's first column: where this listing stands on the selected server. ◉ installed, ▲ a newer
+        version is out."""
+        have = self.fstate.installed(self.cur.server.where).get(listing_id(x))
+        if not have:
+            return Text("")
+        latest = latest_of(x)
+        if latest and version_id(latest) and version_id(latest) != have.get("version_id"):
+            return Text("▲", AMBER)
+        return Text("◉", GREEN)
 
     def paint_forge(self) -> None:
         """The catalog table, the readout on its border, and the file of the selected listing. What's typed in the
@@ -2274,6 +2295,7 @@ class OniApp(App):
         self.query_one("#listing-box").border_subtitle = (f"KEY FROM {self.fsetup.source.upper()}"
                                                           if self.forge and self.fsetup.source else "")
         versions.display = self.query_one("#forge-raw-box").display = bool(self.forge and x)
+        self.query_one("#fg-install").display = self.query_one("#fg-load").display = bool(self.forge and x)
         if not self.forge:
             box.update(self.no_key_text())
             return
@@ -2310,7 +2332,8 @@ class OniApp(App):
                      ("STATUS", Text(withdrawn.upper() or "—", RED if withdrawn in ("withdrawn", "removed")
                                      else GREEN if withdrawn else DIM)),
                      ("UPDATED", day(pick(x, "updated_at", "updated"))),
-                     ("LATEST", version_label(latest_of(x)) if latest_of(x) else "—")]:
+                     ("LATEST", version_label(latest_of(x)) if latest_of(x) else "—"),
+                     ("ON THIS SERVER", self.installed_words(x))]:
             g.add_row(a, b if isinstance(b, Text) else Text(str(b)))
         parts = [Text("CATALOG ENTRY", AMBER) + Text(f"  //  {lid}", DIM), Text(), g]
         if summary := pick(x, "summary", "description", "short_description"):
@@ -2318,6 +2341,9 @@ class OniApp(App):
         if x.get("_error"):
             parts += [Text(), Text(x["_error"], RED)]
         box.update(Group(*parts))
+        have = self.fstate.installed(self.cur.server.where).get(lid)
+        self.query_one("#fg-install", Button).disabled = is_withdrawn(x)
+        self.query_one("#fg-load", Button).disabled = not have or kind_of(have) == "playlist"
         vs = versions_of(x)
         versions.display = bool(vs)
         versions.fill([(version_id(v), [self.version_mark(x, v), Text(version_label(v), WHITE),
@@ -2327,7 +2353,8 @@ class OniApp(App):
         self.query_one("#listing-raw", Static).update(JSON.from_data(scrub_data(x)))
 
     def version_mark(self, x: dict, v: dict) -> Text:
-        return Text("")
+        have = self.fstate.installed(self.cur.server.where).get(listing_id(x))
+        return Text("◉", GREEN) if have and have.get("version_id") == version_id(v) else Text("")
 
     @on(DataTable.RowHighlighted, "#listings")
     def _listing_row(self, _) -> None:
@@ -2359,6 +2386,10 @@ class OniApp(App):
             if not sel.disabled:
                 opts = SORTS if what == "sort" else WINDOWS
                 sel.value = opts[(opts.index(sel.value) + 1) % len(opts)]
+        elif what == "install":
+            await self.forge_install()
+        elif what == "load":
+            await self.forge_play()
         elif what == "more":
             self.forge_load(more=True)
         elif what == "copy":
@@ -2390,3 +2421,155 @@ class OniApp(App):
         self.forge_opened = True
         self.forge_load()
         self.notify("Loaded. It goes to reclaimerforge.net only.", title="FORGE KEY")
+
+    # --- forge: installing ------------------------------------------------------------------------------------
+    def installed_words(self, x: dict) -> Text:
+        st = self.cur
+        have = self.fstate.installed(st.server.where).get(listing_id(x))
+        if have:
+            return Text(f"v{have.get('version', '?')}", GREEN) + Text(f"  installed {day(have.get('installed_at'))}",
+                                                                      DIM)
+        where = target_for(st.server)
+        return Text("not installed", DIM) if not isinstance(where, str) else Text("can't install here: i says why",
+                                                                                   AMBER)
+
+    def sharing(self, st: Station) -> list[Station]:
+        """The stations that load content from the same folder as this one: an install there is theirs too."""
+        here = place(st.server)
+        return [o for o in self.stations if o.server.content_dir and not o.server.url and place(o.server) == here]
+
+    def listed(self, st: Station, entry: dict) -> tuple[str, str] | None:
+        """Where the server lists an installed listing: ("maps" or "modes", the reference to load it by)."""
+        names = refs_of(entry)
+        for what in ("maps", "modes"):
+            for e in st.data.get(what, {}).get("entries") or []:
+                if any(norm(v) in names for v in (pick(e, "reference"), pick(e, "name")) if v):
+                    return what, str(pick(e, "reference", "name"))
+        return None
+
+    def selected_version(self, x: dict) -> dict | None:
+        vid = self.query_one("#versions", Roster).selected
+        return next((v for v in versions_of(x) if version_id(v) == vid), None) or latest_of(x)
+
+    async def forge_install(self) -> None:
+        st, x = self.cur, self.cur_listing()
+        if not (self.forge and x):
+            self.notify("Pick a listing first." if self.forge else "Load your Forge key first (k).", severity="warning")
+            return
+        title, lid = title_of(x), listing_id(x)
+        target = target_for(st.server)
+        if isinstance(target, str):
+            self.notify(target, title=f"{st.label} · CAN'T INSTALL HERE", severity="warning", timeout=15)
+            return
+        if is_withdrawn(x):
+            self.notify("It's been withdrawn from ReclaimerForge, so it isn't installed anywhere new.",
+                        title=f"FORGE · {title}", severity="warning")
+            return
+        v = self.selected_version(x)
+        if not v or not version_id(v):
+            self.notify("It has no version to install yet.", title=f"FORGE · {title}", severity="warning")
+            return
+        vid, label = version_id(v), version_label(v)
+        try:
+            manifest = await self.forge.manifest(lid, vid)
+            files = plan(manifest)
+            there = await target.existing([f.path for f in files])
+        except ForgeError as e:
+            self.notify(e.text, title=f"FORGE · {e.short}", severity="error", timeout=15)
+            return
+        except InstallError as e:
+            self.notify(explain(str(e)), title=f"FORGE · {title}", severity="error", timeout=15)
+            return
+        have = self.fstate.installed(st.server.where).get(lid)
+        lines = [f"{len(files)} file{'s' * (len(files) != 1)}, {size_words(sum(f.size for f in files))}, into "
+                 f"{st.server.content_dir} on {target.where}."]
+        if have and have.get("version_id") != vid:
+            lines.append(f"Replaces v{have.get('version', '?')}, installed {day(have.get('installed_at'))}.")
+        elif have:
+            lines.append("This version is installed already: it's copied again.")
+        if there:
+            lines.append("Already there, and replaced: " + ", ".join(sorted(there)) + ".")
+        if others := [o.label for o in self.sharing(st) if o is not st]:
+            lines.append(f"{', '.join(others)} load{'s' * (len(others) == 1)} from the same folder, so it's theirs too.")
+        lines.append("Every file is checked against the manifest's size and SHA-256 before it's copied and again "
+                     "once it's there. Loading it is a separate step.")
+        replacing = bool(there or have)
+        if not await self.push_screen_wait(Confirm(f"INSTALL  {title} v{label}", "\n\n".join(lines),
+                                                   verb="REPLACE" if replacing else "INSTALL", danger=replacing)):
+            return
+        # a worker of its own: opening another dialog meanwhile must not cancel a copy halfway
+        self.run_worker(self.forge_put(st, x, v, manifest, files, target), group="install", exit_on_error=False)
+
+    async def forge_put(self, st: Station, x: dict, v: dict, manifest: dict, files: list, target) -> None:
+        title, lid, vid, label = title_of(x), listing_id(x), version_id(v), version_label(v)
+        stamp = Text(time.strftime("%H:%M:%S "), DIM) + Text(f"{st.label} ", CYAN)
+        self.log_cmd(stamp + Text(f"» forge install {title} v{label}  ({lid} {vid})", WHITE))
+        self.notify(f"Downloading {len(files)} file{'s' * (len(files) != 1)} and checking each one…",
+                    title=f"FORGE · {title}")
+        try:
+            local = [await self.forge.download(f.url, f.size, f.sha256) for f in files]  # all checked, then copied
+            for f, path in zip(files, local):
+                await target.put(path, f)
+        except (ForgeError, Unverified, InstallError) as e:
+            if not self.is_running:
+                return
+            words = e.text if isinstance(e, ForgeError) else explain(str(e))
+            self.log_cmd(Text("  ✕ " + words, RED))
+            self.notify(words, title="FORGE · NOT INSTALLED", severity="error", timeout=20)
+            return
+        entry = {"listing_id": lid, "version_id": vid, "version": label, "title": title, "kind": kind_of(x)
+                 or kind_of(manifest), "author": author_of(x), "owner_id": owner_of(x),
+                 "reference": str(pick(manifest, "reference", "map_reference", "name", default="")),
+                 "files": [{"path": f.path, "sha256": f.sha256, "size": f.size} for f in files],
+                 "content_dir": st.server.content_dir, "installed_at": utc_iso()}
+        sharing = self.sharing(st)
+        self.fstate.record([o.server.where for o in sharing], entry)
+        if not self.is_running:
+            return
+        self.log_cmd(Text(f"  ✓ {len(files)} file{'s' * (len(files) != 1)} checked and in place", GREEN))
+        self.paint_forge()
+        for o in sharing:  # does the server list it yet?
+            if o.online:
+                await self._fetch(o, ("maps", "modes"))
+        if kind_of(entry) == "playlist":
+            after = "Point the server's playlist setting at it to use it: oni-rcon doesn't edit dedicated.toml."
+        elif self.listed(st, entry):
+            after = "The server lists it now: l loads it."
+        else:
+            after = "The server doesn't list it yet: it may need a restart to pick new content up."
+        self.notify(f"{title} v{label} is on {st.label}. {after}", title="FORGE · INSTALLED", timeout=15)
+
+    async def forge_play(self) -> None:
+        """Load an installed map or gametype now: the same as LOAD MAP+MODE on F3, with this half filled in."""
+        st, x = self.cur, self.cur_listing()
+        entry = self.fstate.installed(st.server.where).get(listing_id(x)) if x else None
+        if not entry:
+            self.notify("Install it on this server first (i).", severity="warning")
+            return
+        if kind_of(entry) == "playlist":
+            self.notify("A playlist isn't loaded from here: point the server's playlist setting at it.",
+                        severity="warning")
+            return
+        if not st.online:
+            self.notify(f"{st.label} is not connected.", severity="warning")
+            return
+        await self._fetch(st, ("maps", "modes"))
+        found = self.listed(st, entry)
+        if not found:
+            self.notify("The server doesn't list it yet. It may need a restart to pick new content up, which oni-rcon "
+                        "can't do for you.", title=f"LOAD NOW · {entry.get('title', '')}", severity="warning",
+                        timeout=15)
+            return
+        what, ref = found
+        title = entry.get("title") or ref
+        if what == "maps":
+            other = await self.push_screen_wait(Pick(f"{title} · SELECT MODE", self.entries(st, "modes")))
+            args = [ref, other]
+        else:
+            other = await self.push_screen_wait(Pick(f"{title} · SELECT MAP", self.entries(st, "maps")))
+            args = [other, ref]
+        if not other:
+            return
+        if await self.push_screen_wait(Confirm(f"LOAD  {' / '.join(args)}", "Ends the current game for everyone on "
+                                               "this station; the new one starts in the next lobby.")):
+            self.send(st, "load", *args, then=("status", "nextmap"))

@@ -22,7 +22,7 @@ servers first.
 | **F3 Operations** | Sitrep for the selected server with the vote under way and its tally; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
-| **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked, over the last 24 hours, 7 days or 30 days, and search it. Each listing shows its type, author, rating, recent downloads, and whether it runs on the selected server's version; its file lists every version. `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
+| **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked, over the last 24 hours, 7 days or 30 days, and search it. Each listing shows its type, author, rating, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. `i` install on this server · `l` load it now · `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
 
 Also:
 
@@ -186,6 +186,35 @@ forge_api_key_env = "RECLAIMERFORGE_KEY"
 These go at the top of the config file, above `[defaults]` and the `[[server]]` blocks: TOML reads a key that comes
 after a table as part of that table.
 
+### Installing on a server
+
+Pick a listing on F6, pick a version (the newest is picked for you), and press `i`. oni-rcon fetches that version's
+manifest, downloads every file and checks each one against the manifest's size and SHA-256 before any of it is used,
+copies them into the server's content folder, checks them again there, and only then moves them into place. A file
+that fails a check is thrown away and nothing is installed. Replacing anything already there asks first, with ABORT
+picked. `◉` in the catalog marks what's installed on the selected server.
+
+Tell oni-rcon where each server loads content from with `content_dir`, in `[defaults]` or a `[[server]]` block:
+
+```toml
+[defaults]
+ssh = "admin@game-box"
+content_dir = "~/reclaimer/content"   # on the game box, for a server reached over ssh
+```
+
+- **Behind `--ssh`**, files go to the same SSH destination as the tunnel, with the same key authentication, and need a
+  POSIX shell and `sha256sum` on the game box (the Reclaimer docker host has both). With docker, name the host folder
+  that's mounted into the container.
+- **On this machine** (no `ssh`), it's a plain copy.
+- **Reached by a `ws://` or `wss://` link**, a server can't be installed to, and F6 says so.
+- Servers that share a `content_dir` share an install: it shows on all of them.
+
+**Loading is a separate step.** Whether a dedicated server picks up new content while it runs is up to the server, so
+installing never loads anything. Once the server lists the new map or gametype, `l` on F6 loads it, the same as LOAD
+MAP+MODE on F3. If it isn't listed yet, the server needs a restart, which oni-rcon can't do for you. A playlist is
+installed like anything else, but using it means pointing the server's playlist setting at it, and oni-rcon doesn't
+edit `dedicated.toml`. What's installed where is kept in `forge-state.json`, beside the config file.
+
 oni-rcon keeps to the key's quota (120 requests a minute): it reads the rate-limit headers on every reply, waits out a
 `429` for as long as Forge asks, and keeps recent replies so it doesn't ask twice. Those replies and every verified
 download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` elsewhere.
@@ -220,7 +249,7 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
-| `s w n k y` | on the Forge catalog: sort, time window, next page, API key, copy listing ID |
+| `i l s w n k y` | on the Forge catalog: install, load now, sort, time window, next page, API key, copy listing ID |
 | any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good) |
 | `Ctrl+Q` | quit |
 

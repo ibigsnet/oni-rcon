@@ -15,6 +15,7 @@ forge_api_key_env = "RECLAIMERFORGE_KEY"
 [defaults]                    # applies to every [[server]] unless it sets the key itself
 ssh = "admin@game-box"        # tunnel through this SSH destination (key auth; leave out for direct)
 host = "127.0.0.1"            # RCON address as seen from the ssh destination (the server's default bind)
+content_dir = "~/reclaimer/content"  # where the server loads Forge content from (on the ssh destination)
 
 # Where the RCON password comes from, first that's set wins:
 #   password = "..."                          (plain text: avoid)

@@ -341,3 +341,144 @@ def test_the_forge_tab_without_a_key(fake, tmp_path):
             assert fake.seen[-1][2] and KEY not in cfg.read_text()  # sent with the key; not saved
             assert "TYPED THIS SESSION" in str(app.query_one("#listing-box").border_subtitle)
     asyncio.run(go())
+
+
+# --- installing ---------------------------------------------------------------------------------------------------
+def test_only_safe_files_are_written():
+    from oni_rcon.install import InstallError, plan, safe_path
+    assert safe_path("guardian_rebuilt.map") == "guardian_rebuilt.map" and safe_path("maps\\a b.map") == "maps/a b.map"
+    for bad in ("../evil.map", "/etc/passwd", "C:\\x.map", ".ssh/authorized_keys", "a/../../b", "", "x/./y",
+                "trailing.", "a/b/c/d/e.map"):
+        with pytest.raises(InstallError):
+            safe_path(bad)
+    good = {"path": "a.map", "url": "/assets/x", "size": 3, "sha256": "ab" * 32}
+    assert plan({"assets": [good]})[0].sha256 == "ab" * 32
+    for broken, words in [({**good, "sha256": "md5:1"}, "no SHA-256"), ({**good, "size": -1}, "no size"),
+                          ({**good, "url": ""}, "no link")]:
+        with pytest.raises(InstallError, match=words):
+            plan({"assets": [broken]})
+    with pytest.raises(InstallError, match="twice"):
+        plan({"assets": [good, {**good, "path": "A.map"}]})
+    with pytest.raises(InstallError, match="no files"):
+        plan({"assets": []})
+
+
+def test_the_state_file(tmp_path):
+    from oni_rcon.state import ForgeState, refs_of
+    p = tmp_path / "forge-state.json"
+    st = ForgeState(p)
+    entry = {"listing_id": "lst_1", "version_id": "ver_1", "title": "Pit Stop", "reference": "pit_stop",
+             "files": [{"path": "maps/pit-stop.map"}]}
+    st.record(["a:1", "b:2"], entry)
+    again = ForgeState(p)
+    assert again.ids() == {"lst_1"} and again.where("lst_1") == ["a:1", "b:2"] and again.installed("a:1")["lst_1"]
+    assert refs_of(entry) == {"pit_stop"}
+    p.write_text("{not json")
+    assert not ForgeState(p).ids() and (tmp_path / "forge-state.json.unreadable").exists()  # kept aside, not lost
+
+
+def install_files(fake, tmp_path, target):
+    """Download a listing's latest version through the client, then put it with `target`: (files, listing)."""
+    from oni_rcon.install import plan
+
+    async def go():
+        fc, _ = client(fake, tmp_path)
+        x = next(x for x in (await fc.listings("latest"))[0] if x["kind"] == "map")
+        files = plan(await fc.manifest(x["id"], forge.latest_of(x)["id"]))
+        assert await target.existing([f.path for f in files]) == set()
+        for f in files:
+            await target.put(await fc.download(f.url, f.size, f.sha256), f)
+        assert await target.existing([f.path for f in files] + ["nope.map"]) == {f.path for f in files}
+        return files, x
+    return asyncio.run(go())
+
+
+def test_install_on_this_machine(fake, tmp_path):
+    from oni_rcon.install import LocalTarget
+    files, _ = install_files(fake, tmp_path, LocalTarget(str(tmp_path / "content")))
+    f = files[0]
+    assert hashlib.sha256((tmp_path / "content" / f.path).read_bytes()).hexdigest() == f.sha256
+    assert not list((tmp_path / "content").rglob("*.part"))
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="stands in for ssh with a POSIX shell script")
+def test_install_over_ssh(fake, tmp_path, monkeypatch):
+    from oni_rcon.install import File, InstallError, SshTarget, rpath
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    ssh = bin_ / "ssh"  # runs the remote command here, as the game box's shell would
+    ssh.write_text('#!/bin/sh\nwhile [ "$1" = "-o" ]; do shift 2; done\nshift\nexec sh -c "$1"\n')
+    ssh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_}:{__import__('os').environ['PATH']}")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert rpath("~/content", "a b.map") == '"$HOME"/\'content/a b.map\''
+    files, _ = install_files(fake, tmp_path, SshTarget("admin@game-box", "~/reclaimer/content"))
+    landed = tmp_path / "home" / "reclaimer" / "content" / files[0].path
+    assert hashlib.sha256(landed.read_bytes()).hexdigest() == files[0].sha256
+
+    bogus = tmp_path / "bogus.map"
+    bogus.write_bytes(b"not what the manifest says")
+    target = SshTarget("admin@game-box", "~/reclaimer/content")
+    with pytest.raises(InstallError, match="doesn't match the manifest's SHA-256"):
+        asyncio.run(target.put(bogus, File("odd name's.map", "", 26, "ab" * 32)))
+    assert not list(landed.parent.glob("*.part")) and not (landed.parent / "odd name's.map").exists()
+
+
+def test_install_and_load_from_f6(fake, tmp_path):
+    from oni_rcon.app import Confirm, Pick
+    from oni_rcon.config import Server
+    from oni_rcon.demo import serve_fakes
+    from oni_rcon.forge import ForgeSetup
+
+    async def go():
+        shared = tmp_path / "shared"
+        ports, keep = await serve_fakes(tick=False, content_dirs=[shared, shared, tmp_path / "other"])
+        servers = [Server(port=ports[0], password="demo", content_dir=str(shared)),
+                   Server(port=ports[1], password="demo", content_dir=str(shared)),
+                   Server(port=ports[2], password="demo")]  # no content_dir: says so
+        app = forge_app(ports, fake, tmp_path, servers=servers)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: all(st.online and "maps" in st.data for st in app.stations))
+            await pilot.press("f6")
+            t = app.query_one("#listings")
+            assert await until(pilot, lambda: t.row_count == 25)
+            row = next(i for i, lid in enumerate(t.ids) if app.listing_rows[lid]["kind"] == "map")
+            t.focus()
+            t.move_cursor(row=row)
+            lid = t.selected
+            assert await until(pilot, lambda: lid in app.details)
+            await pilot.press("i")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            assert app.screen.verb == "INSTALL" and "Big Team Battle" in app.screen.b  # it shares the folder
+            assert app.screen.focused.id == "no"  # ABORT by default
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: lid in app.fstate.ids(), 200)
+            entry = app.fstate.installed(app.stations[0].server.where)[lid]
+            assert app.fstate.installed(app.stations[1].server.where)[lid] == entry  # theirs too
+            assert (shared / entry["files"][0]["path"]).is_file() and "◉" in str(t.get_row_at(t.ids.index(lid))[0])
+            assert await until(pilot, lambda: app.listed(app.stations[0], entry))  # the server lists it now
+
+            await pilot.press("i")  # again: it's there, so it asks to replace, and Enter means ABORT
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            assert app.screen.verb == "REPLACE" and app.screen.danger
+            await pilot.press("enter")
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, Confirm)
+
+            await pilot.press("l")  # load now: its map, a mode to go with it, a confirm
+            assert await until(pilot, lambda: isinstance(app.screen, Pick))
+            await pilot.press("enter")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            app.screen.query_one("#yes").press()
+            fake_rcon = keep[0]
+            assert await until(pilot, lambda: fake_rcon.status["map"] == entry["reference"])
+
+            await pilot.press("3")
+            await pilot.pause(0.2)
+            await pilot.press("f6")
+            app.query_one("#listings").focus()
+            await pilot.press("i")
+            await pilot.pause(0.3)
+            assert not isinstance(app.screen, Confirm)  # no content_dir: nothing to confirm, a toast says why
+            assert any("content_dir" in n.message for n in app._notifications)
+    asyncio.run(go())

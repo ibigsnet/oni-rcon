@@ -55,10 +55,12 @@ def main() -> None:
         if demo:
             from .demo import start_in_thread
             from .forgefake import start_demo
-            servers = [Server(port=p, password="demo") for p in start_in_thread()]
+            scratch = Path(tempfile.mkdtemp(prefix="oni-rcon-demo-"))
+            folders = [scratch / f"content-{i + 1}" for i in range(3)]  # each pretend server loads from its own
+            servers = [Server(port=p, password="demo", content_dir=str(d))
+                       for p, d in zip(start_in_thread(content_dirs=folders), folders)]
             hint = hint or DEMO_HINT
             url, key = start_demo()  # a pretend Forge too, with a pretend key: the real one is never touched
-            scratch = Path(tempfile.mkdtemp(prefix="oni-rcon-demo-"))
             forge = ForgeSetup(Secret(key), "the demo", url=url, poll=30, state_dir=scratch, cache_dir=scratch)
         elif targets:
             try:
