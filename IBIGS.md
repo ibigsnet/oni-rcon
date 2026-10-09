@@ -34,7 +34,7 @@ The container is built locally as `ibigs/reclaimer-terminal`, uses an immutable 
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.7.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.7.0), upstream commit `dfd7a6124f510139f00377c3aff5fadc05802918`. This source version is `0.7.0+ibigs.1`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.7.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.7.0), upstream commit `dfd7a6124f510139f00377c3aff5fadc05802918`. This source version is `0.7.0+ibigs.2`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
@@ -49,3 +49,7 @@ The 0.6 integration preserves actual Forge schema aliases and sequence ordering 
 The 0.6 source validation covered 127 upstream and maintained test cases, including timed cached favourites, missing-cache behavior, vote sorting, multi-version withdrawals, small-terminal layout, F9 catalog alongside F6 lifecycle controls, player search and target preservation, download validation, and terminal credential isolation. Client publication and installation use the separately maintained IBIGS update channel; the application never replaces itself with an upstream release binary.
 
 The 0.7 integration limits sidebar redraws to visible cards, fixes Operations at 80 columns, shows the correct ban moderator and adds optional join-time ping. IBIGS adapts card visibility to sorting and filtering, preserves the selected command target, and correctly registers new dynamic lobbies. Focused regressions cover these behaviors and log-reader process cleanup; combined-suite and container validation belong to the release record. An installed launcher changes only when its separately reviewed image is promoted.
+
+## Customer lobby controls
+
+The customer console includes F7 and a sidebar button to start, stop or restart this VM’s lobbies through the local `oni` wrapper. It shows players before confirmation and defaults to abort. Occupied or unreadable lobbies require a second explicit disconnect confirmation. If an empty lobby gains players before the helper’s final check, the operation stops and asks you to reopen F7 to review occupancy. The panel fits 80-column terminals. This local customer helper does not add Docker access or power controls to the fleet-console fleet adapter.

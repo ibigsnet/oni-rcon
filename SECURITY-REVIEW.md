@@ -1,13 +1,13 @@
 # Source review — 2026-10-09, upstream 0.7.0
 
-The 0.7.0+ibigs.2 performance pass keeps all network/authentication and write-confirmation boundaries. It bounds the pre-layout terminal log queue as well as rendered history, releases unselected fleet detail caches, and coalesces overview work by snapshot generation. Native player polling stays at three seconds. Selected controls repaint immediately on disconnect; hidden views refresh before use. The final suite passes 149 tests, including unchanged command targets, redaction after hidden-panel transitions, bounded hidden logs, preserved scrollback, and process cleanup. No runtime dependencies changed.
+The 0.7.0+ibigs.2 performance pass keeps all network/authentication and write-confirmation boundaries. It bounds the pre-layout terminal log queue as well as rendered history, releases unselected fleet detail caches, and coalesces overview work by snapshot generation. Native player polling stays at three seconds. Selected controls repaint immediately on disconnect; hidden views refresh before use. The pre-F7 performance suite passed 149 tests, including unchanged command targets, redaction after hidden-panel transitions, bounded hidden logs, preserved scrollback, and process cleanup. No runtime dependencies changed.
 
 Reviewed upstream range: `e5772fe56a558f164f6a55d270795d8bc8104718` (0.6.0) through
 `dfd7a6124f510139f00377c3aff5fadc05802918` (0.7.0), including 0.6.1
 `a8c17e551408fed530f35ed90cef0fe84799e632` and 0.6.2 `3e32178ca7010cc197d820a33ac94c3cf3016e7f`.
 Primary release notes: [0.6.1](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.1),
 [0.6.2](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.2),
-[0.7.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.7.0). Maintained source version: `0.7.0+ibigs.1`.
+[0.7.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.7.0). Maintained source version: `0.7.0+ibigs.2`.
 This is source review, not a formal audit or verification of upstream executables.
 
 This range adds visible-card rendering and cached layout measurements, an 80-column Operations layout fix,
@@ -39,6 +39,8 @@ files. It covers literal command arguments, rejected shell strings, managed-mode
 helper descendants, log-source exit, dynamic discovery, stable filtered viewport identities, and F3 then Help at
 80×32. All 24 focused checks passed with Python 3.12 on 2026-10-09. No production broadcasts, moderation, game loads, stops or restarts are source tests. Final combined-suite
 and image canary results are recorded separately during release promotion.
+
+The customer-only F7 panel uses an argument array to the existing local `oni` wrapper. It requires explicit occupied-lobby confirmation before passing `--force`; an earlier empty snapshot cannot bypass the helper’s final occupancy refusal. Narrow-terminal layout and this join-during-confirmation path have separate offline regression coverage. It does not grant the fleet-console fleet adapter Docker or shell access.
 
 ## Historical source review — upstream 0.6.0
 

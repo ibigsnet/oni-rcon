@@ -24,6 +24,7 @@ VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 .-fleet #stations:focus > ListItem.-highlight { background: $block-cursor-background; }
 #add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
 #add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; }
+#power-btn { width: 100%; margin: 1 1 0 1; text-style: bold; }
 #sidebar > Center { height: 1fr; align-vertical: middle; }
 #super { height: auto; padding: 1 1 0 1; border-top: hkey $primary 40%; }
 #uplink { height: auto; padding: 1; border-top: hkey $primary 40%; }
@@ -121,6 +122,9 @@ ModalScreen { align: center middle; background: $background 75%; }
 }
 .dialog-keys { color: $text-muted; margin-top: 1; text-align: right; }
 .dialog Input.-missing, .dialog Select.-missing { border: tall $error; background: $error 20%; }
+.dialog.power { width: 96; max-width: 100%; }
+.power .dialog-body { max-height: 10; overflow-y: auto; scrollbar-gutter: stable; }
+.power .dialog-buttons Button { width: 1fr; min-width: 10; }
 .dialog.help { width: 96; height: 90%; }
 #help-body { height: 1fr; scrollbar-size-vertical: 1; }
 .dialog.danger { border: thick $error; }
