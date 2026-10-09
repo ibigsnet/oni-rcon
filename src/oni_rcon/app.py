@@ -2455,14 +2455,15 @@ class OniApp(App):
                  "oni-rcon only ever sends it to reclaimerforge.net, and never shows it."))
         if not f:
             return
-        self.fsetup.key, self.fsetup.source, self.fsetup.error = Secret(f["key"]), "typed this session", ""
+        # out of the form's result at once: a crash report lists what's in scope, and a Secret never prints
+        self.fsetup.key, self.fsetup.source, self.fsetup.error = Secret(f.pop("key")), "typed this session", ""
         if f.get("remember") == "yes":
             try:
                 remember_forge_key(cfg, self.fsetup.key.value)
                 self.fsetup.source = f"{cfg.name}"
-            except (OSError, ValueError) as e:
-                self.notify(f"Couldn't save it ({e}). It's loaded for this session.", title="FORGE KEY",
-                            severity="warning")
+            except Exception as e:  # whatever it was, a toast: never a crash report with the key in its frames
+                self.notify(f"Couldn't save it ({type(e).__name__}). It's loaded for this session.",
+                            title="FORGE KEY", severity="warning")
         self.forge_connect()
         self.forge_opened = True
         self.forge_load()
@@ -2523,7 +2524,7 @@ class OniApp(App):
         except ForgeError as e:
             self.notify(e.text, title=f"FORGE · {e.short}", severity="error", timeout=15)
             return
-        except InstallError as e:
+        except (InstallError, OSError) as e:
             self.notify(explain(str(e)), title=f"FORGE · {title}", severity="error", timeout=15)
             return
         have = self.fstate.installed(st.server.where).get(lid)
@@ -2556,7 +2557,7 @@ class OniApp(App):
             local = [await self.forge.download(f.url, f.size, f.sha256) for f in files]  # all checked, then copied
             for f, path in zip(files, local):
                 await target.put(path, f)
-        except (ForgeError, Unverified, InstallError) as e:
+        except (ForgeError, Unverified, InstallError, OSError) as e:
             if not self.is_running:
                 return
             words = e.text if isinstance(e, ForgeError) else explain(str(e))

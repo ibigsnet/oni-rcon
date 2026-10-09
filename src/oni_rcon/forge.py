@@ -34,6 +34,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urljoin, urlsplit
@@ -525,8 +526,8 @@ class ForgeClient:
             with contextlib.suppress(Exception):
                 body = e.read(4096)
             return e.code, e.headers, body
-        except (URLError, OSError, ValueError) as e:  # offline, refused, timed out, a TLS failure
-            raise ForgeError(0, str(getattr(e, "reason", "") or e)) from None
+        except (URLError, OSError, ValueError, HTTPException) as e:  # offline, refused, timed out, TLS, cut off
+            raise ForgeError(0, str(getattr(e, "reason", "") or e) or type(e).__name__) from None
 
     async def _get(self, url: str, background: bool) -> dict:
         for attempt in range(4):
@@ -664,8 +665,8 @@ class ForgeClient:
             os.replace(part, path)
         except HTTPError as e:
             raise ForgeError(e.code, "", retry_after(e.headers.get("Retry-After") if e.headers else None)) from None
-        except (URLError, OSError, ValueError) as e:
-            raise ForgeError(0, str(getattr(e, "reason", "") or e)) from None
+        except (URLError, OSError, ValueError, HTTPException) as e:
+            raise ForgeError(0, str(getattr(e, "reason", "") or e) or type(e).__name__) from None
         finally:
             with contextlib.suppress(OSError):
                 part.unlink()
