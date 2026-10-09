@@ -539,3 +539,31 @@ def test_updates_and_withdrawals(fake, tmp_path):
             assert await until(pilot, lambda: not app.fstate.alarms())
             assert app.condition()[0] == "GREEN" and app.fstate.is_withdrawn(lid)  # still flagged, just seen
     asyncio.run(go())
+
+
+# --- now playing --------------------------------------------------------------------------------------------------
+def test_now_playing_credit(fake, tmp_path):
+    from oni_rcon.demo import serve_fakes
+    from oni_rcon.state import ForgeState
+
+    st = ForgeState(None)
+    st.record(["s"], {"listing_id": "l1", "kind": "map", "title": "Pit Stop", "reference": "pit_stop", "files": []})
+    st.record(["s"], {"listing_id": "l2", "kind": "gametype", "title": "Grifball", "reference": "grifball", "files": []})
+    assert [e["listing_id"] for e in st.playing("s", "Pit Stop", "Grifball")] == ["l1", "l2"]
+    assert st.playing("s", "grifball", "pit_stop") == []  # a map's name as a mode isn't it
+    assert st.playing("s", "the_pit", "Slayer") == [] and st.playing("other", "pit_stop", "") == []
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: app.cur.online and "status" in app.cur.data)
+            app.fstate.record([app.cur.server.where], {"listing_id": "l1", "kind": "map", "title": "Pit Stop",
+                                                       "author": "Kestrel", "version": "1.2", "reference": "pit_stop",
+                                                       "files": []})
+            await app.cur.rcon.call("load", "pit_stop", "slayer")
+            await app._fetch(app.cur, ("status",))
+            await pilot.pause()
+            text = plain(app.query_one("#sitrep"))
+            assert "FORGE" in text and "Pit Stop  by Kestrel  v1.2" in text
+    asyncio.run(go())

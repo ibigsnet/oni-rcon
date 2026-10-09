@@ -70,6 +70,14 @@ class ForgeState:
     def ids(self) -> set[str]:
         return {lid for entries in self.data["servers"].values() for lid in entries}
 
+    def playing(self, server: str, map_name, mode) -> list[dict]:
+        """The installed listings a server is playing now: its map, its gametype, or both. Only what's installed is
+        matched, never the catalog at large, so a stock map never gets someone else's credit."""
+        m, g = norm(map_name), norm(mode)
+        return [e for e in self.installed(server).values()
+                if m and m in refs_of(e) and e.get("kind") != "gametype"
+                or g and g in refs_of(e) and e.get("kind") != "map"]
+
     def entry(self, lid: str) -> dict | None:
         """Any server's record of a listing: its title, author and kind are the same everywhere."""
         return next((e[lid] for e in self.data["servers"].values() if lid in e), None)

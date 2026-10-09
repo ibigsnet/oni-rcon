@@ -643,6 +643,8 @@ GUIDE = [
     ("F3  OPERATIONS  ·  running the match", [
         ("Buttons", "Change map or mode, queue what plays next, end the round, shuffle teams, run votes, broadcast, "
                     "and server settings. Anything that ends a game asks first."),
+        ("Credit", "When the map or gametype playing came from ReclaimerForge, the sitrep's FORGE line names it and "
+                   "whoever made it."),
     ]),
     ("F4  BLACKLIST  ·  bans", [
         ("Lists", "Every ban by player, address and device, and who may join through a VPN. Pick a row, then UNBAN "
@@ -1715,6 +1717,8 @@ class OniApp(App):
                      ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)
                                 if str(s.get("phase") or "").lower() not in QUIET_PHASES else Text("—", DIM)),
                      ("MAP", str(s.get("map") or "—")), ("MODE", str(s.get("mode") or "—")),
+                     *[("FORGE", self.credit(e)) for e in self.fstate.playing(st.server.where, s.get("map"),
+                                                                              s.get("mode"))],
                      ("NEXT", str(s.get("next") or "playlist")),
                      ("PLAYERS", f"{s.get('players', '—')} / {s.get('max_players', '—')}"),
                      ("JOIN PASSWORD", yes_no(s.get("password_required"), "SET", "OPEN")),
@@ -1743,6 +1747,13 @@ class OniApp(App):
             flag = lambda v: Text(v, style) + (Text("  ⚠ WITHDRAWN", RED) if norm(v) in pulled else Text())
             rows.append((str(i), [Text("▶" if now else str(i), style), flag(mp), flag(md)]))
         self.query_one("#rotation", Roster).fill(rows)
+
+    @staticmethod
+    def credit(e: dict) -> Text:
+        """Who made what's playing: the title, and its author when Forge named one."""
+        return (Text(str(e.get("title") or e.get("listing_id")), GOLD)
+                + Text(f"  by {e['author']}" if e.get("author") else "", WHITE)
+                + Text(f"  v{e['version']}" if e.get("version") else "", DIM))
 
     def paint_theatre(self) -> None:
         """Who's winning: each team's numbers and score as bars, or a leaderboard when there are no teams."""
