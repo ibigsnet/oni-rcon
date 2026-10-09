@@ -104,8 +104,8 @@ class FakeForge:
             major, minor = (x["latest_version"]["version"].split(".") + ["0"])[:2]
             now = datetime.now(timezone.utc)
             v = self._version(x, f"{major}.{int(minor) + 1}", now)
-            self.changes.append({"listing_id": lid, "version_id": v["id"], "change": "version_published",
-                                 "updated_at": utc_iso(now)})
+            self.changes.append({"listing_id": lid, "version_id": v["id"], "version": v["version"],
+                                 "change": "version_published", "updated_at": utc_iso(now)})
             return v["id"]
 
     def withdraw(self, lid: str) -> None:

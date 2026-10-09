@@ -37,10 +37,10 @@ from textual.worker import WorkerState
 from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, gauge, hbar,
                   spark, split_bar)
 from .config import Server, remember_forge_key
-from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, ForgeClient, ForgeError, ForgeSetup, Secret, Unverified,
-                    author_of, compat_of, compatible, is_withdrawn, kind_of, latest_of, listing_id, owner_of,
-                    ratings_of, recent_of, scrub, scrub_data, title_of, utc_iso, version_id, version_label,
-                    versions_of)
+from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
+                    Unverified, author_of, before, compat_of, compatible, is_withdrawn, kind_of, latest_of,
+                    listing_id, owner_of, ratings_of, recent_of, scrub, scrub_data, title_of, utc_iso, version_id,
+                    version_label, versions_of)
 from .install import InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .rcon import Rcon, Tunnel
@@ -64,12 +64,15 @@ KIND = {"chat": "chat", "kill": "combat", "join": "traffic", "leave": "traffic",
         "kick": "moderation", "ban": "moderation", "unban": "moderation", "mute": "moderation",
         "unmute": "moderation", "cheat": "moderation"}
 GLYPH = {"chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□",
-         "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡"}
+         "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡", "forge": "⬢"}
 STATE = {"online": ("◉", GREEN), "connecting": ("◌", AMBER), "offline": ("○", RED), "denied": ("⊘", RED)}
 SPIN = "◐◓◑◒"
 PANE_FOCUS = {"assets": "#players", "intercepts": "#feed", "operations": "#op-load", "blacklist": "#bans",
               "console": "#cmd", "forge": "#listings"}
 TABS = ("f1", "f2", "f3", "f4", "f5", "f6")
+VIEWS = [*SORTS, "installed"]  # the catalog's orders, then what's on the selected server, from forge-state.json
+OVERLAP = 300  # seconds the changes feed is read back over each time: a change written late isn't missed
+RECONCILE = 6 * 3600  # seconds between fetching every installed listing whole, for whatever the feed missed
 KIND_COLOR = {"map": CYAN, "gametype": AMBER, "playlist": GOLD}
 ALERT = re.compile(r"\b(admins?|mods?|hack\w*|cheat\w*|aimbot|wallhack)\b", re.I)
 ADDRESS_KEYS = {"address", "ip", "ip_address", "addr"}
@@ -133,9 +136,10 @@ TIPS = {
     "f-local": "Show only what happens on the selected server.",
     "fg-install": "Put the selected version on this server, every file checked against Forge's manifest.  Key: i",
     "fg-load": "Load the installed map or gametype now, once the server lists it. Ends the current game.  Key: l",
+    "fg-ack": "Say you've seen that it was withdrawn: CONDITION goes back to GREEN. It stays flagged.  Key: a",
     "fg-key": "Load your own ReclaimerForge API key.  Key: k",
     "fg-more": "Fetch the next page of the catalog.  Key: n",
-    "forge-sort": "How the catalog is ordered.  Key: s",
+    "forge-sort": "How the catalog is ordered, or what's installed on this server.  Key: s",
     "forge-window": "The stretch of time trending, rising and downloads count over.  Key: w",
     "raw": "Also print every event the servers push, as raw data.",
 }
@@ -655,6 +659,9 @@ GUIDE = [
                     "anything asks first. ◉ marks what's installed here; ▲ means a newer version is out."),
         ("Load now", "l loads an installed map or gametype, once the server lists it. Whether a server picks up new "
                      "content without a restart is up to the server, so installing never loads anything by itself."),
+        ("Updates", "Every few minutes oni-rcon asks Forge what changed among what you've installed. A new version "
+                    "gets a toast and ▲. A withdrawn one is flagged ⚠ in the F3 rotation and on F6, and turns the "
+                    "CONDITION amber until you acknowledge it: s to INSTALLED HERE, pick it, then a."),
         ("Your key", "Forge takes your own API key: k loads one. It's only ever sent to reclaimerforge.net, and it's "
                      "never shown on screen."),
         ("Thanks", CREDIT),
@@ -802,6 +809,7 @@ class Blacklist(Vertical):
 
 class ForgePane(Vertical):
     BINDINGS = [Binding("i", "app.forge('install')", "Install"), Binding("l", "app.forge('load')", "Load now"),
+                Binding("a", "app.forge('ack')", "Acknowledge"),
                 Binding("s", "app.forge('sort')", "Sort"), Binding("w", "app.forge('window')", "Window"),
                 Binding("n", "app.forge('more')", "More"), Binding("y", "app.forge('copy')", "Copy ID"),
                 Binding("k", "app.forge('key')", "Key")]
@@ -958,6 +966,7 @@ class OniApp(App):
         self.forge_next: dict | None = None  # the query for the catalog's next page
         self.forge_note, self.forge_stale, self.forge_opened = "", 0, False
         self.detail_want: str | None = None  # the listing whose versions are being fetched
+        self.watching, self.watch_said = False, ""  # a look at the changes feed under way; the last fault told
         self.frame, self.lit = 0, set()  # lit: cards mid-pulse
         self.stations = [Station(s, s.name or s.where, index=i) for i, s in enumerate(servers)]
         self.by_rcon: dict[Rcon, Station] = {}
@@ -1044,8 +1053,8 @@ class OniApp(App):
                     with ForgePane():
                         with Horizontal(id="forge-bar"):
                             yield Input(id="forge-q", placeholder="search the catalog   ·   Enter to search")
-                            yield Select([(x.upper(), x) for x in SORTS], value="trending", allow_blank=False,
-                                         id="forge-sort")
+                            yield Select([(x.upper() if x != "installed" else "INSTALLED HERE", x) for x in VIEWS],
+                                         value="trending", allow_blank=False, id="forge-sort")
                             yield Select([(x.upper(), x) for x in WINDOWS], value="7d", allow_blank=False,
                                          id="forge-window")
                         with Horizontal(id="forge-main"):
@@ -1056,6 +1065,7 @@ class OniApp(App):
                                 with Grid(id="forge-actions"):
                                     yield Button("INSTALL  i", id="fg-install", variant="primary", compact=True)
                                     yield Button("LOAD NOW  l", id="fg-load", compact=True)
+                                    yield Button("ACKNOWLEDGE  a", id="fg-ack", variant="warning", compact=True)
                                     yield Button("KEY  k", id="fg-key", compact=True)
                                     yield Button("MORE  n", id="fg-more", compact=True)
                                 with Collapsible(title="RAW DATA", id="forge-raw-box"):
@@ -1116,6 +1126,8 @@ class OniApp(App):
         self.set_interval(3, self.poll_fast)
         self.set_interval(1, self.poll_slow)
         self.set_interval(0.15, self.animate_cards)
+        self.set_interval(self.fsetup.poll, self.forge_watch)
+        self.set_timer(5, self.forge_watch)  # once soon after start, for what changed while the console was closed
         self.paint_all()
         if self.intro:
             self.push_screen(Boot())
@@ -1421,10 +1433,11 @@ class OniApp(App):
         return sum(st.alerts for st in self.stations)
 
     def condition(self) -> tuple[str, str]:
-        """RED while an alert is unseen and for a moment after any; AMBER while a station is down; else GREEN."""
+        """RED while an alert is unseen and for a moment after any; AMBER while a station is down or something
+        installed from Forge has been withdrawn and nobody has acknowledged it; else GREEN."""
         if self.unseen or time.monotonic() - self.alert_at < 15:
             return "RED", RED
-        if not all(st.online for st in self.stations):
+        if not all(st.online for st in self.stations) or self.fstate.alarms():
             return "AMBER", AMBER
         return "GREEN", GREEN
 
@@ -1719,13 +1732,16 @@ class OniApp(App):
             self.query_one(f"#op-{op}", Button).disabled = off
         self.paint_theatre()
         here = str(s.get("map") or "").lower().replace(" ", "_")
+        pulled = {n: e for lid, e in self.fstate.installed(st.server.where).items() if self.fstate.is_withdrawn(lid)
+                  for n in refs_of(e)}  # withdrawn from Forge, and still in this rotation: flagged
         rows, marked = [], False
         for i, e in enumerate(st.data.get("nextmap", {}).get("rotation") or [], 1):
             mp, md = str(pick(e, "map", "base_map", default="?")), str(pick(e, "mode", "game", default="?"))
             now = not marked and mp.lower().replace(" ", "_") == here
             marked |= now
             style = AMBER if now else ""
-            rows.append((str(i), [Text("▶" if now else str(i), style), Text(mp, style), Text(md, style)]))
+            flag = lambda v: Text(v, style) + (Text("  ⚠ WITHDRAWN", RED) if norm(v) in pulled else Text())
+            rows.append((str(i), [Text("▶" if now else str(i), style), flag(mp), flag(md)]))
         self.query_one("#rotation", Roster).fill(rows)
 
     def paint_theatre(self) -> None:
@@ -2204,6 +2220,10 @@ class OniApp(App):
 
     async def _forge_load(self, more: bool, fresh: bool) -> None:
         sort, window = self.query_one("#forge-sort", Select).value, self.query_one("#forge-window", Select).value
+        if sort == "installed":  # nothing to ask Forge: it's what forge-state.json says is here
+            self.forge_next, self.forge_note, self.forge_stale = None, "", 0
+            self.paint_forge()
+            return
         self.forge_note = "Fetching more of the catalog…" if more else "Fetching the catalog…"
         self.paint_forge()
         try:
@@ -2232,14 +2252,15 @@ class OniApp(App):
 
     def forge_mark(self, x: dict) -> Text:
         """The catalog's first column: where this listing stands on the selected server. ◉ installed, ▲ a newer
-        version is out."""
-        have = self.fstate.installed(self.cur.server.where).get(listing_id(x))
+        version is out, ⚠ withdrawn from Forge."""
+        lid = listing_id(x)
+        have = self.fstate.installed(self.cur.server.where).get(lid)
         if not have:
             return Text("")
-        latest = latest_of(x)
-        if latest and version_id(latest) and version_id(latest) != have.get("version_id"):
-            return Text("▲", AMBER)
-        return Text("◉", GREEN)
+        if self.fstate.is_withdrawn(lid):
+            return Text("⚠", RED)
+        latest = version_id(latest_of(x) or {}) or version_id(self.fstate.latest(lid) or {})
+        return Text("▲", AMBER) if latest and latest != have.get("version_id") else Text("◉", GREEN)
 
     def paint_forge(self) -> None:
         """The catalog table, the readout on its border, and the file of the selected listing. What's typed in the
@@ -2247,6 +2268,8 @@ class OniApp(App):
         query = self.query_one("#forge-q", Input).value.strip().lower()
         sort, window = self.query_one("#forge-sort", Select).value, self.query_one("#forge-window", Select).value
         version = self.cur.rcon.info.get("version") if self.cur.rcon else None
+        if sort == "installed":
+            self.listings = self.installed_listings()
         rows, self.listing_rows = [], {}
         for x in self.listings:
             lid, kind, author, recent = listing_id(x), kind_of(x), author_of(x), recent_of(x, window)
@@ -2259,7 +2282,8 @@ class OniApp(App):
                                str(recent) if recent is not None else "—", fit_text(x, version)]))
         t = self.query_one("#listings", Roster)
         t.fill(rows)
-        t.border_title = Text(f"FORGE CATALOG · {len(rows)}{'+' if self.forge_next else ''} · {str(sort).upper()}"
+        t.border_title = Text(f"INSTALLED ON {self.cur.label.upper()} · {len(rows)}" if sort == "installed" else
+                              f"FORGE CATALOG · {len(rows)}{'+' if self.forge_next else ''} · {str(sort).upper()}"
                               + (f" {window}" if sort in WINDOWED else ""))
         sub = [SITE]
         if self.forge and self.forge_stale:
@@ -2296,6 +2320,7 @@ class OniApp(App):
                                                           if self.forge and self.fsetup.source else "")
         versions.display = self.query_one("#forge-raw-box").display = bool(self.forge and x)
         self.query_one("#fg-install").display = self.query_one("#fg-load").display = bool(self.forge and x)
+        self.query_one("#fg-ack").display = False
         if not self.forge:
             box.update(self.no_key_text())
             return
@@ -2329,8 +2354,8 @@ class OniApp(App):
                      ("RUNS ON", Text(compat_words(spec), WHITE) + (Text(
                          f"   {'✓' if ok else '✕' if ok is False else '?'} v{version} on {self.cur.label}",
                          GREEN if ok else RED if ok is False else DIM) if version else Text())),
-                     ("STATUS", Text(withdrawn.upper() or "—", RED if withdrawn in ("withdrawn", "removed")
-                                     else GREEN if withdrawn else DIM)),
+                     ("STATUS", Text("WITHDRAWN", RED) if self.fstate.is_withdrawn(lid) and not withdrawn else
+                      Text(withdrawn.upper() or "—", RED if withdrawn in WITHDRAWN else GREEN if withdrawn else DIM)),
                      ("UPDATED", day(pick(x, "updated_at", "updated"))),
                      ("LATEST", version_label(latest_of(x)) if latest_of(x) else "—"),
                      ("ON THIS SERVER", self.installed_words(x))]:
@@ -2342,7 +2367,8 @@ class OniApp(App):
             parts += [Text(), Text(x["_error"], RED)]
         box.update(Group(*parts))
         have = self.fstate.installed(self.cur.server.where).get(lid)
-        self.query_one("#fg-install", Button).disabled = is_withdrawn(x)
+        self.query_one("#fg-install", Button).disabled = is_withdrawn(x) or self.fstate.is_withdrawn(lid)
+        self.query_one("#fg-ack").display = lid in self.fstate.alarms()
         self.query_one("#fg-load", Button).disabled = not have or kind_of(have) == "playlist"
         vs = versions_of(x)
         versions.display = bool(vs)
@@ -2381,10 +2407,12 @@ class OniApp(App):
     async def action_forge(self, what: str) -> None:
         if what == "key":
             await self.forge_key()
+        elif what == "ack":
+            await self.forge_ack()
         elif what in ("sort", "window"):
             sel = self.query_one(f"#forge-{what}", Select)
             if not sel.disabled:
-                opts = SORTS if what == "sort" else WINDOWS
+                opts = VIEWS if what == "sort" else WINDOWS
                 sel.value = opts[(opts.index(sel.value) + 1) % len(opts)]
         elif what == "install":
             await self.forge_install()
@@ -2573,3 +2601,129 @@ class OniApp(App):
         if await self.push_screen_wait(Confirm(f"LOAD  {' / '.join(args)}", "Ends the current game for everyone on "
                                                "this station; the new one starts in the next lobby.")):
             self.send(st, "load", *args, then=("status", "nextmap"))
+
+    # --- forge: the update and withdrawal watcher -------------------------------------------------------------
+    def installed_listings(self) -> list[dict]:
+        """What forge-state.json says is on the selected server, shaped like catalog listings."""
+        out = []
+        for lid, e in self.fstate.installed(self.cur.server.where).items():
+            out.append({"id": lid, "title": e.get("title"), "kind": e.get("kind"), "author": e.get("author"),
+                        "owner_id": e.get("owner_id"), "status": "withdrawn" if self.fstate.is_withdrawn(lid) else "",
+                        "latest_version": self.fstate.latest(lid) or {"id": e.get("version_id"),
+                                                                      "version": e.get("version")}})
+        return sorted(out, key=lambda x: title_of(x).lower())
+
+    def forge_watch(self) -> None:
+        """Every forge_poll seconds: what changed on Forge among what's installed. One look at a time, and none at
+        all with nothing installed, so an idle console spends nothing of the key's quota."""
+        if self.is_running and self.forge and self.fstate.ids() and not self.watching:
+            self.watching = True
+            self.run_worker(self._forge_watch(), group="forge-watch", exit_on_error=False)
+
+    async def _forge_watch(self) -> None:
+        try:
+            ids, since = self.fstate.ids(), self.fstate.since() or utc_iso()
+            try:
+                changes, as_of = await self.forge.changes(before(since, OVERLAP))
+            except ForgeError as e:
+                if e.status in (401, 403, 502) and self.watch_said != e.short:  # one toast, not one per look
+                    self.watch_said = e.short
+                    self.notify(f"Checking for updates: {e.text}", title=f"FORGE · {e.short}", severity="warning",
+                                timeout=15)
+                return
+            self.watch_said, keys = "", []
+            for c in changes:  # the feed is read back over OVERLAP each time: what was handled before is skipped
+                lid = str(pick(c, "listing_id", "id", default=""))
+                key = "|".join(str(pick(c, k, default="")) for k in ("version_id", "change", "updated_at"))
+                if not lid or self.fstate.seen(f"{lid}|{key}") or f"{lid}|{key}" in keys:
+                    continue
+                keys.append(f"{lid}|{key}")
+                if lid in ids:
+                    self.forge_news(lid, c)
+            self.fstate.saw(keys, as_of)
+            if time.time() - (num(self.fstate.data.get("reconciled")) or 0) > RECONCILE:
+                await self.forge_reconcile(ids)
+        finally:
+            self.watching = False
+
+    def forge_news(self, lid: str, c: dict) -> None:
+        change = str(pick(c, "change", "type", "event", "kind", default="")).lower()
+        status = str(pick(c, "status", default="")).lower()
+        if "withdraw" in change or status in WITHDRAWN:
+            self.forge_withdrawn(lid)
+            return
+        if "restor" in change or status in ("published", "live"):
+            self.forge_restored(lid)
+        if vid := str(pick(c, "version_id", "latest_version_id", default="")):
+            self.forge_newer(lid, vid, str(pick(c, "version", "version_label", default="")))
+
+    async def forge_reconcile(self, ids: set) -> None:
+        """Each installed listing fetched whole, a little apart, for anything the changes feed missed. Background
+        requests stop short of the key's last few each minute, and a fault leaves the rest for next time. A listing
+        that can't be found isn't called withdrawn: only Forge saying so counts."""
+        for lid in sorted(ids):
+            try:
+                d = await self.forge.listing(lid, background=True)
+            except ForgeError as e:
+                if e.status in (0, 401, 403, 429, 503):
+                    return
+                continue
+            if is_withdrawn(d):
+                self.forge_withdrawn(lid)
+            else:
+                self.forge_restored(lid)
+                if (latest := latest_of(d)) and version_id(latest):
+                    self.forge_newer(lid, version_id(latest), version_label(latest))
+            await asyncio.sleep(0.5)
+        self.fstate.data["reconciled"] = time.time()
+        self.fstate.save()
+
+    def stations_at(self, servers: list[str]) -> list[Station]:
+        return [st for st in self.stations if st.server.where in servers]
+
+    def forge_newer(self, lid: str, vid: str, label: str = "") -> None:
+        behind = self.fstate.newer(lid, vid, label)
+        if behind and self.is_running:
+            e = self.fstate.entry(lid) or {}
+            names = ", ".join(st.label for st in self.stations_at(behind)) or "your servers"
+            title = e.get("title") or lid
+            self.notify(f"{title} {'v' + label if label else 'has a new version'} is out on ReclaimerForge. {names} "
+                        f"run{'s' * (len(behind) == 1)} v{e.get('version', '?')}. Install it from F6 (▲).",
+                        title="FORGE · UPDATE", timeout=20)
+            self.log_event(None, {"event": "forge", "text": f"UPDATE  {title} {('v' + label) if label else ''}".strip()})
+        if self.is_running:
+            self.paint_forge()
+
+    def forge_withdrawn(self, lid: str) -> None:
+        if self.fstate.withdraw(lid) and self.is_running:
+            e = self.fstate.entry(lid) or {}
+            title = e.get("title") or lid
+            names = ", ".join(st.label for st in self.stations_at(self.fstate.where(lid))) or "your servers"
+            self.notify(f"{title} was withdrawn from ReclaimerForge. It's still installed on {names}, and flagged ⚠ in "
+                        f"the rotation on F3. Once you've dealt with it, acknowledge it on F6 (a).",
+                        title="FORGE · WITHDRAWN", severity="warning", timeout=30)
+            self.log_event(None, {"event": "forge", "text": f"WITHDRAWN  {title}  on {names}"})
+        if self.is_running:
+            self.paint_masthead()
+            self.paint_ops()
+            self.paint_forge()
+
+    def forge_restored(self, lid: str) -> None:
+        if self.fstate.is_withdrawn(lid):
+            self.fstate.restore(lid)
+            if self.is_running:
+                self.paint_masthead()
+                self.paint_ops()
+
+    async def forge_ack(self) -> None:
+        x = self.cur_listing()
+        lid = listing_id(x) if x else ""
+        if lid not in self.fstate.alarms():
+            self.notify("Nothing here to acknowledge.", severity="warning")
+            return
+        if await self.push_screen_wait(Confirm(
+                f"ACKNOWLEDGE  {title_of(x)}", "It stays installed, and stays flagged as withdrawn in the rotation. "
+                "CONDITION goes back to green once nothing else needs you.", verb="ACKNOWLEDGE", danger=False)):
+            self.fstate.acknowledge(lid)
+            self.paint_masthead()
+            self.paint_forge()

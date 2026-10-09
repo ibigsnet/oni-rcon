@@ -11,6 +11,7 @@ by = "your-name"              # who you are in the server's admin log (default: 
 #   $ONI_RCON_FORGE_KEY
 # Keep these above the first [table]. No key: the console works as ever, just without Forge.
 forge_api_key_env = "RECLAIMERFORGE_KEY"
+forge_poll = 600              # seconds between checks for updates to what you've installed (60 at least)
 
 [defaults]                    # applies to every [[server]] unless it sets the key itself
 ssh = "admin@game-box"        # tunnel through this SSH destination (key auth; leave out for direct)

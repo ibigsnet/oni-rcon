@@ -482,3 +482,60 @@ def test_install_and_load_from_f6(fake, tmp_path):
             assert not isinstance(app.screen, Confirm)  # no content_dir: nothing to confirm, a toast says why
             assert any("content_dir" in n.message for n in app._notifications)
     asyncio.run(go())
+
+
+# --- the watcher --------------------------------------------------------------------------------------------------
+def test_updates_and_withdrawals(fake, tmp_path):
+    from oni_rcon.app import Confirm
+    from oni_rcon.demo import serve_fakes
+    from oni_rcon.forgefake import slug
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: all(st.online and "nextmap" in st.data for st in app.stations))
+            st = app.stations[0]
+            x = next(x for x in fake.listings.values() if x["kind"] == "map")
+            lid, v = x["id"], x["latest_version"]
+            entry = {"listing_id": lid, "version_id": v["id"], "version": v["version"], "title": x["title"],
+                     "kind": "map", "reference": slug(x["title"]), "files": [], "installed_at": forge.utc_iso()}
+            app.fstate.record([st.server.where], entry)
+            toasts = lambda title: [n for n in app._notifications if n.title == title]
+
+            await app._forge_watch()
+            await pilot.pause()  # nothing new: no toast, and the installed listings were fetched once whole
+            assert not toasts("FORGE · UPDATE") and app.fstate.data.get("reconciled")
+            new = fake.publish(lid)
+            await app._forge_watch()
+            await pilot.pause()
+            assert len(toasts("FORGE · UPDATE")) == 1 and "Slayer" in toasts("FORGE · UPDATE")[0].message
+            await app._forge_watch()
+            await pilot.pause()  # the feed is read back over the overlap: the same change isn't news twice
+            assert len(toasts("FORGE · UPDATE")) == 1 and app.fstate.latest(lid)["id"] == new
+            pages = [q for path, q, _ in fake.seen if path == "/api/listings/changes"]
+            assert forge.parse_iso(pages[-1]["updated_since"]) < forge.parse_iso(app.fstate.data["since"])
+
+            assert app.condition()[0] == "GREEN"
+            fake.withdraw(lid)
+            await app._forge_watch()
+            await pilot.pause()
+            assert app.condition()[0] == "AMBER" and app.fstate.alarms() == [lid]
+            assert len(toasts("FORGE · WITHDRAWN")) == 1
+            st.data["nextmap"] = {"rotation": [{"map": "guardian", "mode": "Slayer"},
+                                               {"map": entry["reference"], "mode": "Slayer"}]}
+            app.paint_ops()
+            rot = app.query_one("#rotation")
+            assert "WITHDRAWN" in str(rot.get_row_at(1)[1]) and "WITHDRAWN" not in str(rot.get_row_at(0)[1])
+
+            await pilot.press("f6")
+            app.query_one("#forge-sort").value = "installed"  # what's on this server, from forge-state.json
+            t = app.query_one("#listings")
+            assert await until(pilot, lambda: t.row_count == 1 and "⚠" in str(t.get_row_at(0)[0]))
+            t.focus()
+            await pilot.press("a")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: not app.fstate.alarms())
+            assert app.condition()[0] == "GREEN" and app.fstate.is_withdrawn(lid)  # still flagged, just seen
+    asyncio.run(go())

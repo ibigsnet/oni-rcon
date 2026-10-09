@@ -40,8 +40,8 @@ Also:
   listing each one, and the console stays light enough for a web terminal: a card is redrawn only when what it shows
   changes, status polls are spread over 15 seconds instead of fired together, and servers sign in 8 at a time with
   jittered reconnects.
-- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down; RED when a call for an
-  admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
+- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down or something you installed
+  from Forge has been withdrawn; RED when a call for an admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
   or the Intercepts tab.
 - **Broadcast to one server or all.** `Ctrl+B`. `@all` messages and commands go out 4 servers at a time, each reply
   goes in the command log on one line, and a tally closes it ("79 stations · 77 ok · 2 no reply yet"). A command that
@@ -215,6 +215,17 @@ MAP+MODE on F3. If it isn't listed yet, the server needs a restart, which oni-rc
 installed like anything else, but using it means pointing the server's playlist setting at it, and oni-rcon doesn't
 edit `dedicated.toml`. What's installed where is kept in `forge-state.json`, beside the config file.
 
+### Updates and withdrawals
+
+While anything is installed, oni-rcon reads Forge's changes feed every 10 minutes (`forge_poll = 600`, in seconds, at
+the top of the config; 60 at least) and, every 6 hours, fetches each installed listing whole for anything the feed
+missed. Those background checks stop well short of the key's quota, so browsing F6 always has room.
+
+- **A new version** gets one toast, says which servers run the old one, and marks the listing `▲` on F6.
+- **A withdrawn listing** gets a toast and a line in the feed, is flagged `⚠ WITHDRAWN` in the F3 rotation wherever
+  it's in it, and turns the masthead to **CONDITION AMBER** until you acknowledge it: on F6, `s` to INSTALLED HERE,
+  pick it, then `a`. It stays installed and flagged; what to do about it is yours to decide.
+
 oni-rcon keeps to the key's quota (120 requests a minute): it reads the rate-limit headers on every reply, waits out a
 `429` for as long as Forge asks, and keeps recent replies so it doesn't ask twice. Those replies and every verified
 download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` elsewhere.
@@ -249,7 +260,7 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
-| `i l s w n k y` | on the Forge catalog: install, load now, sort, time window, next page, API key, copy listing ID |
+| `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (or INSTALLED HERE), time window, next page, API key, copy listing ID |
 | any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good) |
 | `Ctrl+Q` | quit |
 
