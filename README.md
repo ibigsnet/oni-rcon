@@ -226,6 +226,15 @@ missed. Those background checks stop well short of the key's quota, so browsing 
   it's in it, and turns the masthead to **CONDITION AMBER** until you acknowledge it: on F6, `s` to INSTALLED HERE,
   pick it, then `a`. It stays installed and flagged; what to do about it is yours to decide.
 
+### Rounds played
+
+oni-rcon counts the rounds each server plays, per map and gametype, from the status it already polls, and keeps them
+in `rounds.jsonl` beside the config file, one line per round: when it started and ended, the peak and final player
+counts, the Forge listing it came from if any, and whether the console saw it from the start. Nothing is sent
+anywhere. ReclaimerForge plans to take "verified host feedback" one day, and the lines are shaped for that; there's
+no endpoint for it yet, so for now they're yours to read. No player names, IDs or addresses go in, and servers are
+named as they name themselves, never by address or SSH login. Like medals, it counts only what the console saw.
+
 oni-rcon keeps to the key's quota (120 requests a minute): it reads the rate-limit headers on every reply, waits out a
 `429` for as long as Forge asks, and keeps recent replies so it doesn't ask twice. Those replies and every verified
 download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` elsewhere.

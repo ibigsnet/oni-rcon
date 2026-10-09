@@ -45,6 +45,7 @@ from .install import InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
+from .stats import Rounds
 
 ONI = Theme(name="oni", primary=AMBER, secondary=CYAN, accent=CYAN, warning="#E8A33D", error=RED, success=GREEN,
             foreground=WHITE, background=INK, surface="#0B0F14", panel="#111821", dark=True)
@@ -961,6 +962,7 @@ class OniApp(App):
         self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
         self.fsetup = forge or ForgeSetup()
         self.fstate = ForgeState(self.fsetup.state_dir / "forge-state.json" if self.fsetup.state_dir else None)
+        self.rounds = Rounds(self.fsetup.state_dir / "rounds.jsonl" if self.fsetup.state_dir else None)
         self.forge: ForgeClient | None = None
         self.listings: list[dict] = []  # the catalog as fetched, in its order
         self.listing_rows: dict[str, dict] = {}
@@ -1214,6 +1216,8 @@ class OniApp(App):
                         title=f"{st.label} · SIGN-IN REFUSED", severity="error", timeout=20)
         elif state == "offline" and st.prev == "online":
             self.log_event(st, {"event": "uplink", "text": f"LOST  {detail}"})
+        if state != "online":
+            self.rounds.lost(st.server.where)  # how a round ends unseen isn't known: it isn't counted
         retry = re.search(r"retry in (\d+)s", detail) if state == "offline" else None
         st.retry_at = time.monotonic() + int(retry[1]) if retry else 0.0
         if state != "connecting":
@@ -1287,6 +1291,9 @@ class OniApp(App):
             if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
                 if w == "status" and r["data"].get("phase") != st.data.get("status", {}).get("phase"):
                     st.medals.new_game()
+                if w == "status":  # rounds played, kept locally: see stats.py
+                    where = st.server.where
+                    self.rounds.observe(where, r["data"], lambda m, g, where=where: self.fstate.playing(where, m, g))
                 st.data[w] = r["data"]
         self.paint(st, what)
 

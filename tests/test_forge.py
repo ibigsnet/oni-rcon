@@ -567,3 +567,35 @@ def test_now_playing_credit(fake, tmp_path):
             text = plain(app.query_one("#sitrep"))
             assert "FORGE" in text and "Pit Stop  by Kestrel  v1.2" in text
     asyncio.run(go())
+
+
+# --- rounds played ------------------------------------------------------------------------------------------------
+def test_rounds_are_counted_locally(tmp_path, monkeypatch):
+    from oni_rcon import stats
+    from oni_rcon.stats import Rounds
+    clock = [1000.0]
+    monkeypatch.setattr(stats.time, "monotonic", lambda: clock[0])
+    r = Rounds(tmp_path / "rounds.jsonl", client="oni-rcon/test")
+    s1 = "127.0.0.1:11774 via ssh admin@game-box"
+    credit = lambda m, g: [{"listing_id": "l1", "version_id": "v1", "kind": "map"}] if m == "pit_stop" else []
+    status = lambda phase, mp="pit_stop", md="Slayer", n=8: {"phase": phase, "map": mp, "mode": md, "players": n,
+                                                              "address": "203.0.113.7:1", "name": "Probe | Slayer"}
+
+    assert r.observe(s1, status("in_game"), credit) is None  # joined partway through: not seen whole
+    clock[0] += 300
+    r.observe(s1, status("in_game", n=12), credit)
+    done = r.observe(s1, status("post_game", n=10), credit)
+    assert done["seconds"] == 300 and done["players_peak"] == 12 and done["players_end"] == 10
+    assert done["seen_whole"] is False and done["forge"] == [{"listing_id": "l1", "version_id": "v1", "kind": "map"}]
+
+    r.observe(s1, status("in_game", mp="guardian"), credit)  # seen to start this time
+    done = r.observe(s1, status("in_game", mp="narrows"), credit)  # a map change ends one round, starts the next
+    assert done["map"] == "guardian" and done["seen_whole"] is True and done["forge"] == []
+    r.lost(s1)  # the link dropped: the narrows round's end is unknown, so it isn't counted
+    assert r.observe(s1, status("post_game"), credit) is None
+
+    lines = [json.loads(x) for x in (tmp_path / "rounds.jsonl").read_text().splitlines()]
+    assert len(lines) == 2 and len({x["id"] for x in lines}) == 2 and lines[0]["schema"] == 1
+    assert lines[0]["client"] == "oni-rcon/test" and lines[0]["server"] == "Probe | Slayer"  # its public name
+    assert not any(k in json.dumps(lines) for k in ("203.0.113", "admin@", "11774"))  # never how it's reached
+    assert Rounds(None).observe("s", status("in_game")) is None  # nowhere to keep them: counted in memory only
