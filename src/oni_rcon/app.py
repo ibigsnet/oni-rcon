@@ -38,9 +38,10 @@ from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, 
                   spark, split_bar)
 from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
-                    Unverified, author_of, before, compat_of, compatible, is_withdrawn, kind_of, latest_of,
-                    listing_id, owner_of, ratings_of, recent_of, scrub, scrub_data, title_of, utc_iso, version_id,
-                    version_label, versions_of)
+                    Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
+                    compatible, favourite_listings, history_since, id_list, is_withdrawn, kind_of, latest_of,
+                    listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, title_of, usable, utc_iso,
+                    version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .install import InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .rcon import Rcon, Tunnel
@@ -71,7 +72,9 @@ SPIN = "◐◓◑◒"
 PANE_FOCUS = {"assets": "#players", "intercepts": "#feed", "operations": "#op-load", "blacklist": "#bans",
               "console": "#cmd", "forge": "#listings"}
 TABS = ("f1", "f2", "f3", "f4", "f5", "f6")
-VIEWS = [*SORTS, "installed"]  # the catalog's orders, then what's on the selected server, from forge-state.json
+# the catalog's orders, what Forge is featuring, then what's on the selected server, from forge-state.json
+VIEWS = [*SORTS, "favourites", "installed"]
+VIEW_NAMES = {"installed": "INSTALLED HERE"}
 OVERLAP = 300  # seconds the changes feed is read back over each time: a change written late isn't missed
 RECONCILE = 6 * 3600  # seconds between fetching every installed listing whole, for whatever the feed missed
 KIND_COLOR = {"map": CYAN, "gametype": AMBER, "playlist": GOLD}
@@ -140,8 +143,9 @@ TIPS = {
     "fg-ack": "Say you've seen that it was withdrawn: CONDITION goes back to GREEN. It stays flagged.  Key: a",
     "fg-key": "Load your own ReclaimerForge API key.  Key: k",
     "fg-more": "Fetch the next page of the catalog.  Key: n",
-    "forge-sort": "How the catalog is ordered, or what's installed on this server.  Key: s",
-    "forge-window": "The stretch of time trending, rising and downloads count over.  Key: w",
+    "forge-sort": "How the catalog is ordered, what ReclaimerForge is featuring (favourites), or what's installed "
+                  "on this server.  Key: s",
+    "forge-window": "The stretch of time trending and rising count over.  Key: w",
     "raw": "Also print every event the servers push, as raw data.",
 }
 TAB_TIPS = {"assets": "Players on the selected server: click one for their file and actions.",
@@ -656,15 +660,19 @@ GUIDE = [
     ]),
     ("F6  FORGE  ·  community content", [
         ("The catalog", "Maps, gametypes and playlists from ReclaimerForge. s changes the order, w the time window "
-                        "it counts over, and / searches. Pick one for its file and its versions; n fetches more."),
+                        "trending and rising count over, and / searches. Pick one for its file and its versions; n "
+                        "fetches more. RATING is thumbs up and down. FAVOURITES is what ReclaimerForge is featuring "
+                        "now, for as long as each collection runs."),
         ("Install", "i puts the selected version on this server. Every file is checked against Forge's manifest "
                     "before it's copied into the server's content_dir and again once it's there, and replacing "
                     "anything asks first. ◉ marks what's installed here; ▲ means a newer version is out."),
         ("Load now", "l loads an installed map or gametype, once the server lists it. Whether a server picks up new "
                      "content without a restart is up to the server, so installing never loads anything by itself."),
         ("Updates", "Every few minutes oni-rcon asks Forge what changed among what you've installed. A new version "
-                    "gets a toast and ▲. A withdrawn one is flagged ⚠ in the F3 rotation and on F6, and turns the "
-                    "CONDITION amber until you acknowledge it: s to INSTALLED HERE, pick it, then a."),
+                    "gets a toast and ▲. A withdrawn listing, or the very version you installed, is flagged ⚠ in the "
+                    "F3 rotation and on F6, and turns the CONDITION amber until you acknowledge it: s to INSTALLED "
+                    "HERE, pick it, then a. Installing a newer version clears a withdrawn version's flag. A withdrawn "
+                    "version is never picked to install."),
         ("Your key", "Forge takes your own API key: k loads one. It's only ever sent to reclaimerforge.net, and it's "
                      "never shown on screen."),
         ("Thanks", CREDIT),
@@ -819,12 +827,13 @@ class ForgePane(Vertical):
 
 
 def rating_text(x: dict) -> Text:
-    up, down, avg, count = ratings_of(x)
-    if avg is not None:
-        return Text(f"★{avg:.1f}", GOLD) + Text(f" ({count})" if count else "", DIM)
-    if up is not None:
-        return Text(f"▲{up}", GREEN) + Text(f" ▼{down or 0}", DIM)
-    return Text(f"{count} rated", DIM) if count else Text("—", DIM)
+    """Thumbs up and down. The star rating is archived by Forge and no longer shown."""
+    up, down, total = votes_of(x)
+    if up is None and down is None:
+        return Text("—", DIM)
+    if not total:
+        return Text("no votes", DIM)
+    return Text(f"▲{up or 0:,}", GREEN) + Text(f" ▼{down or 0:,}", DIM)
 
 
 def fit_text(x: dict, version) -> Text:
@@ -969,6 +978,8 @@ class OniApp(App):
         self.details: dict[str, dict] = {}  # listing id -> the listing with its versions, once fetched
         self.forge_next: dict | None = None  # the query for the catalog's next page
         self.forge_note, self.forge_stale, self.forge_opened = "", 0, False
+        self.featured: dict[str, str] = {}  # listing id -> the favourites collection it's in, while that view is up
+        self.versions_for = ""  # the listing whose versions the table shows: its cursor starts on the newest installable
         self.detail_want: str | None = None  # the listing whose versions are being fetched
         self.watching, self.watch_said = False, ""  # a look at the changes feed under way; the last fault told
         self.frame, self.lit = 0, set()  # lit: cards mid-pulse
@@ -1057,7 +1068,7 @@ class OniApp(App):
                     with ForgePane():
                         with Horizontal(id="forge-bar"):
                             yield Input(id="forge-q", placeholder="search the catalog   ·   Enter to search")
-                            yield Select([(x.upper() if x != "installed" else "INSTALLED HERE", x) for x in VIEWS],
+                            yield Select([(VIEW_NAMES.get(x, x.upper()), x) for x in VIEWS],
                                          value="trending", allow_blank=False, id="forge-sort")
                             yield Select([(x.upper(), x) for x in WINDOWS], value="7d", allow_blank=False,
                                          id="forge-window")
@@ -1743,7 +1754,7 @@ class OniApp(App):
             self.query_one(f"#op-{op}", Button).disabled = off
         self.paint_theatre()
         here = str(s.get("map") or "").lower().replace(" ", "_")
-        pulled = {n: e for lid, e in self.fstate.installed(st.server.where).items() if self.fstate.is_withdrawn(lid)
+        pulled = {n: e for lid, e in self.fstate.installed(st.server.where).items() if self.fstate.pulled(lid, e)
                   for n in refs_of(e)}  # withdrawn from Forge, and still in this rotation: flagged
         rows, marked = [], False
         for i, e in enumerate(st.data.get("nextmap", {}).get("rotation") or [], 1):
@@ -2230,7 +2241,7 @@ class OniApp(App):
             except ValueError as e:
                 s.error = str(e)
         self.listings, self.details, self.forge_next, self.forge_note, self.forge_stale = [], {}, None, "", 0
-        self.detail_want = None
+        self.detail_want, self.featured = None, {}
 
     def forge_load(self, more: bool = False, fresh: bool = False) -> None:
         if self.forge and (self.forge_next or not more):
@@ -2242,6 +2253,10 @@ class OniApp(App):
             self.forge_next, self.forge_note, self.forge_stale = None, "", 0
             self.paint_forge()
             return
+        if sort == "favourites":  # one unpaginated feed, not searched: the box narrows what's here as it's typed
+            await self._forge_favourites(fresh)
+            return
+        self.featured = {}
         self.forge_note = "Fetching more of the catalog…" if more else "Fetching the catalog…"
         self.paint_forge()
         try:
@@ -2255,6 +2270,20 @@ class OniApp(App):
             had = {listing_id(x) for x in self.listings} if more else set()
             self.listings = (self.listings if more else []) + [x for x in items if listing_id(x) not in had]
             self.forge_next, self.forge_note, self.forge_stale = nxt, "", reply.get("_stale", 0)
+        if self.is_running:
+            self.paint_forge()
+
+    async def _forge_favourites(self, fresh: bool) -> None:
+        self.forge_next, self.forge_note = None, "Fetching the favourites…"
+        self.paint_forge()
+        try:
+            collections, reply = await self.forge.favourites(fresh=fresh)
+        except ForgeError as e:
+            self.forge_note, self.listings, self.featured = e.text, [], {}
+        else:
+            self.listings, self.featured = favourite_listings(collections)
+            self.forge_note = "" if self.listings else "ReclaimerForge isn't featuring anything right now."
+            self.forge_stale = reply.get("_stale", 0)
         if self.is_running:
             self.paint_forge()
 
@@ -2275,7 +2304,7 @@ class OniApp(App):
         have = self.fstate.installed(self.cur.server.where).get(lid)
         if not have:
             return Text("")
-        if self.fstate.is_withdrawn(lid):
+        if self.fstate.pulled(lid, have):
             return Text("⚠", RED)
         latest = version_id(latest_of(x) or {}) or version_id(self.fstate.latest(lid) or {})
         return Text("▲", AMBER) if latest and latest != have.get("version_id") else Text("◉", GREEN)
@@ -2321,9 +2350,12 @@ class OniApp(App):
         t = Text.assemble(("FORGE UPLINK  //  ", AMBER), ("NO KEY\n\n", RED),
                           ("ReclaimerForge is the community catalog of forged maps, gametypes and playlists. Browsing "
                            "and installing from it takes your own API key.\n\n", WHITE),
-                          ("1  ", AMBER), ("Make a key on reclaimerforge.net with the catalog:read and assets:download "
-                                          "scopes, and nothing more.\n", WHITE),
-                          ("2  ", AMBER), ("Press k, or KEY below, to load it for this session. Or set "
+                          ("1  ", AMBER), ("Your ReclaimerForge account needs the Developer role (an Owner gives it) "
+                                          "and a verified email.\n", WHITE),
+                          ("2  ", AMBER), ("In Developer tools on reclaimerforge.net, make a key for oni-rcon alone, "
+                                          "with the catalog:read and assets:download scopes and nothing more. It's "
+                                          "shown when you make it, so save it then.\n", WHITE),
+                          ("3  ", AMBER), ("Press k, or KEY below, to load it for this session. Or set "
                                           "$ONI_RCON_FORGE_KEY, or forge_api_key_env in the config file, and start "
                                           "oni-rcon again.\n", WHITE))
         if self.fsetup.error:
@@ -2358,47 +2390,73 @@ class OniApp(App):
         base = pick(x, "base_map", "map", "base_mode", "base_gametype")
         base_word = "from" if kind == "gametype" else "on"
         withdrawn = str(pick(x, "status", "state", default="")).lower()
+        views, began = views_of(x), history_since(x, window)
+        rows = [("TITLE", Text(title_of(x), AMBER)),
+                ("TYPE", Text(kind.upper() or "—", KIND_COLOR.get(kind, DIM))
+                 + Text(f"  {base_word} {str(base).replace('_', ' ')}" if base else "", DIM)),
+                ("AUTHOR" if len(authors_of(x)) < 2 else "AUTHORS", Text(author_of(x) or "—", WHITE)
+                 + Text(f"  {owner}" if owner else "", DIM)),
+                ("RATING", rating_text(x)),
+                ("DOWNLOADS", Text(f"{total:,}" if total is not None else "—", WHITE)
+                 + Text(f"  ·  {recent} in {window if window in WINDOWS else 'recent days'}"
+                        if recent is not None else "", DIM)
+                 + Text(f"  (counted from {day(began.isoformat())}, when Forge began keeping history)"
+                        if recent is not None and began else "", DIM))]
+        if views is not None:
+            rows.append(("VIEWS", Text(f"{views:,}", WHITE)))
+        if note := self.featured.get(lid):
+            rows.append(("FEATURED", Text(note, GOLD)))
+        rows += [("RUNS ON", Text(compat_words(spec), WHITE) + (Text(
+                     f"   {'✓' if ok else '✕' if ok is False else '?'} v{version} on {self.cur.label}",
+                     GREEN if ok else RED if ok is False else DIM) if version else Text())),
+                 ("STATUS", self.status_words(lid, withdrawn)),
+                 ("UPDATED", day(pick(x, "updated_at", "updated"))),
+                 ("LATEST", version_label(latest_of(x)) if latest_of(x) else "—"),
+                 ("ON THIS SERVER", self.installed_words(x))]
         g = Table.grid(padding=(0, 2))
         g.add_column(style=DIM, no_wrap=True)
         g.add_column()
-        for a, b in [("TITLE", Text(title_of(x), AMBER)),
-                     ("TYPE", Text(kind.upper() or "—", KIND_COLOR.get(kind, DIM))
-                      + Text(f"  {base_word} {str(base).replace('_', ' ')}" if base else "", DIM)),
-                     ("AUTHOR", Text(author_of(x) or "—", WHITE) + Text(f"  {owner}" if owner else "", DIM)),
-                     ("RATING", rating_text(x)),
-                     ("DOWNLOADS", Text(f"{total:,}" if total is not None else "—", WHITE)
-                      + Text(f"  ·  {recent} in {window if window in WINDOWS else 'recent days'}"
-                             if recent is not None else "", DIM)),
-                     ("RUNS ON", Text(compat_words(spec), WHITE) + (Text(
-                         f"   {'✓' if ok else '✕' if ok is False else '?'} v{version} on {self.cur.label}",
-                         GREEN if ok else RED if ok is False else DIM) if version else Text())),
-                     ("STATUS", Text("WITHDRAWN", RED) if self.fstate.is_withdrawn(lid) and not withdrawn else
-                      Text(withdrawn.upper() or "—", RED if withdrawn in WITHDRAWN else GREEN if withdrawn else DIM)),
-                     ("UPDATED", day(pick(x, "updated_at", "updated"))),
-                     ("LATEST", version_label(latest_of(x)) if latest_of(x) else "—"),
-                     ("ON THIS SERVER", self.installed_words(x))]:
+        for a, b in rows:
             g.add_row(a, b if isinstance(b, Text) else Text(str(b)))
         parts = [Text("CATALOG ENTRY", AMBER) + Text(f"  //  {lid}", DIM), Text(), g]
-        if summary := pick(x, "summary", "description", "short_description"):
-            parts += [Text(), Text(str(summary), WHITE)]
+        if blurb := blurb_of(x):  # Markdown on the website; plain text here, so nothing in it does anything
+            parts += [Text(), Text(shorten(blurb, 700), WHITE)]
         if x.get("_error"):
             parts += [Text(), Text(x["_error"], RED)]
         box.update(Group(*parts))
         have = self.fstate.installed(self.cur.server.where).get(lid)
-        self.query_one("#fg-install", Button).disabled = is_withdrawn(x) or self.fstate.is_withdrawn(lid)
+        self.query_one("#fg-install", Button).disabled = is_withdrawn(x) or self.fstate.blocks(lid)
         self.query_one("#fg-ack").display = lid in self.fstate.alarms()
         self.query_one("#fg-load", Button).disabled = not have or kind_of(have) == "playlist"
         vs = versions_of(x)
         versions.display = bool(vs)
-        versions.fill([(version_id(v), [self.version_mark(x, v), Text(version_label(v), WHITE),
+        versions.fill([(version_id(v), [self.version_mark(x, v), Text(version_label(v), WHITE if usable(v) else DIM),
                                         day(pick(v, "created_at", "published_at", "released_at")),
-                                        Text(str(pick(v, "notes", "changelog", "summary", default="")), DIM)])
+                                        Text(shorten(notes_of(v), 90), DIM)])
                        for v in vs])
+        if vs and self.versions_for != lid:  # a listing newly shown: its cursor starts on the newest to install
+            self.versions_for = lid
+            if (first := version_id(latest_of(x) or {})) in versions.ids:
+                versions.move_cursor(row=versions.ids.index(first))
         self.query_one("#listing-raw", Static).update(JSON.from_data(scrub_data(x)))
 
     def version_mark(self, x: dict, v: dict) -> Text:
+        """◉ the version installed here, ✕ one its author has withdrawn (it can't be installed), ⚠ when that is the
+        one installed here."""
         have = self.fstate.installed(self.cur.server.where).get(listing_id(x))
-        return Text("◉", GREEN) if have and have.get("version_id") == version_id(v) else Text("")
+        here = bool(have) and have.get("version_id") == version_id(v)
+        if not usable(v):
+            return Text("⚠" if here else "✕", RED)
+        return Text("◉", GREEN) if here else Text("")
+
+    def status_words(self, lid: str, status: str) -> Text:
+        """What the listing says about itself, and what oni-rcon has heard about the one installed here."""
+        words = Text(status.upper() or "—", RED if status in WITHDRAWN else GREEN if status else DIM)
+        if self.fstate.blocks(lid) and not status:
+            words = Text("WITHDRAWN", RED)
+        elif self.fstate.is_withdrawn(lid) and not self.fstate.blocks(lid):
+            words += Text("  ·  installed version withdrawn", AMBER)
+        return words
 
     @on(DataTable.RowHighlighted, "#listings")
     def _listing_row(self, _) -> None:
@@ -2451,8 +2509,9 @@ class OniApp(App):
                                                        (f"Yes: save it in {cfg.name}, readable only by you", "yes")]))
         f = await self.push_screen_wait(Form(
             "FORGE API KEY", fields, verb="LOAD", required=("key",), secret=("key",),
-            note="Make one on reclaimerforge.net with the catalog:read and assets:download scopes, and nothing more. "
-                 "oni-rcon only ever sends it to reclaimerforge.net, and never shows it."))
+            note="Make one in Developer tools on reclaimerforge.net, for oni-rcon alone, with the catalog:read and "
+                 "assets:download scopes and nothing more. oni-rcon only ever sends it to reclaimerforge.net, and "
+                 "never shows it."))
         if not f:
             return
         # out of the form's result at once: a crash report lists what's in scope, and a Secret never prints
@@ -2516,6 +2575,10 @@ class OniApp(App):
         if not v or not version_id(v):
             self.notify("It has no version to install yet.", title=f"FORGE · {title}", severity="warning")
             return
+        if not usable(v):
+            self.notify("Its author has withdrawn that version, so it isn't installed. Pick another.",
+                        title=f"FORGE · {title}", severity="warning")
+            return
         vid, label = version_id(v), version_label(v)
         try:
             manifest = await self.forge.manifest(lid, vid)
@@ -2574,6 +2637,8 @@ class OniApp(App):
         if not self.is_running:
             return
         self.log_cmd(Text(f"  ✓ {len(files)} file{'s' * (len(files) != 1)} checked and in place", GREEN))
+        self.paint_masthead()
+        self.paint_ops()
         self.paint_forge()
         for o in sharing:  # does the server list it yet?
             if o.online:
@@ -2627,7 +2692,7 @@ class OniApp(App):
         out = []
         for lid, e in self.fstate.installed(self.cur.server.where).items():
             out.append({"id": lid, "title": e.get("title"), "kind": e.get("kind"), "author": e.get("author"),
-                        "owner_id": e.get("owner_id"), "status": "withdrawn" if self.fstate.is_withdrawn(lid) else "",
+                        "owner_id": e.get("owner_id"), "status": "withdrawn" if self.fstate.blocks(lid) else "",
                         "latest_version": self.fstate.latest(lid) or {"id": e.get("version_id"),
                                                                       "version": e.get("version")}})
         return sorted(out, key=lambda x: title_of(x).lower())
@@ -2652,29 +2717,78 @@ class OniApp(App):
                 return
             self.watch_said, keys = "", []
             for c in changes:  # the feed is read back over OVERLAP each time: what was handled before is skipped
-                lid = str(pick(c, "listing_id", "id", default=""))
-                key = "|".join(str(pick(c, k, default="")) for k in ("version_id", "change", "updated_at"))
-                if not lid or self.fstate.seen(f"{lid}|{key}") or f"{lid}|{key}" in keys:
+                lid, key = change_listing(c), change_key(c)
+                if not lid or self.fstate.seen(key) or key in keys:
                     continue
-                keys.append(f"{lid}|{key}")
+                keys.append(key)
                 if lid in ids:
-                    self.forge_news(lid, c)
+                    await self.forge_news(lid, c)
             self.fstate.saw(keys, as_of)
             if time.time() - (num(self.fstate.data.get("reconciled")) or 0) > RECONCILE:
                 await self.forge_reconcile(ids)
         finally:
             self.watching = False
 
-    def forge_news(self, lid: str, c: dict) -> None:
+    async def forge_news(self, lid: str, c: dict) -> None:
+        """One change to something installed. The feed names the versions it published and withdrew; the older
+        spelling, a change word and a version_id, still reads. A version withdrawn while its listing stays up only
+        matters if it's the one installed."""
         change = str(pick(c, "change", "type", "event", "kind", default="")).lower()
         status = str(pick(c, "status", default="")).lower()
+        self.forge.forget(lid)  # what's kept of it, here and in the cache, is old now
+        self.forge_refresh(lid)
         if "withdraw" in change or status in WITHDRAWN:
             self.forge_withdrawn(lid)
             return
         if "restor" in change or status in ("published", "live"):
             self.forge_restored(lid)
-        if vid := str(pick(c, "version_id", "latest_version_id", default="")):
-            self.forge_newer(lid, vid, str(pick(c, "version", "version_label", default="")))
+        installed = self.fstate.versions(lid)
+        if gone := installed & set(id_list(c.get("withdrawn_version_ids"))):
+            self.forge_withdrawn(lid, sorted(gone)[0])
+        fresh = id_list(c.get("published_version_ids"))
+        if (old := str(pick(c, "version_id", "latest_version_id", default=""))) and old not in fresh:
+            fresh.append(old)
+        if any(v not in installed for v in fresh):
+            await self.forge_check(lid, fresh[-1])
+
+    def forge_refresh(self, lid: str) -> None:
+        """Forget the file held for a listing, so F6 asks for it again the next time it's shown."""
+        self.details.pop(lid, None)
+        if self.detail_want == lid:
+            self.detail_want = None
+
+    async def forge_check(self, lid: str, named: str = "") -> None:
+        """An installed listing fetched whole, which is what the feed's entry is checked against: the order of
+        versions and which are withdrawn are the listing's to say. If it can't be fetched, `named`, a version the
+        feed said was published, is all there is to go on."""
+        try:
+            d = await self.forge.listing(lid, background=True)
+        except ForgeError as e:
+            if named and e.status != 404:
+                self.forge_newer(lid, named)
+            return
+        self.forge_judge(lid, d)
+
+    def forge_judge(self, lid: str, d: dict) -> None:
+        """What a whole listing says about what's installed: withdrawn, or the installed version withdrawn, or a
+        newer one out. After a version is withdrawn the newest left may be older than the one installed, and that
+        isn't an update."""
+        self.forge_refresh(lid)
+        if is_withdrawn(d):
+            self.forge_withdrawn(lid)
+            return
+        self.forge_restored(lid)
+        installed = self.fstate.versions(lid)
+        for v in versions_of(d):
+            if is_withdrawn(v) and version_id(v) in installed:
+                self.forge_withdrawn(lid, version_id(v))
+                break
+        latest = latest_of(d)
+        if latest and version_id(latest):
+            dates = {version_id(v): when_of(v) for v in versions_of(d)}
+            if (lw := when_of(latest)) and installed and all(dates.get(i) and dates[i] >= lw for i in installed):
+                return  # nothing newer than what's installed
+            self.forge_newer(lid, version_id(latest), version_label(latest))
 
     async def forge_reconcile(self, ids: set) -> None:
         """Each installed listing fetched whole, a little apart, for anything the changes feed missed. Background
@@ -2687,12 +2801,7 @@ class OniApp(App):
                 if e.status in (0, 401, 403, 429, 503):
                     return
                 continue
-            if is_withdrawn(d):
-                self.forge_withdrawn(lid)
-            else:
-                self.forge_restored(lid)
-                if (latest := latest_of(d)) and version_id(latest):
-                    self.forge_newer(lid, version_id(latest), version_label(latest))
+            self.forge_judge(lid, d)
             await asyncio.sleep(0.5)
         self.fstate.data["reconciled"] = time.time()
         self.fstate.save()
@@ -2713,15 +2822,25 @@ class OniApp(App):
         if self.is_running:
             self.paint_forge()
 
-    def forge_withdrawn(self, lid: str) -> None:
-        if self.fstate.withdraw(lid) and self.is_running:
+    def forge_withdrawn(self, lid: str, vid: str = "") -> None:
+        """The listing, or with `vid` just the installed version of it, was withdrawn from Forge."""
+        if self.fstate.withdraw(lid, vid) and self.is_running:
             e = self.fstate.entry(lid) or {}
             title = e.get("title") or lid
-            names = ", ".join(st.label for st in self.stations_at(self.fstate.where(lid))) or "your servers"
-            self.notify(f"{title} was withdrawn from ReclaimerForge. It's still installed on {names}, and flagged ⚠ in "
-                        f"the rotation on F3. Once you've dealt with it, acknowledge it on F6 (a).",
-                        title="FORGE · WITHDRAWN", severity="warning", timeout=30)
-            self.log_event(None, {"event": "forge", "text": f"WITHDRAWN  {title}  on {names}"})
+            names = ", ".join(st.label for st in self.stations_at(self.fstate.where(lid, vid))) or "your servers"
+            if vid:
+                label = next((x.get("version") for es in self.fstate.data["servers"].values()
+                              for x in es.values() if x.get("version_id") == vid), "") or "?"
+                self.notify(f"{title} v{label} was withdrawn from ReclaimerForge by its author. It's still installed "
+                            f"on {names}, and flagged ⚠ in the rotation on F3. Install another version from F6, or "
+                            f"acknowledge it there (a).", title="FORGE · VERSION WITHDRAWN", severity="warning",
+                            timeout=30)
+                self.log_event(None, {"event": "forge", "text": f"WITHDRAWN  {title} v{label}  on {names}"})
+            else:
+                self.notify(f"{title} was withdrawn from ReclaimerForge. It's still installed on {names}, and flagged "
+                            f"⚠ in the rotation on F3. Once you've dealt with it, acknowledge it on F6 (a).",
+                            title="FORGE · WITHDRAWN", severity="warning", timeout=30)
+                self.log_event(None, {"event": "forge", "text": f"WITHDRAWN  {title}  on {names}"})
         if self.is_running:
             self.paint_masthead()
             self.paint_ops()

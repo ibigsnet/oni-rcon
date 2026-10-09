@@ -86,6 +86,10 @@ def test_the_catalog(fake, tmp_path):
         assert path == "/api/listings" and q == {"page_size": "10", "sort": "trending", "window": "7d"}
         await fc.listings("latest", "24h")
         assert "window" not in fake.seen[-1][1]  # a window only goes with the sorts it means something for
+        await fc.listings("downloads", "24h")
+        assert "window" not in fake.seen[-1][1]  # downloads is lifetime; only trending and rising take one
+        await fc.listings("rising", "24h")
+        assert fake.seen[-1][1]["window"] == "24h"
         found, _, _ = await fc.listings("latest", query="grif")
         assert [x["title"] for x in found] == ["Grifball"]
         detail = await fc.listing(found[0]["id"])
@@ -219,7 +223,8 @@ def test_the_changes_feed_pages_from_as_of(fake, tmp_path):
         fake.withdraw(lids[0])
         since = forge.before(forge.utc_iso(), 60)
         changes, as_of = await fc.changes(since, page_size=2)
-        assert len(changes) == 6 and changes[-1]["change"] == "withdrawn"
+        assert len(changes) == 6 and changes[-1]["status"] == "withdrawn"
+        assert changes[0]["published_version_ids"] and changes[-1]["withdrawn_version_ids"]  # the documented fields
         pages = [q for path, q, _ in fake.seen if path == "/api/listings/changes"]
         assert len(pages) == 3 and "updated_before" not in pages[0]
         assert all(q["updated_before"] == as_of and q["updated_since"] == since for q in pages[1:])
@@ -235,7 +240,128 @@ def test_reading_listings_tolerantly():
     x = {"name": "Pit", "type": "Game_Type", "owner": {"id": "u1", "display_name": "Juno"},
          "ratings": {"positive": 9, "negative": 1}, "recent_downloads": {"7d": 40}, "state": "Withdrawn"}
     assert (forge.title_of(x), forge.kind_of(x), forge.owner_of(x), forge.author_of(x)) == ("Pit", "gametype", "u1", "Juno")
-    assert forge.ratings_of(x) == (9, 1, None, 10) and forge.recent_of(x, "7d") == 40 and forge.is_withdrawn(x)
+    assert forge.votes_of(x) == (9, 1, 10) and forge.recent_of(x, "7d") == 40 and forge.is_withdrawn(x)
+
+
+def days_ago(n: int) -> str:
+    return forge.utc_iso(forge.datetime.now(forge.timezone.utc) - forge.timedelta(days=n))
+
+
+def test_reading_the_documented_listing():
+    x = {"id": "l1", "title": "Pit Stop", "owner_id": "u1", "upvote_count": 12, "downvote_count": 3, "vote_count": 15,
+         "view_count": 900, "rating_average": 4.5, "rating_count": 99,
+         "authors": [{"user_id": "u2", "username": "lowgrav", "avatar_url": "/a.png", "is_owner": False},
+                     {"user_id": "u1", "username": "Kestrel", "avatar_url": "/b.png", "is_owner": True}],
+         "metrics": {"recent_downloads": {"24h": 2, "7d": 30}, "download_history_started_at": days_ago(10)}}
+    assert forge.votes_of(x) == (12, 3, 15)  # thumbs; the archived stars are ignored
+    assert forge.votes_of({"rating_average": 4.5, "rating_count": 9}) == (None, None, None)
+    assert forge.votes_of({"upvote_count": 4, "downvote_count": 1}) == (4, 1, 5)
+    assert forge.votes_of({"upvote_count": 0, "downvote_count": 0, "vote_count": 0}) == (0, 0, 0)  # unrated
+    assert forge.author_of(x) == "Kestrel, lowgrav" and forge.owner_of(x) == "u1"  # the owner first
+    assert [a["user_id"] for a in forge.authors_of(x)] == ["u1", "u2"]
+    assert forge.owner_of({"authors": x["authors"]}) == "u1" and forge.author_of({"author": "Juno"}) == "Juno"
+    assert forge.views_of(x) == 900 and forge.views_of({"metrics": {"view_count": 4}}) == 4 and forge.views_of({}) is None
+    assert forge.recent_of(x, "24h") == 2 and forge.recent_of(x, "7d") == 30  # in the metrics object
+    assert forge.recent_of({"metrics": {"downloads_30d": 7}}, "30d") == 7 and forge.recent_of({}, "7d") is None
+
+    # recent windows fill from deployment onward: a window that reaches back past it is only partly counted
+    began = {"metrics": {"download_history_started_at": days_ago(3)}}
+    assert forge.history_since(began, "30d") and forge.history_since(began, "7d")
+    assert forge.history_since(began, "24h") is None  # history covers all of the last day
+    assert forge.history_since(x, "30d") and forge.history_since(x, "7d") is None  # began ten days ago
+    assert forge.history_since({}, "7d") is None and forge.history_since(began, "") is None
+
+
+def test_versions_by_their_documented_fields():
+    old = {"id": "v1", "version_label": "1.0", "created_at": "2026-09-01T00:00:00Z", "release_notes": "First **cut**."}
+    new = {"id": "v2", "version_label": "1.1", "created_at": "2026-10-01T00:00:00Z", "status": "published"}
+    gone = {"id": "v3", "version_label": "1.2", "created_at": "2026-10-05T00:00:00Z", "status": "withdrawn"}
+    draft = {"id": "v4", "version_label": "1.3", "created_at": "2026-10-06T00:00:00Z", "status": "draft"}
+    assert forge.version_label(old) == "1.0" and forge.version_label({"id": "v9", "version": "0.5"}) == "0.5"
+    assert forge.notes_of(old) == "First **cut**." and forge.notes_of({"notes": "older spelling"}) == "older spelling"
+    assert [forge.usable(v) for v in (old, new, gone, draft)] == [True, True, False, False]
+    assert not forge.usable({"id": "v5", "withdrawn_at": "2026-10-02T00:00:00Z"}) and not forge.usable("v1")
+
+    # a withdrawn version is never the latest, even when the listing's own latest_version still names it
+    x = {"versions": [gone, draft, new, old], "latest_version": {"id": "v3", "version_label": "1.2"}}
+    assert forge.latest_of(x)["id"] == "v2"
+    assert forge.latest_of({**x, "latest_version": "v3"})["id"] == "v2"
+    assert forge.latest_of({**x, "latest_version": "v1"})["id"] == "v1"  # one that is out stays as the listing says
+    assert forge.latest_of({"versions": [gone]}) is None and forge.latest_of({}) is None
+    assert forge.latest_of({"versions": [old, new]})["id"] == "v2"  # oldest first, as Forge may list them: by date
+    assert forge.latest_of({"versions": [{"id": "a"}, {"id": "b"}]})["id"] == "a"  # undated: as listed
+
+    # compatibility is set per version: the listing's own wins, else the newest version's
+    assert forge.compat_of({"versions": [{**new, "compatibility": ">=0.9.6"}, old]}) == ">=0.9.6"
+    assert forge.compat_of({"compatibility": "0.9.5", "versions": [{**new, "compatibility": ">=0.9.6"}]}) == "0.9.5"
+    assert forge.compat_of({"versions": [new]}) is None and compatible(forge.compat_of({}), "0.9.7") is None
+
+
+def test_text_from_strangers_is_safe_on_a_terminal():
+    nasty = "Pit\x1b]0;owned\x07 Stop\x1b[2J\u202eGnp.exe\x9b31m\x00"
+    assert forge.tidy(nasty) == "Pit]0;owned Stop[2JGnp.exe31m"  # no escape, bell, C1, null or bidi override left
+    assert forge.tidy("a\n\n  b\tc\r\nd") == "a b c d" and forge.tidy(None) == "" and forge.tidy(7) == "7"
+    assert forge.tidy("**one**\r\n\r\n- two\x1b[0m\n", lines=True) == "**one**\n\n- two[0m"  # Markdown's breaks stay
+    assert forge.title_of({"title": nasty}) == "Pit]0;owned Stop[2JGnp.exe31m" and forge.title_of({}) == "untitled"
+    assert "\x1b" not in forge.author_of({"authors": [{"user_id": "u", "username": "Ev\x1bil", "is_owner": True}]})
+    assert "\x1b" not in forge.blurb_of({"description": "x\x1b[31m red"}) and "\x1b" not in forge.version_label(
+        {"id": "v", "version_label": "1\x1b[0m"})
+    assert forge.shorten("abcdef", 4) == "abc…" and forge.shorten("abc", 4) == "abc"
+    # the Markdown itself is left as written: shown as text, never rendered
+    assert forge.blurb_of({"description": "[x](javascript:alert(1)) <b>hi</b>"}) == "[x](javascript:alert(1)) <b>hi</b>"
+
+
+def test_favourites_feed(fake, tmp_path):
+    async def go():
+        fc, _ = client(fake, tmp_path)
+        cols, reply = await fc.favourites()
+        assert [c["title"] for c in cols] == ["Staff picks"]  # the scheduled and the expired ones are off
+        assert fake.seen[-1][0] == "/api/favourites" and reply["items"] and fc.quota.remaining == 119
+        listings, notes = forge.favourite_listings(cols)
+        assert [x["id"] for x in listings] == cols[0]["listing_ids"] and len(listings) == 4
+        assert notes[listings[0]["id"]].startswith("Staff picks, until 20")  # which collection, and until when
+        sent = fc.sent
+        await fc.favourites()
+        assert fc.sent == sent  # fresh in the cache
+        await fc.favourites(fresh=True)
+        assert fc.sent == sent + 1
+
+        fake.fail["/api/favourites"] = [503] * 4  # Forge down: the last copy, flagged, and still only what is on now
+        old, reply = await fc.favourites(fresh=True)
+        assert old and reply["_stale"] >= 0
+        fake.collections[0]["ends_at"] = forge.utc_iso(forge.datetime.now(forge.timezone.utc)
+                                                       + forge.timedelta(seconds=2))
+        assert (await fc.favourites(fresh=True))[0]  # still on, and now cached with that end
+        await asyncio.sleep(2.2)
+        fake.fail["/api/favourites"] = [503] * 4
+        cols, reply = await fc.favourites(fresh=True)
+        assert cols == [] and reply["_stale"] >= 0  # the old copy's collection has ended since: not shown
+    asyncio.run(go())
+
+
+def test_a_favourites_collection_is_on_from_its_start_until_its_end():
+    t = forge.parse_iso("2026-10-09T12:00:00Z")
+    at = lambda starts, ends: forge.active_now({"starts_at": starts, "ends_at": ends}, t)
+    assert at("2026-10-09T12:00:00Z", "2026-10-10T00:00:00Z")  # the start is inclusive
+    assert not at("2026-10-09T00:00:00Z", "2026-10-09T12:00:00Z")  # the end is exclusive
+    assert not at("2026-10-09T12:00:01Z", None) and at(None, "2026-10-09T12:00:01Z") and at(None, None)
+    a = {"id": "a", "title": "Picks", "ends_at": "2026-10-12T00:00:00Z", "listing_ids": ["2", "1", "9"],
+         "listings": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}
+    b = {"id": "b", "title": "More", "listing_ids": ["3", "2"], "listings": [{"id": "2"}, {"id": "3"}]}
+    got, notes = forge.favourite_listings([a, b])
+    assert [x["id"] for x in got] == ["2", "1", "3"]  # each collection's order, the unlisted last, no repeats
+    assert notes == {"2": "Picks, until 2026-10-12", "1": "Picks, until 2026-10-12", "3": "Picks, until 2026-10-12"}
+    assert forge.favourite_listings([]) == ([], {})
+
+
+def test_changes_are_told_apart_by_ids():
+    legacy = {"listing_id": "l1", "version_id": "v1", "change": "version_published", "updated_at": "T1"}
+    assert forge.change_key(legacy) == "l1|v1|version_published|T1"  # the form already kept in forge-state.json
+    new = {"listing_id": "l1", "updated_at": "T1", "published_version_ids": ["v2", "v1"], "withdrawn_version_ids": ["v0"]}
+    assert forge.change_key(new) == "l1|||T1|pub:v1,v2|wd:v0" and forge.change_listing({"id": "l9"}) == "l9"
+    assert forge.change_key({**new, "published_version_ids": ["v1", "v2", "v2"]}) == forge.change_key(new)
+    assert forge.change_key({**new, "withdrawn_version_ids": []}) != forge.change_key(new)
+    assert forge.id_list(["a", 2, True, "", None, "a", {"x": 1}]) == ["a", "2"] and forge.id_list("a") == []
 
 
 def test_compatibility():
@@ -292,7 +418,8 @@ def test_the_forge_tab(fake, tmp_path):
             assert await until(pilot, lambda: app.query_one("#versions").row_count > 0)  # the file brings versions
             file = plain(app.query_one("#listing"))
             x = app.cur_listing()
-            assert "CATALOG ENTRY" in file and x["title"] in file and x["author"] in file and "on Slayer" in file
+            assert "CATALOG ENTRY" in file and x["title"] in file and forge.author_of(x) in file and "on Slayer" in file
+            assert "VIEWS" in file and "▲" in file or "no votes" in file  # thumbs, not stars
             assert "Section Three" in plain(app.query_one("#forge-credit"))
 
             app.query_one("#listings").focus()
@@ -314,6 +441,137 @@ def test_the_forge_tab(fake, tmp_path):
             assert await until(pilot, lambda: "OFFLINE COPY" in str(t.border_subtitle), 200)
             seen = "\n".join(line.text for line in app.query_one("#console-log").lines)
             assert KEY not in seen and KEY not in plain(app.query_one("#listing-raw"))
+    asyncio.run(go())
+
+
+def test_the_favourites_view(fake, tmp_path):
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: app.cur.online)
+            await pilot.press("f6")
+            t = app.query_one("#listings")
+            assert await until(pilot, lambda: t.row_count == 25)
+            app.query_one("#forge-sort").value = "favourites"
+            assert await until(pilot, lambda: t.row_count == 4)  # the one collection that is on
+            assert "FAVOURITES" in str(t.border_title) and app.query_one("#forge-window").disabled
+            assert [lid for lid in t.ids] == fake.collections[0]["listing_ids"]  # in the collection's order
+            assert await until(pilot, lambda: "FEATURED" in plain(app.query_one("#listing")))
+            assert "Staff picks, until" in plain(app.query_one("#listing"))
+            assert app.query_one("#fg-more").disabled  # one unpaginated feed: no next page
+
+            app.query_one("#forge-sort").value = "latest"  # an ordinary order forgets what was featured
+            assert await until(pilot, lambda: t.row_count == 25 and "FEATURED" not in plain(app.query_one("#listing")))
+
+            fake.collections.clear()
+            app.query_one("#forge-sort").value = "favourites"
+            await pilot.press("ctrl+r")  # past the cache: nothing is featured now, and it says so
+            assert await until(pilot, lambda: t.row_count == 0
+                               and "isn't featuring anything" in plain(app.query_one("#listing")))
+    asyncio.run(go())
+
+
+def test_a_withdrawn_version_flags_only_the_install_it_was(fake, tmp_path):
+    from oni_rcon.app import Confirm
+    from oni_rcon.config import Server
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        shared = tmp_path / "content"
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)], content_dirs=[shared])
+        app = forge_app(ports, fake, tmp_path, servers=[Server(port=ports[0], password="demo", content_dir=str(shared))])
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: app.cur.online and "nextmap" in app.cur.data)
+            st = app.cur
+            x = next(x for x in fake.listings.values() if x["kind"] == "map")
+            lid = x["id"]
+            fake.publish(lid)  # at least two versions, so the newest can be withdrawn and the listing stay up
+            first = fake.listings[lid]["latest_version"]
+            entry = {"listing_id": lid, "version_id": first["id"], "version": first["version_label"], "title": x["title"],
+                     "kind": "map", "reference": "r", "files": [], "installed_at": forge.utc_iso()}
+            app.fstate.record([st.server.where], entry)
+            toasts = lambda title: [n for n in app._notifications if n.title == title]
+
+            await app._forge_watch()
+            await pilot.pause()  # it published what is installed already: not news
+            assert not toasts("FORGE · UPDATE") and app.condition()[0] == "GREEN"
+
+            fake.withdraw_version(lid, first["id"])  # the installed one, by its author; the listing stays up
+            older = fake.listings[lid]["latest_version"]["id"]
+            assert older != first["id"]
+            await app._forge_watch()
+            await pilot.pause()
+            assert len(toasts("FORGE · VERSION WITHDRAWN")) == 1 and not toasts("FORGE · UPDATE")  # a step back isn't news
+            assert not toasts("FORGE · WITHDRAWN") and app.condition()[0] == "AMBER"
+            assert app.fstate.is_withdrawn(lid) and not app.fstate.blocks(lid) and app.fstate.alarms() == [lid]
+            await app._forge_watch()
+            await pilot.pause()  # the feed is read back over the overlap: the same change isn't news twice
+            assert len(toasts("FORGE · VERSION WITHDRAWN")) == 1
+
+            await pilot.press("f6")  # the listing: ⚠ in the catalog, the version struck, the install still open
+            q = app.query_one("#forge-q")
+            q.value = x["title"]
+            await pilot.press("slash")
+            await pilot.press("enter")
+            t, vt = app.query_one("#listings"), app.query_one("#versions")
+            assert await until(pilot, lambda: lid in t.ids and lid in app.details and vt.row_count > 1)
+            t.move_cursor(row=t.ids.index(lid))
+            assert await until(pilot, lambda: first["id"] in vt.ids)
+            assert "⚠" in str(t.get_row_at(t.ids.index(lid))[0])
+            assert "⚠" in str(vt.get_row_at(vt.ids.index(first["id"]))[0])  # withdrawn, and it's the one here
+            assert vt.selected == older  # the cursor starts on the newest version that can be installed
+            assert not app.query_one("#fg-install").disabled and "installed version withdrawn" in plain(
+                app.query_one("#listing"))
+
+            vt.move_cursor(row=vt.ids.index(first["id"]))  # but the withdrawn one itself is never installed
+            vt.focus()
+            await pilot.press("i")
+            await pilot.pause(0.3)
+            assert not isinstance(app.screen, Confirm)
+            assert any("withdrawn that version" in n.message for n in app._notifications)
+            vt.move_cursor(row=vt.ids.index(older))
+            await pilot.press("i")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            app.screen.query_one("#no").press()
+
+            new = fake.publish(lid)
+            await app._forge_watch()
+            await pilot.pause()
+            assert len(toasts("FORGE · UPDATE")) == 1 and app.fstate.latest(lid)["id"] == new
+            app.fstate.record([st.server.where], {**entry, "version_id": new, "version": "9.9"})  # installed: it's clear
+            assert not app.fstate.is_withdrawn(lid) and app.condition()[0] == "GREEN"
+    asyncio.run(go())
+
+
+def test_the_older_change_spelling_still_reads(fake, tmp_path):
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: app.cur.online and "nextmap" in app.cur.data)
+            x = next(x for x in fake.listings.values() if x["kind"] == "map")
+            lid, v = x["id"], x["latest_version"]
+            app.fstate.record([app.cur.server.where], {
+                "listing_id": lid, "version_id": v["id"], "version": v["version_label"], "title": x["title"],
+                "kind": "map", "reference": "r", "files": [], "installed_at": forge.utc_iso()})
+            new = fake.publish(lid)
+            fake.changes[-1] = {"listing_id": lid, "version_id": new, "version": "1.9", "change": "version_published",
+                                "updated_at": fake.changes[-1]["updated_at"]}
+            await app._forge_watch()
+            await pilot.pause()
+            assert [n for n in app._notifications if n.title == "FORGE · UPDATE"] and app.fstate.latest(lid)["id"] == new
+
+            fake.fail["/api/listings/" + lid] = [503] * 8  # the listing can't be fetched: the feed's word is enough
+            newer = fake.publish(lid)
+            fake.changes[-1] = {"listing_id": lid, "published_version_ids": [newer], "updated_at": fake.changes[-1]["updated_at"]}
+            await app._forge_watch()
+            await pilot.pause()
+            assert app.fstate.latest(lid)["id"] == newer
     asyncio.run(go())
 
 
@@ -375,6 +633,34 @@ def test_the_state_file(tmp_path):
     assert refs_of(entry) == {"pit_stop"}
     p.write_text("{not json")
     assert not ForgeState(p).ids() and (tmp_path / "forge-state.json.unreadable").exists()  # kept aside, not lost
+
+
+def test_a_withdrawn_version_in_the_state_file(tmp_path):
+    from oni_rcon.state import ForgeState
+    p = tmp_path / "forge-state.json"
+    st = ForgeState(p)
+    one = {"listing_id": "l1", "version_id": "v1", "version": "1.0", "title": "Pit", "files": []}
+    st.record(["a:1", "b:2"], one)
+    st.record(["c:3"], {**one, "version_id": "v0", "version": "0.9"})  # an older one elsewhere
+
+    assert st.withdraw("l1", "v1") and not st.withdraw("l1", "v1")  # news once
+    assert st.is_withdrawn("l1") and not st.blocks("l1")  # the listing is up: a newer version can be installed
+    assert st.pulled("l1", one) and not st.pulled("l1", st.installed("c:3")["l1"])  # only the install that was it
+    assert st.alarms() == ["l1"] and st.where("l1", "v1") == ["a:1", "b:2"] and st.where("l1") == ["a:1", "b:2", "c:3"]
+    st.restore("l1")  # the listing coming back says nothing about one withdrawn version
+    assert st.is_withdrawn("l1") and ForgeState(p).is_withdrawn("l1")
+    st.acknowledge("l1")
+    assert st.alarms() == []
+
+    st.record(["a:1"], {**one, "version_id": "v2", "version": "1.1"})  # one server moves on: b:2 still has it
+    assert st.is_withdrawn("l1")
+    st.record(["b:2"], {**one, "version_id": "v2", "version": "1.1"})  # the last one: the flag clears
+    assert not st.is_withdrawn("l1") and not ForgeState(p).is_withdrawn("l1")
+
+    assert st.withdraw("l1", "v2") and st.withdraw("l1")  # then the whole listing goes: that replaces it, as news
+    assert st.blocks("l1") and st.pulled("l1", st.installed("c:3")["l1"]) and not st.withdraw("l1")
+    st.restore("l1")
+    assert not st.is_withdrawn("l1")
 
 
 def install_files(fake, tmp_path, target):
@@ -498,7 +784,7 @@ def test_updates_and_withdrawals(fake, tmp_path):
             st = app.stations[0]
             x = next(x for x in fake.listings.values() if x["kind"] == "map")
             lid, v = x["id"], x["latest_version"]
-            entry = {"listing_id": lid, "version_id": v["id"], "version": v["version"], "title": x["title"],
+            entry = {"listing_id": lid, "version_id": v["id"], "version": v["version_label"], "title": x["title"],
                      "kind": "map", "reference": slug(x["title"]), "files": [], "installed_at": forge.utc_iso()}
             app.fstate.record([st.server.where], entry)
             toasts = lambda title: [n for n in app._notifications if n.title == title]

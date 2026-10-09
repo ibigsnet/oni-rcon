@@ -34,7 +34,8 @@ class ForgeState:
 
     The watcher's part: "since", the changes feed's last as_of; "seen", the changes already handled; "latest", the
     newest version known per listing; "told", the version each update toast was for, so a restart doesn't repeat
-    it; "withdrawn", {listing id: {"at", "acknowledged"}}; "reconciled", when the installed listings were last fetched whole."""
+    it; "withdrawn", {listing id: {"at", "acknowledged", "version_id"?}}, where a version_id means only that version was
+    withdrawn and its listing is still up; "reconciled", when the installed listings were last fetched whole."""
 
     def __init__(self, path: Path | None):
         self.path = path
@@ -62,10 +63,19 @@ class ForgeState:
         """An install, on every server that shares the content folder it went into."""
         for s in servers:
             self.data["servers"].setdefault(s, {})[entry["listing_id"]] = entry
+        w = self.data.get("withdrawn", {}).get(entry["listing_id"])
+        if w and w.get("version_id") and w["version_id"] not in self.versions(entry["listing_id"]):
+            del self.data["withdrawn"][entry["listing_id"]]  # the withdrawn version is gone from every server
         self.save()
 
-    def where(self, lid: str) -> list[str]:
-        return [s for s, entries in self.data["servers"].items() if lid in entries]
+    def versions(self, lid: str) -> set[str]:
+        """The versions of a listing installed anywhere."""
+        return {es[lid].get("version_id") for es in self.data["servers"].values() if lid in es} - {None, ""}
+
+    def where(self, lid: str, vid: str = "") -> list[str]:
+        """The servers a listing is installed on, or with `vid` the ones running that version of it."""
+        return [s for s, entries in self.data["servers"].items()
+                if lid in entries and (not vid or entries[lid].get("version_id") == vid)]
 
     def ids(self) -> set[str]:
         return {lid for entries in self.data["servers"].values() for lid in entries}
@@ -113,20 +123,35 @@ class ForgeState:
         self.save()
         return behind
 
-    def withdraw(self, lid: str) -> bool:
-        """True the first time a listing is heard to be withdrawn."""
-        if lid in self.data.setdefault("withdrawn", {}):
+    def withdraw(self, lid: str, vid: str = "") -> bool:
+        """True the first time a listing, or with `vid` just that version of it, is heard to be withdrawn. A whole
+        listing withdrawn after one of its versions replaces that, and is news again."""
+        w = self.data.setdefault("withdrawn", {})
+        if lid in w and not (w[lid].get("version_id") and not vid):
             return False
-        self.data["withdrawn"][lid] = {"at": utc_iso(), "acknowledged": False}
+        w[lid] = {"at": utc_iso(), "acknowledged": False, **({"version_id": vid} if vid else {})}
         self.save()
         return True
 
     def restore(self, lid: str) -> None:
-        if self.data.get("withdrawn", {}).pop(lid, None):
+        """The whole listing is back. A withdrawn version stays withdrawn: only installing another clears it."""
+        if lid in self.data.get("withdrawn", {}) and not self.data["withdrawn"][lid].get("version_id"):
+            del self.data["withdrawn"][lid]
             self.save()
 
     def is_withdrawn(self, lid: str) -> bool:
         return lid in self.data.get("withdrawn", {})
+
+    def blocks(self, lid: str) -> bool:
+        """Whether the whole listing is withdrawn, so nothing of it can be installed. When only a version is, a
+        newer one still can."""
+        w = self.data.get("withdrawn", {}).get(lid)
+        return bool(w) and not w.get("version_id")
+
+    def pulled(self, lid: str, entry: dict | None) -> bool:
+        """Whether what's installed, `entry`, is what was withdrawn: all of it, or the one version that was."""
+        w = self.data.get("withdrawn", {}).get(lid)
+        return bool(w) and (not w.get("version_id") or bool(entry) and entry.get("version_id") == w["version_id"])
 
     def acknowledge(self, lid: str) -> None:
         if lid in self.data.get("withdrawn", {}):
@@ -134,6 +159,7 @@ class ForgeState:
             self.save()
 
     def alarms(self) -> list[str]:
-        """Withdrawn listings still installed somewhere, that nobody has acknowledged: CONDITION AMBER."""
-        ids = self.ids()
-        return [lid for lid, w in self.data.get("withdrawn", {}).items() if lid in ids and not w.get("acknowledged")]
+        """Withdrawn listings, or versions, still installed somewhere that nobody has acknowledged: CONDITION AMBER."""
+        return [lid for lid, w in self.data.get("withdrawn", {}).items()
+                if not w.get("acknowledged") and any(self.pulled(lid, es[lid]) for es in self.data["servers"].values()
+                                                     if lid in es)]

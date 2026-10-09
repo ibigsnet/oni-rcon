@@ -22,7 +22,7 @@ servers first.
 | **F3 Operations** | Sitrep for the selected server with the vote under way and its tally, and the title and author of the map or gametype playing when it came from ReclaimerForge; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
-| **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked, over the last 24 hours, 7 days or 30 days, and search it. Each listing shows its type, author, rating, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. `i` install on this server · `l` load it now · `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
+| **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked (trending and rising over the last 24 hours, 7 days or 30 days), or see the collections ReclaimerForge is featuring now, and search it. Each listing shows its type, authors, thumbs up and down, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. `i` install on this server · `l` load it now · `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
 
 Also:
 
@@ -166,8 +166,13 @@ port = 11775
 Reclaimer. oni-rcon reads it with **your own API key**: none ships with oni-rcon, and every admin uses their own.
 Without one, everything else works as before. `oni-rcon --demo` brings a pretend Forge to try F6 with.
 
-**Get a key** on reclaimerforge.net with the `catalog:read` and `assets:download` scopes, and nothing more. oni-rcon
-never writes, uploads or publishes anything there.
+**Get a key** on reclaimerforge.net. Your account needs the Developer role (an Owner assigns it) and a verified
+email. Then open Developer tools and create a named key with the `catalog:read` and `assets:download` scopes, and
+nothing more. The key is shown once, when you make it, so save it then. Make one for oni-rcon alone, so you can rotate
+it without touching anything else that uses a key: create the replacement, load it into oni-rcon, then revoke the old
+one. A key stops working when it expires or is revoked, when its account loses the Developer role or its verified
+email, or when the account is banned; F6 then says the key was refused. oni-rcon never writes, uploads or publishes
+anything there.
 
 **Give it to oni-rcon.** The first of these that's set wins:
 
@@ -186,9 +191,30 @@ forge_api_key_env = "RECLAIMERFORGE_KEY"
 These go at the top of the config file, above `[defaults]` and the `[[server]]` blocks: TOML reads a key that comes
 after a table as part of that table.
 
+### Browsing the catalog
+
+`s` steps through the orders: trending, rising, latest, updated, downloads, rated, unrated and overlooked, then
+**FAVOURITES** and **INSTALLED HERE**. `w` sets the window (24 hours, 7 days or 30 days) for trending and rising, the
+two orders it applies to; it greys out for the rest.
+
+- **Rating** is thumbs up and down, as ReclaimerForge now counts them. *Rated* puts the most thumbs up first, then the
+  fewest down, and *unrated* is listings nobody has voted on. Forge's old star rating is archived and isn't shown.
+- **Authors.** A listing can have several. All are named, the original owner first, and the owner's ID is beside them.
+- **Recent downloads** fill from the day Forge began recording them, and older totals aren't backfilled. Where a window
+  reaches back past that day the file says so, because the count then covers only part of it. Downloads through an API
+  key, oni-rcon's included, don't count toward a listing's popularity.
+- **Favourites** are ReclaimerForge's curated collections, in their order and for as long as each one runs (a
+  collection starts at its start time and ends at its end time). The file says which collection a listing is in and
+  until when. Nothing is featured between collections, and F6 says so.
+- **Descriptions and release notes** are Markdown on the website. oni-rcon shows them as plain text, with any
+  terminal control characters removed, and never renders them.
+- **Compatibility** is whatever the author reported for the version; where the listing doesn't say, it reads `?` and
+  stays unknown. Check it on the server you mean to run it on.
+
 ### Installing on a server
 
-Pick a listing on F6, pick a version (the newest is picked for you), and press `i`. oni-rcon fetches that version's
+Pick a listing on F6, pick a version (the newest one that can be installed is picked for you), and press `i`. A
+version its author has withdrawn is marked `✕` and is never installed. oni-rcon fetches that version's
 manifest, downloads every file and checks each one against the manifest's size and SHA-256 before any of it is used,
 copies them into the server's content folder, checks them again there, and only then moves them into place. A file
 that fails a check is thrown away and nothing is installed. Replacing anything already there asks first, with ABORT
@@ -218,13 +244,19 @@ edit `dedicated.toml`. What's installed where is kept in `forge-state.json`, bes
 ### Updates and withdrawals
 
 While anything is installed, oni-rcon reads Forge's changes feed every 10 minutes (`forge_poll = 600`, in seconds, at
-the top of the config; 60 at least) and, every 6 hours, fetches each installed listing whole for anything the feed
-missed. Those background checks stop well short of the key's quota, so browsing F6 always has room.
+the top of the config; 60 at least). The feed names the versions each change published and withdrew. It is read back
+over a few minutes each time and entries are told apart by their IDs, so a late write isn't missed and nothing is
+announced twice. Every 6 hours oni-rcon also fetches each installed listing whole for anything the feed missed. Those
+background checks stop well short of the key's quota, so browsing F6 always has room.
 
 - **A new version** gets one toast, says which servers run the old one, and marks the listing `▲` on F6.
 - **A withdrawn listing** gets a toast and a line in the feed, is flagged `⚠ WITHDRAWN` in the F3 rotation wherever
   it's in it, and turns the masthead to **CONDITION AMBER** until you acknowledge it: on F6, `s` to INSTALLED HERE,
   pick it, then `a`. It stays installed and flagged; what to do about it is yours to decide.
+- **A withdrawn version** is different from a withdrawn listing: its author took one release back and the listing is
+  still up. It matters only on servers running that version, which get the same `⚠` and amber until you install
+  another version (which clears it) or acknowledge it. The versions left aren't announced as updates when they're
+  older than what you have.
 
 ### Rounds played
 
@@ -269,7 +301,7 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
-| `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (or INSTALLED HERE), time window, next page, API key, copy listing ID |
+| `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (including FAVOURITES and INSTALLED HERE), time window, next page, API key, copy listing ID |
 | any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good) |
 | `Ctrl+Q` | quit |
 
