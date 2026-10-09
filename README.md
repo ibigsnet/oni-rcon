@@ -218,6 +218,7 @@ Project Reclaimer team. Halo and related names are trademarks of Microsoft Corpo
 tribute: the emblem in the interface is a fan-made pixel rendition, and the Windows icon is the ONI emblem. oni-rcon
 contains no game files.
 
-## Licence
+## License
 
-[MIT](LICENSE) © 2026 Arche Labs
+GPL-3.0-or-later. Copyright (c) 2026 ibigs, LLC. See [LICENSE](LICENSE).
+
