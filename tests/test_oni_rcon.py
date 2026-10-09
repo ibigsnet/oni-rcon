@@ -419,6 +419,25 @@ def test_reconnect_takes_the_password_again():
     asyncio.run(go())
 
 
+def test_operations_tab_survives_a_narrow_terminal():
+    """F3 at 80 columns used to raise measuring a button grid squeezed to nothing beside the sitrep."""
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(80, 24)) as pilot:
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if all(st.online for st in app.stations):
+                    break
+            await pilot.press("f3")
+            await pilot.pause(0.3)
+            for size in ((80, 24), (80, 20), (100, 30), (119, 30)):
+                await pilot.resize_terminal(*size)
+                await pilot.pause(0.2)
+                assert all(b.region.width >= 8 for b in app.query(".ops-grid Button")), size
+    asyncio.run(go())
+
+
 def test_feed_holds_still_and_keeps_its_width(monkeypatch):
     monkeypatch.setenv("COLUMNS", "160")  # a terminal's width, which a headless console otherwise lacks
     async def go():
@@ -534,6 +553,28 @@ def test_a_fleet():
             await pilot.press(*"server 9", "enter")
             await pilot.pause(0.2)
             assert app.cur.label == "Server 9"
+
+    asyncio.run(go())
+
+
+def test_a_big_fleet_only_draws_the_cards_in_view():
+    """Redrawing a card Textual isn't showing re-arranges the whole screen: with 200 stations, most of the console's time."""
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=fleet(60))
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(app, pilot, "status")
+            await pilot.pause(0.5)
+            stations = app.query_one("#stations")
+            assert 0 in app.seen and 59 not in app.seen and len(app.seen) < 20
+            assert app.stations[0].drawn and not app.stations[59].drawn  # the last isn't drawn until it's in view
+            stations.scroll_end(animate=False)
+            await pilot.pause(0.3)
+            assert 59 in app.seen and 0 not in app.seen
+            assert app.stations[59].drawn
+            for key in ("f1", "f2", "f3", "f4", "f5", "f6"):  # and every tab still lays out with a fleet
+                await pilot.press(key)
+                await pilot.pause(0.2)
 
     asyncio.run(go())
 
