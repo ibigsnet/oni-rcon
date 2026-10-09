@@ -1944,7 +1944,7 @@ class OniApp(App):
                 rows.append((key, [Text(kind, color), shown, str(pick(e, "name", default="")),
                                    str(pick(e, "reason", default="")),
                                    Text(left, RED if left == "PERMANENT" else DIM if left == "expired" else AMBER),
-                                   str(pick(e, "by", "group", default=""))]))
+                                   str(pick(e, "banned_by", "by", default=""))]))
         t = self.query_one("#bans", Roster)
         t.fill(rows)
         t.border_title = f"BLACKLIST · {len(rows)}"

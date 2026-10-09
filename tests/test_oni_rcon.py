@@ -324,6 +324,7 @@ def test_app_keeps_the_selection_and_redacts():
         async with app.run_test(size=(160, 48)) as pilot:
             await settle(app, pilot, "players", "bans", "vpn")
             bans = app.query_one("#bans")
+            assert str(bans.get_row_at(0)[-1]) == "Admin"  # BY reads the server's banned_by, not the group id
             bans.move_cursor(row=3)
             chosen = app.ban_rows[bans.selected]
             fake.bans["players"].insert(0, {"id": "f" * 32, "name": "New", "reason": "y"})  # someone else bans
