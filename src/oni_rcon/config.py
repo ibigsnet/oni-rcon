@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import getpass
 import os
+import re
 import subprocess
 import tempfile
 import tomllib
@@ -21,6 +22,7 @@ class Server:
     password: str = field(default="", repr=False)
     password_env: str = ""
     password_command: str | list[str] = ""
+    content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
 
     def __post_init__(self):
         if not (self.url or self.port):
@@ -97,17 +99,78 @@ def resolve_passwords(servers: list[Server]) -> None:
             raise SystemExit(f"{s.where}: empty RCON password")
 
 
-def _run(cmd: str | list[str]) -> str:
+class CommandFailed(Exception):
+    pass
+
+
+def run_command(cmd: str | list[str], what: str) -> str:
+    """Run explicit arguments without a shell; never expose secret arguments or stderr on failure."""
     if not isinstance(cmd, list) or not cmd or not all(isinstance(arg, str) for arg in cmd):
-        raise SystemExit('password_command must be an explicit argument list; shell commands are disabled')
+        raise CommandFailed(f'{what} must be an explicit argument list; shell commands are disabled')
     try:
         r = subprocess.run(cmd, shell=False, capture_output=True, text=True, timeout=60,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as e:  # not installed, or waiting on something that never comes
-        raise SystemExit(f"password_command failed: {e}") from None
+        raise CommandFailed(f"{what} failed ({type(e).__name__})") from None
     if r.returncode:
-        raise SystemExit(f"password_command exited {r.returncode}")
+        raise CommandFailed(f"{what} exited {r.returncode}")
     return r.stdout.splitlines()[0] if r.stdout else ""
+
+
+def _run(cmd: str | list[str]) -> str:
+    try:
+        return run_command(cmd, "password_command")
+    except CommandFailed as e:
+        raise SystemExit(str(e)) from None
+
+
+def forge_settings(path: Path | None) -> dict:
+    """The config file's top-level forge_* keys: where the Forge API key comes from, and how often to check for
+    updates. Empty without a file, or with one load_config has already said is unreadable."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if k.startswith("forge_")}
+
+
+def write_atomic(path: Path, text: str, private: bool = False) -> None:
+    """Write through a temp file, so a crash midway leaves the old file whole. `private`: owner-only on Linux and
+    macOS (Windows profiles are per-user already)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f'.{path.name}-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8') as output:
+            if private:
+                os.fchmod(output.fileno(), 0o600)
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(tmp, path)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp)
+
+
+def remember_forge_key(path: Path, key: str) -> None:
+    """Save the Forge API key in the config file: only ever when the operator ticks for it. It goes in at the top,
+    after the opening comments, where a top-level key is always valid TOML, or replaces one saved there before."""
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.is_file() else []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    line = f"forge_api_key = {toml_str(key)}\n"
+    tables = next((i for i, x in enumerate(lines) if x.startswith("[")), len(lines))
+    old = next((i for i, x in enumerate(lines[:tables]) if re.match(r"forge_api_key\s*=", x)), None)
+    if old is not None:
+        lines[old] = line
+    else:
+        lines.insert(next((i for i, x in enumerate(lines) if x.strip() and not x.lstrip().startswith("#")),
+                          len(lines)), line)
+    text = "".join(lines)
+    if tomllib.loads(text).get("forge_api_key") != key:  # never leave the operator a config that won't load
+        raise ValueError("the key couldn't be saved in that config file")
+    write_atomic(path, text, private=True)
 
 
 def toml_str(s: str) -> str:

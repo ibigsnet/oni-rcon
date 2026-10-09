@@ -18,6 +18,8 @@ from .player_search import PlayerSearch, matching_players, coverage_text
 from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_count, matching_rows,
                       server_tags, tagged_message)
 from .config import Server
+from .managed_forge import ManagedForgeClient
+from .safety import clean
 
 READS = frozenset('help status players maps modes nextmap vote bans vpn'.split())
 DISRUPTIVE = frozenset('map mode load endgame endround shuffle teamcount servername'.split())
@@ -56,7 +58,7 @@ class Fleet:
         self.view, self.rows, self.updated, self.locks = {}, {}, 0, {}
 
     def request(self, path, body=None, timeout=25):
-        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players'):
+        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players','/api/forge'):
             raise ValueError('unsupported management route')
         headers = {'Authorization':'Bearer '+self.token,'Accept':'application/json'}
         if body is not None:
@@ -68,7 +70,7 @@ class Fleet:
             with self.opener.open(request,timeout=timeout) as response:
                 data=response.read(4*1024*1024+1)
             if len(data)>4*1024*1024:raise ValueError('management response too large')
-            return json.loads(data)
+            return clean(json.loads(data))
         except urllib.error.HTTPError as exc:
             try:reason=json.loads(exc.read(4096)).get('error','management request refused')
             except (ValueError,AttributeError):reason='management request refused'
@@ -160,8 +162,11 @@ class FleetRcon:
 
 class FleetApp(OniApp):
     TITLE='IBIGS Reclaimer Fleet'
-    BINDINGS=[*[b for b in OniApp.BINDINGS if b.key not in ('ctrl+r', *map(str,range(1,10)))],
+    FORGE_KEY='F9'
+    TRACK_ROUNDS=False  # Cached overview phases cannot prove completed rounds; fleet stats remain authoritative.
+    BINDINGS=[*[b for b in OniApp.BINDINGS if b.key not in ('f6', 'ctrl+r', *map(str,range(1,10)))],
               Binding('f6','lifecycle','Container'),Binding('ctrl+r','refresh_fleet','Refresh fleet'),
+              Binding('f9',"tab('forge')",'Forge catalog'),
               Binding('ctrl+f','search_servers','Search',priority=True),
               Binding('ctrl+g','search_players','Find player',priority=True),
               Binding('f7','sort_servers','Sort'),Binding('f8','filter_servers','Filter'),
@@ -213,6 +218,33 @@ class FleetApp(OniApp):
                 yield Static(id='fleet-summary')
                 yield Static(id='fleet-target')
                 yield Button('RESET',id='fleet-reset',compact=True)
+
+    def forge_connect(self):
+        self.forge = ManagedForgeClient(self.fleet)
+        self.fsetup.source = 'controller cache; no API key in terminal'
+
+    def forge_watch(self):
+        # The long-running controller handles updates even when every terminal is closed.
+        pass
+
+    def paint_listing(self):
+        super().paint_listing()
+        for selector in ('#fg-install', '#fg-load', '#fg-key', '#fg-ack'):
+            self.query_one(selector).display = False
+        self.query_one('#listing-box').border_subtitle = 'READ ONLY · managed deployment and empty-lobby queues'
+        self.query_one('#forge-sort').tooltip = 'Controller catalog. INSTALLED HERE does not track managed fleet installs.'
+
+    async def forge_key(self):
+        self.notify('fleet-console uses the controller catalog. No Forge key is needed in this terminal.')
+
+    async def forge_install(self):
+        self.notify('Fleet content goes through the controller validation and empty-lobby deployment queues. Direct copies are disabled.')
+
+    async def forge_play(self):
+        self.notify('Select the lobby and use Operations for a confirmed live change. Fleet catalog browsing never changes games.')
+
+    def installed_words(self, listing):
+        return Text('Managed by controller; not tracked by this terminal', 'dim')
 
     def compose_stations(self):
         for station,card in zip(self.stations,self.cards):

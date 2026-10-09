@@ -10,6 +10,7 @@ import json
 import random
 import threading
 import time
+from pathlib import Path
 
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosed
@@ -28,8 +29,9 @@ SERVERS = [("Demo Ops | Slayer", 16, 9), ("Demo Ops | Big Team Battle", 32, 17),
 
 
 class Fake:
-    def __init__(self, name: str, password: str, max_players: int, crowd: int):
+    def __init__(self, name: str, password: str, max_players: int, crowd: int, content_dir: str = ""):
         self.password, self.clients, self.engine, self.skill = password, set(), 0, {}
+        self.content = Path(content_dir) if content_dir else None  # Forge installs land here, and get listed
         self.status = {"name": name, "address": "203.0.113.7:49176", "map": random.choice(MAPS), "mode": "Team Slayer",
                        "phase": "in_game", "max_players": max_players, "players": 0, "password_required": False,
                        "max_ping": 0, "hidden": False, "anti_cheat": "enforce", "anti_cheat_active": True,
@@ -54,6 +56,13 @@ class Fake:
                 "service_tag": name[:4].upper(), "alive": random.random() > 0.2, "health": round(random.random(), 2),
                 "shields": round(random.random(), 2), "seconds_since_last_death": random.randint(3, 300),
                 "engine_id": self.engine, "guest_players": []}
+
+    def installed(self, suffix: str) -> list[dict]:
+        """What's in the content folder, as the maps or modes list names it: the fake Forge's .map and .gt files."""
+        if not (self.content and self.content.is_dir()):
+            return []
+        return [{"kind": "map" if suffix == ".map" else "mode", "name": f.stem.replace("_", " ").title(),
+                 "reference": f.stem} for f in sorted(self.content.rglob(f"*{suffix}"))]
 
     def _renumber(self):
         for i, p in enumerate(self.players, 1):
@@ -103,9 +112,9 @@ class Fake:
                                     "players": self.players},
                 "status": lambda: self.status,
                 "maps": lambda: {"entries": [{"kind": "map", "name": m.replace("_", " ").title(), "reference": m}
-                                             for m in MAPS]},
+                                             for m in MAPS] + self.installed(".map")},
                 "modes": lambda: {"entries": [{"kind": "mode", "name": m, "reference": m.lower().replace(" ", "_")}
-                                              for m in MODES]},
+                                              for m in MODES] + self.installed(".gt")},
                 "bans": lambda: self.bans,
                 "vpn": lambda: {"allowed": self.allowed, "block_vpn": True, "ranges": 41812},
                 "vote": lambda: {"vote": self.vote, "playlist": None,
@@ -155,7 +164,10 @@ class Fake:
             self.status["next"] = " / ".join(args)
             if cmd != "nextmap":
                 await self.emit("control", text=f"Loading {' / '.join(args)}.")
-                self.status["map"] = args[0] if cmd != "mode" else self.status["map"]
+                if cmd in ("map", "load") and args:
+                    self.status["map"] = args[0]
+                if cmd == "mode" and args or cmd == "load" and len(args) > 1:
+                    self.status["mode"] = args[-1]
             return ok(f"Accepted: {cmd} {' '.join(args)}.")
         if cmd in ("endround", "endgame", "shuffle", "teamcount", "passvote", "cancelvote", "startvote"):
             if cmd == "startvote":
@@ -252,22 +264,23 @@ class Fake:
                                                               + (f" {target['name']}" if subject == "kick" else ""))
 
 
-async def serve_fakes(password: str = "demo", tick: bool = True, specs=SERVERS) -> tuple[list[int], list]:
+async def serve_fakes(password: str = "demo", tick: bool = True, specs=SERVERS,
+                      content_dirs: list | None = None) -> tuple[list[int], list]:
     """Start the fake servers in the running loop; returns (ports, handles to keep alive)."""
     ports, keep = [], []
-    for name, max_players, crowd in specs:
-        fake = Fake(name, password, max_players, crowd)
+    for i, (name, max_players, crowd) in enumerate(specs):
+        fake = Fake(name, password, max_players, crowd, str(content_dirs[i]) if content_dirs else "")
         server = await serve(fake.handler, "127.0.0.1", 0)
         ports.append(server.sockets[0].getsockname()[1])
         keep += [fake, server] + ([asyncio.create_task(fake.tick())] if tick else [])
     return ports, keep
 
 
-def start_in_thread(password: str = "demo") -> list[int]:
+def start_in_thread(password: str = "demo", content_dirs: list | None = None) -> list[int]:
     ports, ready = [], threading.Event()
 
     async def main():
-        p, _keep = await serve_fakes(password)
+        p, _keep = await serve_fakes(password, content_dirs=content_dirs)
         ports.extend(p)
         ready.set()
         await asyncio.Future()

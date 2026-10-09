@@ -17,6 +17,7 @@ from typing import Callable
 
 from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
+from .safety import clean
 
 
 class Rcon:
@@ -51,7 +52,7 @@ class Rcon:
                 async with self.gate:  # only the sign-in: a fleet connects a few at a time, not all at once
                     ws = await connect(self.url, proxy=None, open_timeout=10, max_size=1024 * 1024)
                     await ws.send(json.dumps({"type": "auth", "password": self.password}))
-                    reply = json.loads(await asyncio.wait_for(ws.recv(), 10))
+                    reply = clean(json.loads(await asyncio.wait_for(ws.recv(), 10)))
                 if not isinstance(reply, dict) or reply.get("type") != "auth":
                     raise ValueError("that port doesn't speak RCON")
                 if not reply.get("ok"):
@@ -62,7 +63,7 @@ class Rcon:
                     self.info, self.ws, delay = reply, ws, 2
                     self._set("online", f"v{reply.get('version', '?')}")
                     async for raw in ws:
-                        if isinstance(msg := json.loads(raw), dict):
+                        if isinstance(msg := clean(json.loads(raw)), dict):
                             self._dispatch(msg)
                     detail = "connection closed"
             except (OSError, TimeoutError, WebSocketException, ValueError) as e:
