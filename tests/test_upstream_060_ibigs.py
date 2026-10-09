@@ -112,6 +112,18 @@ def test_managed_favourites_are_read_only_timed_and_explicit_when_unavailable():
     asyncio.run(run())
 
 
+def test_managed_rising_keeps_first_rank_ahead_of_unranked_listings():
+    async def run():
+        fleet = Mock()
+        fleet.request.return_value = {'mode': 'managed-read-only', 'at': time.time(), 'items': [
+            {'id': 'missing'}, {'id': 'second', 'rising_rank': 1},
+            {'id': 'first', 'rising_rank': 0}, {'id': 'unknown', 'rising_rank': None},
+        ]}
+        rows, _, _ = await ManagedForgeClient(fleet).listings(sort='rising')
+        assert [row['id'] for row in rows] == ['first', 'second', 'missing', 'unknown']
+    asyncio.run(run())
+
+
 def test_fleet_f9_favourites_and_superintendent_keep_lifecycle_and_target_safe():
     async def run():
         rows = {f'node-b-{49000+i}': dict(

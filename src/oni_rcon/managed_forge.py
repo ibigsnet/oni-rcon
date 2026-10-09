@@ -43,7 +43,7 @@ class ManagedForgeClient:
             'unrated': lambda x: x.get('created_at') or '',
             'overlooked': lambda x: -(x.get('download_count') or 0),
             'trending': lambda x: recent_of(x, window) or 0,
-            'rising': lambda x: -(x.get('rising_rank') or 1000000),
+            'rising': lambda x: -x['rising_rank'] if isinstance(x.get('rising_rank'), (int, float)) else -1000000,
         }.get(sort)
         if rank:
             rows.sort(key=rank, reverse=True)
