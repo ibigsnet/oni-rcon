@@ -4,10 +4,11 @@ import json
 import sys
 
 import pytest
+from rich.text import Text
 
 from oni_rcon import app as appmod
-from oni_rcon.app import (Boot, Form, Help, OniApp, emblem, explain, redact_data, render_event, resolve, sides,
-                          target_of)
+from oni_rcon.app import (Boot, Form, Help, OniApp, Pick, emblem, explain, parse_command, redact_data, render_event,
+                          resolve, same, sides, split_tag, target_of)
 from oni_rcon.art import biosig, decrypt, hbar, spark, split_bar
 from oni_rcon.config import Server, add_servers, load_config, parse_target, resolve_passwords
 from oni_rcon.demo import serve_fakes
@@ -453,5 +454,108 @@ def test_feed_holds_still_and_keeps_its_width(monkeypatch):
             assert app.history == ["status", "players"] and cmd.value == "status"
             await pilot.press("down", "down")
             assert cmd.value == "half-typ"  # the draft comes back
+
+    asyncio.run(go())
+
+
+def test_console_lines():
+    assert parse_command("say Test, test, this is a test! :D") == ["say", "Test, test, this is a test! :D"]
+    assert parse_command("say don't camp") == ["say", "don't camp"]  # an apostrophe isn't an open quote
+    assert parse_command('say "all of it"') == ["say", "all of it"]
+    assert parse_command('tell "Big Name" it\'s you') == ["tell", "Big Name", "it's you"]
+    assert parse_command('ban 9f3a 2h "team killing"') == ["ban", "9f3a", "2h", "team killing"]
+    assert parse_command("status") == ["status"] and parse_command("say") == ["say"]
+    with pytest.raises(ValueError):
+        parse_command('kick "unclosed')
+
+
+def test_community_tags():
+    assert split_tag("ALPHA · Big Team Rockets") == ("ALPHA", "Big Team Rockets")
+    assert split_tag("BRAVO | Throwback 4v4") == ("BRAVO", "Throwback 4v4")
+    assert split_tag("Plain name") == ("", "Plain name") and split_tag("Trailing · ") == ("", "Trailing · ")
+    assert same(Text("Rook", "red"), Text("Rook", "red")) and not same(Text("Rook", "red"), Text("Rook", "blue"))
+    assert not same("1", 1)
+
+
+def fleet(n: int):
+    names = [f"{'ALPHA' if i % 2 else 'BRAVO'} · {'Big Team' if i < 2 else f'Server {i}'}" for i in range(n)]
+    return [(name, 16, 0) for name in names]
+
+
+def test_a_fleet():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=fleet(14))
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest")
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.pause(1.2)  # a line every 0.22 s
+            log = plain(app.screen.query_one("#boot-log"))
+            assert "STATIONS 1-14" in log and "[14]" not in log  # a tally, not a line each
+            await pilot.press("escape")
+            await settle(app, pilot, "status")
+            assert app.has_class("-fleet") and app.cards[0].size.height == 2
+            labels = [st.label for st in app.stations]
+            assert labels[2:4] == ["Server 2", "Server 3"] and app.stations[3].tag == "ALPHA"
+            assert labels[:2] == ["BRAVO · Big Team", "ALPHA · Big Team"]  # the same name twice keeps its tag
+
+            calls, busy, most = [], 0, 0
+            for st in app.stations:  # count how many are in flight at once
+                real = st.rcon.call
+
+                async def slow(command, *args, real=real, **kw):
+                    nonlocal busy, most
+                    busy += 1
+                    most = max(most, busy)
+                    await asyncio.sleep(0.02)
+                    busy -= 1
+                    calls.append(command)
+                    return await real(command, *args, **kw)
+                st.rcon.call = slow
+            await pilot.press("f5")
+            app.query_one("#cmd").value = "@all say it's a test"
+            app.query_one("#cmd").focus()
+            await pilot.press("enter")
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if calls.count("say") == 14:
+                    break
+            await pilot.pause(0.2)
+            assert calls.count("say") == 14 and most <= appmod.FANOUT
+            log = "\n".join(line.text for line in app.query_one("#console-log").lines)
+            assert "@all say  ·  14 stations  ·  14 ok" in log
+            assert sum("it's a test" in str(e.get("text")) for _, e in app.feed) == 14  # one argument, whole
+
+            await pilot.press("escape")
+            app.query_one("#stations").focus()
+            await pilot.press("g")
+            await pilot.pause(0.2)
+            assert isinstance(app.screen, Pick)
+            await pilot.press(*"server 9", "enter")
+            await pilot.pause(0.2)
+            assert app.cur.label == "Server 9"
+
+    asyncio.run(go())
+
+
+def test_a_late_reply_is_reported():
+    async def go():
+        (port, *_), keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        fake, real = keep[0], keep[0].command
+
+        async def slow(cmd, args, by):
+            if cmd == "endgame":
+                await asyncio.sleep(0.3)
+            return await real(cmd, args, by)
+        fake.command = slow
+        late = []
+        rc = Rcon(f"ws://127.0.0.1:{port}", "demo", "pytest", lambda *_: None, lambda *_: None,
+                  on_late=lambda _, line, r: late.append((line, r)))
+        task = asyncio.create_task(rc.run())
+        while rc.state != "online":
+            await asyncio.sleep(0.01)
+        with pytest.raises(TimeoutError, match="isn't resent"):
+            await rc.call("endgame", timeout=0.05)
+        await asyncio.sleep(0.5)
+        assert late and late[0][0] == "endgame" and late[0][1]["ok"]
+        task.cancel()
 
     asyncio.run(go())

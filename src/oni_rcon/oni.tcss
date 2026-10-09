@@ -13,6 +13,13 @@ Screen { background: $background; }
 #stations > ListItem.-highlight { background: $primary 15%; }
 #stations:focus > ListItem.-highlight { background: $primary 25%; }
 .card { height: 3; }
+/* a fleet: two-line cards, told apart by shade instead of a rule */
+.-fleet #stations > ListItem { height: 2; border-bottom: none; }
+.-fleet .card { height: 2; }
+.-fleet #stations > ListItem:odd { background: $panel; }
+.-fleet #stations > ListItem:hover { background: $primary 8%; }
+.-fleet #stations > ListItem.-highlight { background: $primary 15%; }
+.-fleet #stations:focus > ListItem.-highlight { background: $primary 25%; }
 #add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
 #add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; }
 #sidebar > Center { height: 1fr; align-vertical: middle; }
@@ -23,6 +30,8 @@ Screen { background: $background; }
 .-narrow #sidebar { width: 30; }
 .-narrow #dossier-box { min-width: 36; }
 .-narrow #player-actions { grid-size: 3; }
+/* 200 columns and up: room for whole server names */
+.-wide #sidebar { width: 46; }
 #tabs TabPane.-from { offset-x: 4; }
 #tabs TabPane.-slide { transition: offset 220ms out_cubic; }
 DataTable, RichLog, #sitrep, #dossier-box, #theatre {
@@ -97,7 +106,8 @@ ModalScreen.-enter .dialog { offset-y: 3; }
 .dialog-buttons { height: auto; align-horizontal: right; margin-top: 1; }
 .dialog-buttons Button { margin-left: 1; }
 .pick { height: auto; }
-#pick-list { height: auto; max-height: 20; border: round $primary 35%; background: $background; }
+#pick-list { height: auto; max-height: 20; border: round $primary 35%; background: $background; text-wrap: nowrap;
+             text-overflow: ellipsis; }
 
 /* boot */
 #boot { align: center middle; background: $background; }

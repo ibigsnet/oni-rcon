@@ -21,7 +21,7 @@ servers first.
 | **F2 Intercepts** | One feed from every server: chat (team and server), kills with weapon, joins, leaves, kicks, bans, votes and game phases. Kills carry their Halo 3 medals: double kill through killionaire, killing spree through invincible, and killjoy. Filter by chat, combat, traffic, moderation or ops; scroll up to read back and it holds still. Chat that mentions admins or cheating raises a toast and the terminal bell |
 | **F3 Operations** | Sitrep for the selected server with the vote under way and its tally; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
-| **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies |
+| **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
 
 Also:
 
@@ -31,12 +31,20 @@ Also:
   opens a plain-words guide to the whole console.
 - **Errors you can act on.** A server that won't connect says why ("Nothing answered on that port", "SSH refused your
   key") and counts down to its next try.
-- **Many servers at once.** The sidebar holds one card per server, and `1`–`9` jumps between them. Each card shows
-  how full the server is and a trace of its activity over the last 100 seconds.
+- **Many servers at once.** The sidebar holds one card per server, and `1`–`9` jumps between them; `g` lists every
+  server, the busiest first, to type a name into. Each card shows how full the server is and a trace of its activity
+  over the last 100 seconds. Names that share a community tag ("ALPHA · Big Team") are shortened to what tells them
+  apart, with the tag on the card's second line.
+- **Built for fleets.** Past 12 servers the cards slim to two lines, the boot screen tallies the stations instead of
+  listing each one, and the console stays light enough for a web terminal: a card is redrawn only when what it shows
+  changes, status polls are spread over 15 seconds instead of fired together, and servers sign in 8 at a time with
+  jittered reconnects.
 - **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down; RED when a call for an
   admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
   or the Intercepts tab.
-- **Broadcast to one server or all.** `Ctrl+B`.
+- **Broadcast to one server or all.** `Ctrl+B`. `@all` messages and commands go out 4 servers at a time, each reply
+  goes in the command log on one line, and a tally closes it ("79 stations · 77 ok · 2 no reply yet"). A command that
+  gets no reply in 10 seconds is never resent, and if its reply comes later the log shows it.
 - **Command palette.** `Ctrl+P`.
 - **Player addresses are redacted by default,** in the tables, the feed, the toasts and the console's replies and raw
   events. Press `x` to reveal them. This helps when you stream or share screenshots.
@@ -166,6 +174,7 @@ port = 11775
 |---|---|
 | `F1`–`F5` | Assets · Intercepts · Operations · Blacklist · Console |
 | `1`–`9` | select server |
+| `g` | go to any server: the list puts the busiest first and filters as you type |
 | `Ctrl+B` | broadcast |
 | `Ctrl+R` | refresh now |
 | `Ctrl+P` | command palette |
