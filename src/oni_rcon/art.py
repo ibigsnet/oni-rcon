@@ -8,8 +8,10 @@ from pathlib import Path
 
 from rich.text import Text
 
-AMBER, CYAN, RED, GREEN, DIM, WHITE, GREY = "#D9A441", "#4FC3D9", "#E5484D", "#5FB98A", "#5C6773", "#D6DCE4", "#8B95A1"
-GOLD, INK, FAINT = "#FFD27A", "#06080B", "#1C242E"
+# Secondary text is still text: keep it legible on panels and selected rows.
+# FAINT is reserved for decorative chart baselines, never labels or values.
+AMBER, CYAN, RED, GREEN, DIM, WHITE, GREY = "#F2BE62", "#71D6E8", "#FF8088", "#80D7A0", "#A4B2C2", "#F1F5F9", "#BCC8D6"
+GOLD, INK, FAINT = "#FFD98A", "#090E14", "#364653"
 
 # The ONI emblem, traced into pixel grids (largest first, 48 down to 12 px); tones 1 dark face, 2 rays, 3 bright face, 4 the boot scan.
 EMBLEMS = [b.split() for b in re.sub(r"(?m)^#.*\n", "", Path(__file__).with_name("emblem.txt")

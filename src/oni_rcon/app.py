@@ -49,12 +49,23 @@ from .state import ForgeState, norm, refs_of
 from .stats import Rounds
 from .superintendent import BIG, MINI, SMALL, Superintendent, card as sup_card
 
-ONI = Theme(name="oni", primary=AMBER, secondary=CYAN, accent=CYAN, warning="#E8A33D", error=RED, success=GREEN,
-            foreground=WHITE, background=INK, surface="#0B0F14", panel="#111821", dark=True)
+ONI = Theme(name="oni", primary=AMBER, secondary=CYAN, accent=CYAN, warning=AMBER, error=RED, success=GREEN,
+            foreground=WHITE, background=INK, surface="#0F1721", panel="#151F2B", dark=True,
+            variables={
+                "text": WHITE, "text-muted": GREY, "text-disabled": DIM,
+                "foreground-muted": GREY, "foreground-disabled": DIM,
+                "block-cursor-foreground": WHITE, "block-cursor-background": "#20364A",
+                "block-cursor-text-style": "bold",
+                "block-cursor-blurred-foreground": WHITE, "block-cursor-blurred-background": "#1A2C3D",
+                "block-hover-background": "#162B3D",
+                "input-selection-background": "#20364A", "input-selection-foreground": WHITE,
+                "button-color-foreground": INK, "button-focus-text-style": "bold underline",
+                "link-color": CYAN, "link-color-hover": INK,
+            })
 
 TEAMS = ["red", "blue", "green", "orange", "purple", "gold", "brown", "pink"]  # the engine's team order
 TEAM_ORDER = {t: i for i, t in enumerate(TEAMS)}
-TEAM_COLOR = dict(zip(TEAMS, ["#E5484D", "#4C8DFF", "#4CC27A", "#F08A24", "#A066E0", "#E8C547", "#A0714A", "#F07FB8"]))
+TEAM_COLOR = dict(zip(TEAMS, [RED, "#82B1FF", "#81D8A4", "#FFB166", "#C7A0FF", "#F0D675", "#D5AF89", "#F6A4CF"]))
 BAN_TIMES = [("Permanent", ""), ("30 minutes", "30m"), ("2 hours", "2h"), ("12 hours", "12h"), ("1 day", "1d"),
              ("7 days", "7d"), ("2 weeks", "2w"), ("30 days", "30d")]
 MUTE_TIMES = [("Until restart", ""), ("10 minutes", "10m"), ("1 hour", "1h"), ("12 hours", "12h"), ("1 day", "1d")]
@@ -1048,7 +1059,7 @@ class OniApp(App):
                 yield Static(id="super")  # always shown: the crest above gives way before it does
                 yield Static(id="uplink")
             with TabbedContent(id="tabs", initial="assets"):
-                with TabPane("[dim]F1[/] ASSETS", id="assets"):
+                with TabPane("F1 ASSETS", id="assets"):
                     with Assets():
                         yield Roster(id="players", cursor_type="row", zebra_stripes=True)
                         with VerticalScroll(id="dossier-box"):
@@ -1059,7 +1070,7 @@ class OniApp(App):
                                                  variant="error" if op in ("kick", "ban") else "default")
                             with Collapsible(title="RAW DATA", id="raw-box"):
                                 yield Static(id="dossier-raw")
-                with TabPane("[dim]F2[/] INTERCEPTS", id="intercepts"):
+                with TabPane("F2 INTERCEPTS", id="intercepts"):
                     with Horizontal(id="filters"):
                         for cat in CATS:
                             yield Checkbox(cat.upper(), True, id=f"f-{cat}")
@@ -1067,7 +1078,7 @@ class OniApp(App):
                     yield Feed(id="feed", wrap=True, max_lines=3000)
                     yield Input(id="say", placeholder="» type to chat as [Server] on this server   ·   start with @all "
                                                       "to reach every server")
-                with TabPane("[dim]F3[/] OPERATIONS", id="operations"):
+                with TabPane("F3 OPERATIONS", id="operations"):
                     with Horizontal(id="ops-top"):
                         yield Static(id="sitrep")
                         with Vertical(id="ops-panel"):
@@ -1080,20 +1091,20 @@ class OniApp(App):
                     with Horizontal(id="ops-bottom"):
                         yield Roster(id="rotation", cursor_type="none", zebra_stripes=True)
                         yield Static(id="theatre")
-                with TabPane("[dim]F4[/] BLACKLIST", id="blacklist"):
+                with TabPane("F4 BLACKLIST", id="blacklist"):
                     with Blacklist():
                         yield Roster(id="bans", cursor_type="row", zebra_stripes=True)
                         yield Roster(id="vpn", cursor_type="row", zebra_stripes=True)
                         with Horizontal(classes="bar"):
                             for op, label, variant in BAN_OPS:
                                 yield Button(label, id=f"bl-{op}", variant=variant)
-                with TabPane("[dim]F5[/] CONSOLE", id="console"):
+                with TabPane("F5 CONSOLE", id="console"):
                     yield Feed(id="console-log", wrap=True, max_lines=5000)
                     with Horizontal(id="console-bar"):
                         yield CommandInput(id="cmd", placeholder="command   ·   @all <command> runs on every station   ·   ↑↓ history",
                                            suggester=SuggestFromList(COMMANDS, case_sensitive=False))
                         yield Checkbox("RAW EVENTS", False, id="raw")
-                with TabPane(f"[dim]{self.FORGE_KEY}[/] FORGE", id="forge"):
+                with TabPane(f"{self.FORGE_KEY} FORGE", id="forge"):
                     with ForgePane():
                         with Horizontal(id="forge-bar"):
                             yield Input(id="forge-q", placeholder="search the catalog   ·   Enter to search")

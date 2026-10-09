@@ -9,17 +9,17 @@ Screen { background: $background; }
 #stations { height: auto; max-height: 1fr; }
 /* no background transitions here: Textual doesn't repaint the card inside, so it keeps the old colour */
 #stations > ListItem { padding: 0 1; height: 4; border-bottom: hkey $panel-lighten-1; background: $background; }
-#stations > ListItem:hover { background: $primary 8%; }
-#stations > ListItem.-highlight { background: $primary 15%; }
-#stations:focus > ListItem.-highlight { background: $primary 25%; }
+#stations > ListItem:hover { background: $block-hover-background; }
+#stations > ListItem.-highlight { background: $block-cursor-blurred-background; text-style: bold; }
+#stations:focus > ListItem.-highlight { background: $block-cursor-background; }
 .card { height: 3; }
 /* a fleet: two-line cards, told apart by shade instead of a rule */
 .-fleet #stations > ListItem { height: 2; border-bottom: none; }
 .-fleet .card { height: 2; }
 .-fleet #stations > ListItem:odd { background: $panel; }
-.-fleet #stations > ListItem:hover { background: $primary 8%; }
-.-fleet #stations > ListItem.-highlight { background: $primary 15%; }
-.-fleet #stations:focus > ListItem.-highlight { background: $primary 25%; }
+.-fleet #stations > ListItem:hover { background: $block-hover-background; }
+.-fleet #stations > ListItem.-highlight { background: $block-cursor-blurred-background; }
+.-fleet #stations:focus > ListItem.-highlight { background: $block-cursor-background; }
 #add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
 #add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; }
 #sidebar > Center { height: 1fr; align-vertical: middle; }
@@ -43,7 +43,7 @@ DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box {
 DataTable:focus, RichLog:focus, #dossier-box:focus-within, #listing-box:focus-within { border: round $secondary; border-title-color: $secondary; }
 RichLog { border-subtitle-color: $warning; }
 DataTable > .datatable--header { background: $panel; color: $primary; text-style: none; }
-DataTable > .datatable--cursor { background: $primary 30%; color: $foreground; }
+DataTable > .datatable--cursor { background: $block-cursor-background; color: $foreground; text-style: bold; }
 
 Assets { height: 1fr; }
 #players { width: 3fr; height: 1fr; }
@@ -63,7 +63,7 @@ Assets { height: 1fr; }
 #ops-top { height: auto; }
 #sitrep { width: 1fr; min-width: 40; height: auto; padding: 0 1; }
 #ops-panel { width: 2fr; height: auto; padding: 0 1; }
-.ops-head { color: $primary 70%; margin-top: 1; }
+.ops-head { color: $primary; margin-top: 1; }
 .ops-grid { height: auto; grid-size: 3; grid-gutter: 1 1; margin-top: 1; }
 .ops-grid Button { width: 1fr; min-width: 0; }
 #ops-bottom { height: 1fr; min-height: 6; }
@@ -99,10 +99,16 @@ ForgePane { height: 1fr; }
 #cmd { width: 1fr; }
 #raw { width: auto; }
 
-/* no bold anywhere: in most terminal fonts it reads heavy, so colour carries the emphasis instead */
+/* Keep labels readable; reserve bold for keyboard focus and the active tab. */
 Button, Button:disabled { text-style: none; }
-FooterKey .footer-key--key, Toast .toast--title, Tab.-active { text-style: none; }
-Button:disabled { opacity: 45%; }
+Button:focus { text-style: bold underline; }
+FooterKey .footer-key--key, Toast .toast--title, Tab.-active { text-style: bold; }
+Tab { color: $text-muted; }
+Tab.-active { color: $foreground; background: $block-cursor-background; }
+Underline > .underline--bar { color: $secondary; }
+Button:disabled {
+    opacity: 100%; text-opacity: 100%; color: $text-disabled; background: $panel;
+}
 .-hidden { display: none; }
 
 /* dialogs */

@@ -14,6 +14,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Input, ListView, Select, Static, TabbedContent
 from rich.text import Text
 from .app import OniApp, Station, Confirm, Form, Roster, target_of
+from .art import DIM
 from .player_search import PlayerSearch, matching_players, coverage_text
 from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_count, matching_rows,
                       server_tags, tagged_message)
@@ -250,7 +251,7 @@ class FleetApp(OniApp):
         self.notify('Select the lobby and use Operations for a confirmed live change. Fleet catalog browsing never changes games.')
 
     def installed_words(self, listing):
-        return Text('Managed by controller; not tracked by this terminal', 'dim')
+        return Text('Managed by controller; not tracked by this terminal', DIM)
 
     def compose_stations(self):
         for station,card in zip(self.stations,self.cards):
