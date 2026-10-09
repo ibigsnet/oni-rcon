@@ -1,5 +1,7 @@
 /* ONI: charcoal, amber primary, holo cyan, red for anything that bites. Colours come from the `oni` theme. */
 Screen { background: $background; }
+/* Keep text columns in place when a pane first needs its scrollbar. */
+VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 
 #masthead { height: 1; padding: 0 1; background: $panel; color: $foreground; }
 #body { height: 1fr; }
@@ -33,8 +35,6 @@ Screen { background: $background; }
 .-narrow #player-actions { grid-size: 3; }
 /* 200 columns and up: room for whole server names */
 .-wide #sidebar { width: 46; }
-#tabs TabPane.-from { offset-x: 4; }
-#tabs TabPane.-slide { transition: offset 220ms out_cubic; }
 DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box {
     border: round $primary 35%;
     border-title-color: $primary;
@@ -115,13 +115,10 @@ Button:disabled {
 .-hidden { display: none; }
 
 /* dialogs */
-ModalScreen { align: center middle; background: $background 75%; transition: background 200ms; }
-ModalScreen.-enter { background: $background 0%; }
+ModalScreen { align: center middle; background: $background 75%; }
 .dialog {
     width: 68; height: auto; max-height: 90%; padding: 1 2; background: $surface; border: thick $primary;
-    transition: offset 220ms out_cubic;
 }
-ModalScreen.-enter .dialog { offset-y: 3; }
 .dialog-keys { color: $text-muted; margin-top: 1; text-align: right; }
 .dialog Input.-missing, .dialog Select.-missing { border: tall $error; background: $error 20%; }
 .dialog.help { width: 96; height: 90%; }

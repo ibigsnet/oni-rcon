@@ -202,6 +202,7 @@ class FleetApp(OniApp):
         self.visible_ids=[]
         self.server_items={}
         self.browser_fresh=True
+        self.overview_updated = None
         self.browser_nodes=sorted({r['node'] for r in self.catalog.values()})
         servers=[Server(url='fleet://'+r['id'],name=self.label(r)) for r in matching_rows(fleet.rows.values(),sort=sort)]
         super().__init__(servers,by='fleet-console terminal',intro=False,updater=None,
@@ -428,7 +429,13 @@ class FleetApp(OniApp):
         if self.is_running:self.fetch(self.cur,'players','status')
 
     def poll_slow(self):
-        for station in self.stations:self.fetch(station,'status')
+        # The overview is a shared 15-second snapshot, not a per-lobby one-second poll.
+        if not self.is_running or self.overview_updated == self.fleet.updated:
+            return
+        self.overview_updated = self.fleet.updated
+        for station in self.stations:
+            if station is not self.cur:
+                self.fetch(station,'status')
 
     @work(exclusive=True,group='fleet-refresh')
     async def action_refresh_fleet(self):
@@ -457,6 +464,14 @@ class FleetApp(OniApp):
             for station in self.stations:
                 row=self.fleet.rows.get(station.rcon.ident)
                 station.label=self.label(row) if row else station.label.split(' [retired]')[0]+' [retired]'
+                if station is not self.cur or row is None:
+                    # Only the selected lobby needs native detail; keep overview/retirement identity lightweight.
+                    station.data = {k: v for k, v in station.data.items() if k == 'status' and row is not None}
+                    station.first_seen.clear()
+                    station.pings.clear()
+                    station.medals.new_game()
+                    station.medals.earned.clear()
+                    station.painted = False
             nodes=sorted({r['node'] for r in self.catalog.values()})
             if nodes!=self.browser_nodes:
                 self.browser_nodes=nodes
@@ -465,7 +480,7 @@ class FleetApp(OniApp):
                 with selector.prevent(Select.Changed):
                     selector.set_options([('All nodes','all'),*((n.upper(),n) for n in nodes)])
                     selector.value=value
-            self.apply_browser();self.poll_slow();self.paint_all()
+            self.apply_browser();self.poll_slow();self.paint_all(feed=False)
         except Exception as exc:self.notify(str(exc),title='Fleet refresh unavailable',severity='warning')
 
     async def cmd(self, station, command, *args, **kwargs):

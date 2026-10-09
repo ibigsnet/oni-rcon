@@ -890,6 +890,7 @@ def test_now_playing_credit(fake, tmp_path):
                                                        "files": []})
             await app.cur.rcon.call("load", "pit_stop", "slayer")
             await app._fetch(app.cur, ("status",))
+            await pilot.press("f3")  # hidden panels render their current data when opened
             await pilot.pause()
             text = plain(app.query_one("#sitrep"))
             assert "FORGE" in text and "Pit Stop  by Kestrel  v1.2" in text

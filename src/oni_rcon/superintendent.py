@@ -137,6 +137,10 @@ class Superintendent:
     since: float = float("-inf")
     last: str = ""  # a few words on what it reacted to, for under the face
     seen: int = 0  # reactions so far: the blink schedule varies with it
+    _face_key: tuple = field(default=(), repr=False)
+    _face: Text | None = field(default=None, repr=False)
+    _card_key: tuple = field(default=(), repr=False)
+    _card: Text | None = field(default=None, repr=False)
 
     def wants(self, ev: dict) -> bool:
         """Whether the event earns a reaction: asked first, so the words for the ones that don't are never made."""
@@ -197,7 +201,9 @@ class Superintendent:
         t = self.now()
         cur, e = self.look_at(t)
         key = tuple(round(v, 1) if isinstance(v, float) else v for v in vars(e).values()) + (cur.mood, self.last)
-        return face(e, n), cur.mood, cur.color, self.last, key
+        if self._face_key != (n, *key):
+            self._face_key, self._face = (n, *key), face(e, n)
+        return self._face, cur.mood, cur.color, self.last, key
 
 
 def card(sup: Superintendent, width: int, n: int = SMALL) -> tuple[Text, tuple]:
@@ -205,6 +211,9 @@ def card(sup: Superintendent, width: int, n: int = SMALL) -> tuple[Text, tuple]:
     `width` is the room in cells. The key changes when the picture does, so an unchanged one needn't be repainted."""
     art, mood, color, last, key = sup.look(n)
     room, rows = max(8, width - n - 1), n // 2
+    card_key = key + (n, room, color)
+    if sup._card_key == card_key:
+        return sup._card, card_key
     side = [Text("SUPERINTENDENT", DIM), Text(mood, color)] + ([Text("")] if rows >= 6 else [])
     for line in side:
         line.truncate(room)  # never wrap: a wrapped line would make the strip taller than its room
@@ -216,7 +225,8 @@ def card(sup: Superintendent, width: int, n: int = SMALL) -> tuple[Text, tuple]:
     side += [Text(line, WHITE if last else DIM) for line in said]
     lines = art.split("\n")
     out = Text("\n").join(Text.assemble(row, " ", side[i] if i < len(side) else Text("")) for i, row in enumerate(lines))
-    return out, key + (n, room)
+    sup._card_key, sup._card = card_key, out
+    return out, card_key
 
 
 __all__ = ["BIG", "MINI", "SMALL", "Expr", "Reaction", "REACTIONS", "Superintendent", "card", "classify", "face"]

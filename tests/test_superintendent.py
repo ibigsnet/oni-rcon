@@ -282,10 +282,8 @@ def test_animations_off_means_no_blinking_in_the_console():
         app.animation_level = "none"  # what the environment variable sets, once the app has read it
         async with app.run_test(size=(120, 36)) as pilot:
             assert await until(pilot, lambda: all(st.online for st in app.stations))
-            await pilot.pause(0.3)
-            assert app.sup.motion is False
+            assert await until(pilot, lambda: app.sup.motion is False)
             assert not any(app.sup.blinking(i * 0.05) for i in range(400))
             app.animation_level = "full"
-            await pilot.pause(0.3)
-            assert app.sup.motion is True  # and it follows the setting
+            assert await until(pilot, lambda: app.sup.motion is True)  # follows the setting on its next tick
     asyncio.run(go())

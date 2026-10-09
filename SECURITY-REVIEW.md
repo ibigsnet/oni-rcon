@@ -1,5 +1,7 @@
 # Source review — 2026-10-09, upstream 0.7.0
 
+The 0.7.0+ibigs.2 performance pass keeps all network/authentication and write-confirmation boundaries. It bounds the pre-layout terminal log queue as well as rendered history, releases unselected fleet detail caches, and coalesces overview work by snapshot generation. Native player polling stays at three seconds. Selected controls repaint immediately on disconnect; hidden views refresh before use. The final suite passes 149 tests, including unchanged command targets, redaction after hidden-panel transitions, bounded hidden logs, preserved scrollback, and process cleanup. No runtime dependencies changed.
+
 Reviewed upstream range: `e5772fe56a558f164f6a55d270795d8bc8104718` (0.6.0) through
 `dfd7a6124f510139f00377c3aff5fadc05802918` (0.7.0), including 0.6.1
 `a8c17e551408fed530f35ed90cef0fe84799e632` and 0.6.2 `3e32178ca7010cc197d820a33ac94c3cf3016e7f`.

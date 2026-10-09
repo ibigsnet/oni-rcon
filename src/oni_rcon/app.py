@@ -12,9 +12,11 @@ from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from os.path import commonprefix
+from os import environ
 from typing import Callable
 
 from rich.console import Group
+from rich.cells import cell_len
 from rich.json import JSON
 from rich.measure import measure_renderables
 from rich.table import Table
@@ -100,6 +102,9 @@ FLEET = 12  # more stations than this: slimmer cards, a summary on the boot scre
 FANOUT = 4  # an @all command or broadcast reaches this many stations at a time
 SIGN_INS = 8  # stations signing in at once
 SLOW_POLL = 15  # seconds in which every station's status comes round once
+UI_LOG_LIMIT = 1000  # recent terminal history; authoritative server/controller logs stay on disk
+COMMAND_HISTORY_LIMIT = 200
+FORGE_DETAIL_LIMIT = 128
 QUIET_PHASES = {"", "unknown", "none"}  # a phase that says nothing: left off the card, for the map and mode
 SEPARATORS = (" · ", " | ", " - ", " — ", ": ")  # between a community's tag and a server's own name
 FREE_TEXT = {"say": 0, "tell": 1, "kick": 1, "servername": 0}  # console commands whose last argument is the rest
@@ -520,15 +525,14 @@ class Station:
 
 # --- dialogs: titles and bodies are Text, because they carry player names and markup in a name must stay a name ---
 class Dialog(ModalScreen):
-    """A modal that dims the screen behind it as its box rises into place (the -enter transitions in oni.tcss)."""
-    DEFAULT_CLASSES = "-enter"
+    """A stationary modal: opening a control never moves the content underneath it."""
 
     @staticmethod
     def keys(*hints: str) -> Static:
         return Static(Text("   ·   ".join(hints), DIM), classes="dialog-keys")
 
     def on_mount(self) -> None:
-        self.call_after_refresh(self.remove_class, "-enter")
+        pass  # subclasses call this hook; dialogs need no entrance animation
 
 
 class Confirm(Dialog):
@@ -967,7 +971,10 @@ class Roster(DataTable):
             if r < have:
                 for c, v in enumerate(cells):
                     if not same(v, self.cells[r][c]):
-                        self.update_cell_at(Coordinate(r, c), v, update_width=True)
+                        previous = self.cells[r][c]
+                        before_width = previous.cell_len if isinstance(previous, Text) else cell_len(str(previous))
+                        after_width = v.cell_len if isinstance(v, Text) else cell_len(str(v))
+                        self.update_cell_at(Coordinate(r, c), v, update_width=after_width != before_width)
                         changed = True
             else:
                 self.add_row(*cells, key=str(r))
@@ -990,12 +997,19 @@ class Feed(RichLog):
     #           first size read after a write re-arranges the whole screen, and that was most of what a couple of
     #           hundred servers' events cost
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Textual's max_lines bounds rendered lines, but its pre-layout queue is otherwise unbounded.
+        # This queue is part of our pinned Textual 8 implementation; regression coverage guards upgrades.
+        self._deferred_renders = deque(maxlen=self.max_lines or UI_LOG_LIMIT)
+
     def measure(self) -> None:
         if self.size.width:
             self.room = self.scrollable_content_region.width
             self.app.tabs_width = self.app.query_one(TabbedContent).size.width
             self.inset = self.app.tabs_width - self.room + (
-                0 if self.show_vertical_scrollbar else self.styles.scrollbar_size_vertical)  # as if the bar is there
+                0 if self.show_vertical_scrollbar or self.styles.scrollbar_gutter == "stable"
+                else self.styles.scrollbar_size_vertical)  # as if the bar is there
 
     def on_resize(self, event: events.Resize) -> None:  # RichLog's own runs as well
         self.measure()
@@ -1067,6 +1081,8 @@ class OniApp(App):
     def __init__(self, servers: list[Server], by: str, intro: bool = True, updater: Callable[[], str] | None = None,
                  hint: str = "", rcon_factory=Rcon, forge: ForgeSetup | None = None):
         super().__init__()
+        if "TEXTUAL_ANIMATIONS" not in environ:
+            self.animation_level = "none"
         self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
         self.rcon_factory = rcon_factory
         self.fsetup = forge or ForgeSetup()
@@ -1090,7 +1106,8 @@ class OniApp(App):
         self.large_fleet = len(servers) > FLEET
         self.label_width = self.measure_labels()
         self.sel, self.redact, self.raw_events = 0, True, False
-        self.feed: deque = deque(maxlen=3000)
+        self.feed: deque = deque(maxlen=UI_LOG_LIMIT)
+        self.feed_pending: deque = deque(maxlen=UI_LOG_LIMIT)
         self.filters, self.local_only = set(CATS), False
         self.tunnels: dict[str, Tunnel] = {}
         self.history: list[str] = []
@@ -1138,7 +1155,7 @@ class OniApp(App):
                         for cat in CATS:
                             yield Checkbox(cat.upper(), True, id=f"f-{cat}")
                         yield Checkbox("THIS STATION ONLY", False, id="f-local")
-                    yield Feed(id="feed", wrap=True, max_lines=3000)
+                    yield Feed(id="feed", wrap=True, max_lines=UI_LOG_LIMIT)
                     yield Input(id="say", placeholder="» type to chat as [Server] on this server   ·   start with @all "
                                                       "to reach every server")
                 with TabPane("F3 OPERATIONS", id="operations"):
@@ -1162,7 +1179,7 @@ class OniApp(App):
                             for op, label, variant in BAN_OPS:
                                 yield Button(label, id=f"bl-{op}", variant=variant)
                 with TabPane("F5 CONSOLE", id="console"):
-                    yield Feed(id="console-log", wrap=True, max_lines=5000)
+                    yield Feed(id="console-log", wrap=True, max_lines=UI_LOG_LIMIT)
                     with Horizontal(id="console-bar"):
                         yield CommandInput(id="cmd", placeholder="command   ·   @all <command> runs on every station   ·   ↑↓ history",
                                            suggester=SuggestFromList(COMMANDS, case_sensitive=False))
@@ -1213,7 +1230,9 @@ class OniApp(App):
                 "#versions": ["", "VERSION", "PUBLISHED", "NOTES"]}
         for sel, c in cols.items():
             if not (t := self.query_one(sel, DataTable)).columns:  # once, whatever mounts twice
-                t.add_columns(*c)
+                fixed = {"#": 3, "SCORE": 5, "K": 3, "D": 3, "K/D": 5, "PING": 5} if sel == "#players" else {}
+                for label in c:
+                    t.add_column(label, width=fixed.get(label))
         for sel, title in {"#players": "ASSETS IN THEATRE", "#dossier-box": "DOSSIER", "#feed": "SIGINT FEED",
                            "#sitrep": "SITREP", "#theatre": "THEATRE", "#rotation": "ROTATION", "#bans": "BLACKLIST",
                            "#vpn": "VPN ALLOWANCES", "#console-log": "COMMAND LOG", "#listings": "FORGE CATALOG",
@@ -1257,8 +1276,8 @@ class OniApp(App):
         self.set_interval(1, self.tick)
         self.set_interval(3, self.poll_fast)
         self.set_interval(1, self.poll_slow)
-        self.set_interval(0.15, self.animate_cards)
-        self.set_interval(0.12, self.tick_super)
+        self.set_interval(0.5 if self.animation_level == "none" else 0.15, self.animate_cards)
+        self.set_interval(0.5 if self.animation_level == "none" else 0.12, self.tick_super)
         self.set_interval(self.fsetup.poll, self.forge_watch)
         self.set_timer(5, self.forge_watch)  # once soon after start, for what changed while the console was closed
         self.paint_all()
@@ -1267,6 +1286,7 @@ class OniApp(App):
         else:
             self.welcome()
         self.on_resize()
+        self.tick_super()  # reserve and fill the status strip before the first frame, not half a second later
         if self.updater:  # a thread of its own rather than a worker: a slow download must not hold up quitting
             threading.Thread(target=self.check_update, daemon=True).start()
 
@@ -1314,7 +1334,8 @@ class OniApp(App):
         every station card showing; failing that the list gives up rows (it scrolls) to two cards, then to one;
         failing that the smallest face, which is what a very short terminal gets."""
         room, need, card = self.sidebar_room()
-        across = self.query_one("#sidebar").size.width - 2  # a cell of padding each side of the strip
+        default_width = 30 if self.size.width < 140 else 46 if self.size.width >= 200 else 36
+        across = (self.query_one("#sidebar").size.width or default_width) - 2
         for n, spare in [(BIG, need), (SMALL, need), (MINI, need), (SMALL, 2 * card), (MINI, 2 * card), (MINI, card)]:
             if across >= n + 1 + 14 and room - min(need, spare) >= n // 2 + 2:
                 return n
@@ -1399,6 +1420,8 @@ class OniApp(App):
             st.prev = state
         self.paint_card(st)
         self.paint_masthead()
+        if st is self.cur:
+            self.paint(st, ("players", "status", "bans", "vpn"))
 
     def on_tunnel(self, tun: Tunnel, state: str, detail: str) -> None:
         if not self.is_running:  # a late reply or event while quitting: the widgets are already gone
@@ -1462,8 +1485,11 @@ class OniApp(App):
 
     async def _fetch(self, st: Station, what: tuple) -> None:
         replies = await asyncio.gather(*(st.rcon.call(w) for w in what), return_exceptions=True)
+        changed = []
         for w, r in zip(what, replies):
             if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
+                if w == "players" or r["data"] != st.data.get(w):  # NEW badges and log-derived ping can age/change
+                    changed.append(w)
                 if w == "status" and r["data"].get("phase") != st.data.get("status", {}).get("phase"):
                     st.medals.new_game()
                 if w == "status":  # rounds played, kept locally: see stats.py
@@ -1471,7 +1497,8 @@ class OniApp(App):
                     if self.TRACK_ROUNDS:
                         self.rounds.observe(where, r["data"], lambda m, g, where=where: self.fstate.playing(where, m, g))
                 st.data[w] = r["data"]
-        self.paint(st, what)
+        if changed:
+            self.paint(st, tuple(changed))
 
     def poll_fast(self) -> None:
         if not self.is_running:  # the 3 s timer can fire once more while quitting
@@ -1630,7 +1657,18 @@ class OniApp(App):
     def log_event(self, st: Station | None, ev: dict) -> None:
         self.feed.append((st, ev))
         if self.shown(st, ev):
-            self.query_one("#feed", RichLog).write(self.feed_line(st, ev))
+            if self.query_one(TabbedContent).active == "intercepts":
+                self.query_one("#feed", RichLog).write(self.feed_line(st, ev))
+            else:
+                self.feed_pending.append((st, ev))
+
+    def flush_feed(self) -> None:
+        log = self.query_one("#feed", RichLog)
+        with self.batch_update():
+            while self.feed_pending:
+                st, ev = self.feed_pending.popleft()
+                if self.shown(st, ev):
+                    log.write(self.feed_line(st, ev))
 
     def shown(self, st: Station | None, ev: dict) -> bool:
         return KIND.get(ev.get("event"), "ops") in self.filters and not (self.local_only and st not in (None, self.cur))
@@ -1645,11 +1683,12 @@ class OniApp(App):
         self.paint_card(st)
         if st is not self.cur:
             return
-        if "players" in what:
+        pane = self.query_one(TabbedContent).active
+        if pane == "assets" and "players" in what:
             self.paint_players()
-        if {"status", "nextmap", "vote", "players"} & set(what):
+        if pane == "operations" and {"status", "nextmap", "vote", "players"} & set(what):
             self.paint_ops()
-        if {"bans", "vpn"} & set(what):
+        if pane == "blacklist" and {"bans", "vpn"} & set(what):
             self.paint_bans()
 
     def paint_all(self, feed: bool = True) -> None:
@@ -1768,6 +1807,8 @@ class OniApp(App):
             return
         self.frame += 1
         now, moving = time.monotonic(), self.animation_level != "none"
+        if not moving and not self.lit:
+            return  # retry countdowns already refresh on the one-second clock
         for i, (st, card) in enumerate(zip(self.stations, self.cards)):
             if i not in self.seen:
                 continue
@@ -1827,6 +1868,7 @@ class OniApp(App):
                                ping_cell(st.pings.get(str(pick(p, "player_id", "id")))), bar(p.get("health")), bar(p.get("shields")), flags]))
         t = self.query_one("#players", Roster)
         t.fill(rows)
+        st.first_seen = {key: stamp for key, stamp in st.first_seen.items() if key in self.row_players}
         st.painted = st.painted or "players" in st.data  # everyone here at the first look isn't news
         mx = st.data.get("players", {}).get("max_players") or st.data.get("status", {}).get("max_players")
         t.border_title = Text(f"ASSETS IN THEATRE · {len(players)}/{mx or '?'}")
@@ -2013,6 +2055,7 @@ class OniApp(App):
                 op == "unban" and not self.ban_rows or op == "vpnrevoke" and not self.vpn_rows)
 
     def repaint_feed(self) -> None:
+        self.feed_pending.clear()
         log = self.query_one("#feed", RichLog)
         log.clear()
         for st, ev in list(self.feed)[-1000:]:
@@ -2052,22 +2095,18 @@ class OniApp(App):
         if e.pane.id == "forge" and not self.forge_opened:  # fetched when first wanted, not at every start
             self.forge_opened = True
             self.forge_load()
+        if e.pane.id == "assets":
+            self.paint_players()
+        elif e.pane.id == "operations":
+            self.paint_ops()
+        elif e.pane.id == "blacklist":
+            self.paint_bans()
+        elif e.pane.id == "intercepts":
+            self.flush_feed()
         if e.pane.id == "intercepts" and self.unseen:  # every station's alerts are in the feed: seen now
             for st in self.stations:
                 st.alerts = 0
             self.paint_all(feed=False)
-
-    @on(TabbedContent.TabActivated)
-    def _slide_in(self, e: TabbedContent.TabActivated) -> None:
-        """The new tab's content glides in from the right. A slide, not a fade: opacity changes get cached into the
-        logs' rendered lines and leave them dim."""
-        pane = e.pane
-        pane.add_class("-from")  # jumps there: only -slide carries the transition
-
-        def glide() -> None:
-            pane.add_class("-slide").remove_class("-from")
-            self.set_timer(0.3, lambda: pane.remove_class("-slide"))
-        self.call_after_refresh(glide)
 
     @on(Checkbox.Changed)
     def _check(self, e: Checkbox.Changed) -> None:
@@ -2099,6 +2138,7 @@ class OniApp(App):
             return
         if line not in self.history[-1:]:
             self.history.append(line)
+            del self.history[:-COMMAND_HISTORY_LIMIT]
         self.hpos, self.draft = len(self.history), ""
         self.query_one("#console-log", RichLog).scroll_end(animate=False)  # you'll want to see the reply
         if line == "clear":
@@ -2476,6 +2516,8 @@ class OniApp(App):
             self.details[lid] = {**self.listing_rows.get(lid, {}), "_error": e.text}
         else:
             self.details[lid] = {**self.listing_rows.get(lid, {}), **d}
+        while len(self.details) > FORGE_DETAIL_LIMIT:
+            del self.details[next(iter(self.details))]
         if self.is_running and self.query_one("#listings", Roster).selected == lid:
             self.paint_listing()
 

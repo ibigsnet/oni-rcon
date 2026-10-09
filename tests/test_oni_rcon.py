@@ -315,6 +315,7 @@ def test_app_keeps_the_selection_and_redacts():
         app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
         async with app.run_test(size=(160, 48)) as pilot:
             await settle(app, pilot, "players", "bans", "vpn")
+            await pilot.press("f4")  # inspect the visible blacklist, not an unrendered hidden panel
             bans = app.query_one("#bans")
             assert str(bans.get_row_at(0)[-1]) == "Admin"  # BY reads the server's banned_by, not the group id
             bans.move_cursor(row=3)
@@ -477,8 +478,9 @@ def test_feed_holds_still_and_keeps_its_width(monkeypatch):
             await pilot.press("f1")  # shown once and hidden again: a plain RichLog wraps what it gets at 78
             feed, st = app.query_one("#feed"), app.stations[0]
             app.on_rcon_event(st.rcon, {"type": "event", "event": "join", "name": "Wrapper", "note": "x" * 50})
-            assert any("Wrapper" in line.text and "x" * 50 in line.text for line in feed.lines)  # ~97 wide, whole
+            assert app.feed_pending  # hidden logs retain bounded data and paint when opened
             await pilot.press("f2")
+            assert any("Wrapper" in line.text and "x" * 50 in line.text for line in feed.lines)  # ~97 wide, whole
             chat = lambda i: {"type": "event", "event": "chat", "channel": "all", "name": "Rook", "text": f"line {i}"}
             for i in range(120):
                 app.on_rcon_event(st.rcon, chat(i))
