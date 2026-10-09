@@ -1,4 +1,44 @@
-# Source review — 2026-10-09, upstream 0.6.0
+# Source review — 2026-10-09, upstream 0.7.0
+
+Reviewed upstream range: `e5772fe56a558f164f6a55d270795d8bc8104718` (0.6.0) through
+`dfd7a6124f510139f00377c3aff5fadc05802918` (0.7.0), including 0.6.1
+`a8c17e551408fed530f35ed90cef0fe84799e632` and 0.6.2 `3e32178ca7010cc197d820a33ac94c3cf3016e7f`.
+Primary release notes: [0.6.1](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.1),
+[0.6.2](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.2),
+[0.7.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.7.0). Maintained source version: `0.7.0+ibigs.1`.
+This is source review, not a formal audit or verification of upstream executables.
+
+This range adds visible-card rendering and cached layout measurements, an 80-column Operations layout fix,
+correct ban-moderator attribution, and optional join-time player ping from server connection logs. Runtime
+dependency pins, dependency declarations and the Docker base are unchanged; no new dependency audit is claimed.
+
+IBIGS integration decisions:
+
+- Replaced upstream's new shell-string `ping_log` subprocess with an opt-in argument array. Configured shell
+  operators are literal arguments; command strings are refused. Remote argument quoting uses a fixed POSIX
+  supervisor, strict SSH host verification, no PTY and bounded reconnect backoff. Linux process groups are cleaned
+  up when the source ends or the UI closes. Missing commands/read permissions do not expose arguments or raw logs.
+- Join-ping parsing retains only bounded player IDs and integer milliseconds in memory, up to 5,000 records per
+  station. It neither persists raw logs nor displays source addresses. It is a last observed join-time sample,
+  not live latency, loss telemetry or a moderation signal. No matching record displays unknown (`—`).
+- The new subprocess path is only for an operator-configured direct or SSH station. URL connections, including
+  `fleet://`, never start it. fleet-console gets no Docker socket, logs, SSH credentials or extra privileges, and cached
+  RCON response latency is never presented as player ping. Existing customer automatic discovery does not enable
+  log readers; manual configuration and existing read permission are required.
+- Adapted upstream's visible-card optimization to IBIGS sorted/filtered stable station identities. Added proper
+  card type, index and RCON callback registration for dynamically discovered lobbies. Sorting/filtering still
+  cannot silently retarget commands, and new station discovery performs no game mutation.
+- Preserved the managed Forge projection, target checks, credential redaction, download validation, F6/F9 modes,
+  withdrawn-release tracking, tagged broadcasts and player directory. Binary self-updates remain disabled; client
+  updates continue through the separately maintained IBIGS signed publication channel.
+
+Focused validation uses offline RCON/controller fixtures, a local log helper, a local POSIX supervisor and temporary
+files. It covers literal command arguments, rejected shell strings, managed-mode process exclusion, cleanup of log
+helper descendants, log-source exit, dynamic discovery, stable filtered viewport identities, and F3 then Help at
+80×32. All 24 focused checks passed with Python 3.12 on 2026-10-09. No production broadcasts, moderation, game loads, stops or restarts are source tests. Final combined-suite
+and image canary results are recorded separately during release promotion.
+
+## Historical source review — upstream 0.6.0
 
 Reviewed upstream range: `8703bde` (0.4.0) through `e5772fe56a558f164f6a55d270795d8bc8104718` (0.6.0), including 0.5.0 `a8e7a21539e219baf6563ceb599142e96b6cabc3`. Primary release notes: [0.5.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.5.0), [0.6.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.6.0). Maintained source version: `0.6.0+ibigs.1`. This is a source review, not a formal audit or verification of upstream executables.
 

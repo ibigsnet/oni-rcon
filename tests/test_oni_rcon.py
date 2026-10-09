@@ -7,7 +7,7 @@ import pytest
 from rich.text import Text
 
 from oni_rcon import app as appmod
-from oni_rcon.app import (Boot, Form, Help, OniApp, Pick, emblem, explain, parse_command, redact_data, render_event,
+from oni_rcon.app import (JOIN_PING, Boot, Form, Help, OniApp, Pick, emblem, explain, parse_command, redact_data, render_event,
                           resolve, same, sides, split_tag, target_of)
 from oni_rcon.art import biosig, decrypt, hbar, spark, split_bar
 from oni_rcon.config import Server, add_servers, load_config, parse_target, resolve_passwords
@@ -316,6 +316,7 @@ def test_app_keeps_the_selection_and_redacts():
         async with app.run_test(size=(160, 48)) as pilot:
             await settle(app, pilot, "players", "bans", "vpn")
             bans = app.query_one("#bans")
+            assert str(bans.get_row_at(0)[-1]) == "Admin"  # BY reads the server's banned_by, not the group id
             bans.move_cursor(row=3)
             chosen = app.ban_rows[bans.selected]
             fake.bans["players"].insert(0, {"id": "f" * 32, "name": "New", "reason": "y"})  # someone else bans
@@ -336,6 +337,36 @@ def test_app_keeps_the_selection_and_redacts():
             assert app.condition()[0] == "RED" and other.alerts == app.unseen == 1
             await pilot.press("f2")  # every station's alerts are in the feed: seen
             assert app.unseen == 0
+
+    asyncio.run(go())
+
+
+def test_join_ping_comes_from_the_log(tmp_path):
+    line = "[S] Bob connected from 203.0.113.9 (player ID ab12cd, ping 77 ms)."
+    assert JOIN_PING.search(line).groups() == ("ab12cd", "77") and not JOIN_PING.search("[S] Bob left")
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('ping_log = ["tail", "-f", "/log/{port}"]\n[[server]]\nport = 5\n[[server]]\nurl = "ws://x/y"\n')
+    ours, remote = load_config(cfg)[1]
+    assert ours.ping_log == ["tail", "-f", "/log/5"] and remote.ping_log == []
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        pid = keep[0].players[0]["player_id"]
+        script = tmp_path / "log.py"
+        script.write_text(f"print({line.replace('ab12cd', pid)!r})\n")
+        servers = [Server(port=p, password="demo") for p in ports]
+        servers[0].ping_log = [sys.executable, str(script)]
+        app = OniApp(servers, by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players")
+            for _ in range(60):  # the follower starts a process: give it a moment
+                await pilot.pause(0.1)
+                if app.stations[0].pings:
+                    break
+            assert app.stations[0].pings == {pid: 77}
+            app.paint_players()
+            t = app.query_one("#players")
+            assert "77" in [str(c) for r in range(t.row_count) for c in t.get_row_at(r)]
 
     asyncio.run(go())
 
@@ -408,6 +439,30 @@ def test_reconnect_takes_the_password_again():
             await settle(app, pilot, "players")
             assert app.stations[0].online
 
+    asyncio.run(go())
+
+
+def test_operations_tab_survives_a_narrow_terminal():
+    """F3 at 80 columns used to raise measuring a button grid squeezed to nothing beside the sitrep."""
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(80, 24)) as pilot:
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if all(st.online for st in app.stations):
+                    break
+            await pilot.press("f3")
+            await pilot.pause(0.3)
+            for size in ((80, 24), (80, 20), (100, 30), (119, 30), (80, 32)):
+                await pilot.resize_terminal(*size)
+                await pilot.pause(0.2)
+                assert all(b.region.width >= 8 for b in app.query(".ops-grid Button")), size
+            await pilot.press("question_mark")
+            await pilot.pause(0.2)
+            assert isinstance(app.screen, Help)
+            await pilot.press("escape")
+            assert app.is_running
     asyncio.run(go())
 
 
@@ -526,6 +581,28 @@ def test_a_fleet():
             await pilot.press(*"server 9", "enter")
             await pilot.pause(0.2)
             assert app.cur.label == "Server 9"
+
+    asyncio.run(go())
+
+
+def test_a_big_fleet_only_draws_the_cards_in_view():
+    """Redrawing a card Textual isn't showing re-arranges the whole screen: with 200 stations, most of the console's time."""
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=fleet(60))
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await settle(app, pilot, "status")
+            await pilot.pause(0.5)
+            stations = app.query_one("#stations")
+            assert 0 in app.seen and 59 not in app.seen and len(app.seen) < 20
+            assert app.stations[0].drawn and not app.stations[59].drawn  # the last isn't drawn until it's in view
+            stations.scroll_end(animate=False)
+            await pilot.pause(0.3)
+            assert 59 in app.seen and 0 not in app.seen
+            assert app.stations[59].drawn
+            for key in ("f1", "f2", "f3", "f4", "f5", "f6"):  # and every tab still lays out with a fleet
+                await pilot.press(key)
+                await pilot.pause(0.2)
 
     asyncio.run(go())
 

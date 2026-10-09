@@ -23,6 +23,8 @@ class Server:
     password_env: str = ""
     password_command: str | list[str] = ""
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
+    # not a [[server]] key (older versions refuse unknown ones): set from the top-level ping_log by load_config
+    ping_log: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self):
         if not (self.url or self.port):
@@ -69,7 +71,23 @@ def load_config(path: Path) -> tuple[str, list[Server]]:
         raise SystemExit(f"{path}: {e}") from None
     if not servers:
         raise SystemExit(f"{path}: no [[server]] entries")
+    tmpl = data.get("ping_log")
+    if tmpl not in (None, "", []):
+        try:
+            ping_command(tmpl, 0)
+            for s in servers:
+                s.ping_log = [] if s.url else ping_command(tmpl, s.port)
+        except ValueError as exc:
+            raise SystemExit(f"{path}: {exc}") from None
     return data.get("by", ""), servers
+
+
+def ping_command(value, port: int) -> list[str]:
+    """Explicit arguments for an optional join-log follower; never a shell program from configuration."""
+    if (not isinstance(value, list) or not 1 <= len(value) <= 64
+            or not all(isinstance(arg, str) and arg and len(arg) <= 4096 and '\x00' not in arg for arg in value)):
+        raise ValueError('ping_log must be an explicit argument list; shell commands are disabled')
+    return [arg.replace('{port}', str(port)) for arg in value]
 
 
 def resolve_passwords(servers: list[Server]) -> None:

@@ -7,3 +7,6 @@ build/
 *.egg-info/
 # your own server list (may name hosts; never put a password in it)
 oni-rcon.toml
+# ban lists are player data (IDs, IPs): never commit one, or a backup of one
+bans*.json
+*.bak*

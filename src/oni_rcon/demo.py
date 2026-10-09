@@ -39,7 +39,7 @@ class Fake:
                        "next": None, "playlist_vote": True}
         self.players = [self._player(n) for n in random.sample(CALLSIGNS, crowd)]
         self.bans = {"players": [{"id": "9f3a" + "0" * 28, "name": "Griefer", "reason": "team killing", "expires": None,
-                                  "by": "Admin"}],
+                                  "banned_by": "Admin"}],
                      "ips": [{"ip": "198.51.100.0/24", "reason": "ban evasion", "expires": time.time() + 86400 * 6}],
                      "devices": []}
         self.allowed = [{"target": "192.0.2.44", "note": "mobile hotspot"}]
@@ -139,7 +139,7 @@ class Fake:
                 self.players.remove(p)
                 if cmd == "ban":
                     self.bans["players"].append({"id": p["player_id"], "name": p["name"], "reason": " ".join(args[1:]),
-                                                 "by": by, "expires": None})
+                                                 "banned_by": by, "expires": None})
                 await self.emit(cmd, player=p["name"], by=by, reason=" ".join(args[1:]))
                 return ok(f"{p['name']} was {cmd}{'n' if cmd == 'ban' else ''}ed by {by}.")
             if cmd in ("mute", "unmute"):
