@@ -53,7 +53,7 @@ class PowerPanel(Dialog):
         self.lobs = lobs
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes='dialog'):
+        with Vertical(classes='dialog power'):
             yield Static(Text('START / STOP SERVERS'), classes='dialog-title')
             yield Static(table(self.lobs), classes='dialog-body')
             options = [(f'ALL SERVERS ({len(self.lobs)})', '*')] + \

@@ -117,6 +117,7 @@ ModalScreen.-enter .dialog { offset-y: 3; }
 .dialog-keys { color: $text-muted; margin-top: 1; text-align: right; }
 .dialog Input.-missing, .dialog Select.-missing { border: tall $error; background: $error 20%; }
 .dialog.help { width: 96; height: 90%; }
+.dialog.power { width: 96; }
 #help-body { height: 1fr; scrollbar-size-vertical: 1; }
 .dialog.danger { border: thick $error; }
 .dialog-title { color: $primary; margin-bottom: 1; }
