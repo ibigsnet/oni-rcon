@@ -2,18 +2,27 @@
 the operator's own API key. No key ships with oni-rcon, and it asks for nothing past catalog:read and assets:download.
 
 From the developer docs: a Bearer key over HTTPS; 120 requests per 60 s per key, reported in X-RateLimit-Limit,
--Remaining and -Reset, and Retry-After on a 429; GET /api/listings (page_size, updated_since, sort, window),
-/api/listings/{id}/versions/{version}/manifest and /api/listings/changes (updated_since, then the first page's as_of
-as updated_before on the pages after it).
+-Remaining and -Reset (Unix seconds), and Retry-After on a 429; GET /api/listings (page_size, updated_since, sort,
+window for trending and rising), /api/listings/{id}/versions/{version}/manifest, /api/listings/changes
+(updated_since, then the first page's as_of as updated_before on the pages after it) and /api/favourites.
+Listings carry upvote_count, downvote_count, vote_count and view_count (the star rating is archived: rating_average
+and rating_count are deprecated and no longer read), authors[] ({user_id, username, avatar_url, is_owner}, with
+owner_id still the original owner), a metrics object with download_history_started_at, and versions with
+version_label and release_notes. A change names published_version_ids and withdrawn_version_ids: a version can be
+withdrawn while its listing stays up, and a withdrawn version is never one to select. Descriptions and release notes
+are Markdown written by strangers; they are shown here as plain text with terminal control characters dropped.
+/api/favourites is a bare array of active collections ({id, title, starts_at, ends_at, updated_at, listing_ids,
+listings}), kept here as {"items": [...]} like any array reply.
 
 ASSUMED, until checked against the OpenAPI schema (forgefake.py serves exactly these):
 - GET /api/listings/{id} gives one listing with its "versions".
 - a page is {"items": [...], "next_cursor": ...}, and the next one is asked for with cursor=...
-- GET /api/listings takes q= to search, and window= only with the sorts in WINDOWED.
+- GET /api/listings takes q= to search.
 - a manifest is {"reference", "assets": [{"path", "url", "size", "sha256"}]}, the reference being the name the
   dedicated server lists the map or gametype under once it has the files.
-- a change is {"listing_id", "version_id", "change", "updated_at"}, change being "version_published", "updated" or
-  "withdrawn"; a listing's "status" reads "withdrawn" once it is.
+- a change is {"listing_id", "updated_at", "published_version_ids", "withdrawn_version_ids"}, and a listing's
+  "status" reads "withdrawn" once the whole of it is. The older {"version_id", "change"} spelling still works.
+- recent download counts sit in the listing or in its metrics object, as recent_downloads.
 Field names are read tolerantly, as app.py reads the server's, so another spelling of the same thing still works.
 
 Blocking HTTP (urllib) in threads, like update.py: nothing for the frozen build to miss, and 120 requests a minute
@@ -48,7 +57,8 @@ SITE = "RECLAIMERFORGE.NET"
 SCOPES = ("catalog:read", "assets:download")
 SORTS = ["trending", "rising", "latest", "updated", "downloads", "rated", "unrated", "overlooked"]
 WINDOWS = ["24h", "7d", "30d"]
-WINDOWED = {"trending", "rising", "downloads"}  # ASSUMED: the sorts a window means something for
+WINDOWED = {"trending", "rising"}  # the sorts a window is for, per the docs
+WINDOW_SECONDS = {"24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400}
 CREDIT = ("ReclaimerForge is built and kept running by one of the Reclaimer community, on their own time, and they "
           "signed off on this link-up. Every map, gametype and playlist in F6 is theirs to host and ours to play. "
           "Section Three is in their debt.")
@@ -59,6 +69,8 @@ MAX_ASSET = 1 << 30  # bytes: a manifest claiming more for one file is refused b
 KEY_LIKE = re.compile(r"rfk_[A-Za-z0-9_\-]{6,}")
 HIDDEN = "rfk_…████"
 WITHDRAWN = {"withdrawn", "removed", "unlisted", "taken_down", "takedown", "deleted"}
+UNPUBLISHED = {"draft", "pending", "unpublished"}  # a version that isn't out yet: not one to install
+UNSAFE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f‪-‮⁦-⁩]")  # all but \n and \t, and bidi overrides
 
 
 # --- the key: never printed, never logged ------------------------------------------------------------------------
@@ -156,7 +168,8 @@ EXPLAIN = {
     401: ("KEY REFUSED", "ReclaimerForge refused your API key: it's mistyped, revoked or expired. Make a new one on "
                          "reclaimerforge.net and load it again (k on F6)."),
     403: ("MISSING SCOPE", "Your key isn't allowed to do that. oni-rcon needs a key with the catalog:read and "
-                           "assets:download scopes, and nothing more."),
+                           "assets:download scopes, and nothing more. The account behind it also needs the Developer "
+                           "role and a verified email, or its keys stop working."),
     404: ("NOT AVAILABLE", "That listing or version isn't available. It may have been withdrawn or made private."),
     409: ("CHANGED MEANWHILE", "That listing changed state while you were looking at it. Refresh (Ctrl+R) and try "
                                "again."),
@@ -185,7 +198,7 @@ class ForgeError(Exception):
         words = EXPLAIN[self.status][1] if self.status in EXPLAIN else f"ReclaimerForge answered {self.status}."
         if self.status == 429 and self.retry_after:
             words = f"Your key has used its requests for this minute. Try again in {int(self.retry_after) + 1}s."
-        elif self.status in (0, 422, 502) and self.detail:
+        elif self.status in (0, 409, 422, 502) and self.detail:  # a 409's detail says which state it conflicts with
             words += f" ({self.detail})"
         return words
 
@@ -249,7 +262,7 @@ class Quota:
         with contextlib.suppress(TypeError, ValueError):
             self.remaining = int(headers.get("X-RateLimit-Remaining"))
         with contextlib.suppress(TypeError, ValueError):
-            reset = float(headers.get("X-RateLimit-Reset"))  # seconds from now, or a Unix time
+            reset = float(headers.get("X-RateLimit-Reset"))  # a Unix time in seconds per the docs; seconds from now too
             self.reset_at = time.monotonic() + (reset - time.time() if reset > 1e9 else reset)
 
     def wait(self, background: bool = False) -> float:
@@ -295,6 +308,28 @@ def next_page(reply: dict) -> dict | None:
     return None
 
 
+def tidy(v, lines: bool = False) -> str:
+    """Text from Forge as it's safe on a terminal. Titles, names and descriptions are written by strangers, and a
+    terminal obeys escape sequences: control characters go, and so do the bidi overrides that make one name read as
+    another. One line unless `lines`, which keeps the newlines and tabs Markdown uses. It is shown as plain text,
+    never rendered, so no link or markup in it does anything."""
+    s = UNSAFE.sub("", "" if v is None else str(v))
+    return s.strip() if lines else " ".join(s.split())
+
+
+def shorten(s: str, n: int) -> str:
+    return s if len(s) <= n else s[:n - 1].rstrip() + "…"
+
+
+def id_list(v) -> list[str]:
+    """The ids in a list of them (published_version_ids, listing_ids), in order, without blanks or repeats."""
+    out = []
+    for i in v if isinstance(v, list) else []:
+        if isinstance(i, (str, int)) and not isinstance(i, bool) and str(i) and str(i) not in out:
+            out.append(str(i))
+    return out
+
+
 def listing_id(x) -> str:
     return str(pick(x, "id", "listing_id", default=""))
 
@@ -304,11 +339,22 @@ def version_id(x) -> str:
 
 
 def version_label(x) -> str:
-    return str(pick(x, "version", "label", "name", "number", default=version_id(x))) if isinstance(x, dict) else ""
+    return (tidy(pick(x, "version_label", "version", "label", "name", "number", default=version_id(x)))
+            if isinstance(x, dict) else "")
+
+
+def notes_of(v) -> str:
+    """A version's release notes (Markdown on the website) as one line of plain text."""
+    return tidy(pick(v, "release_notes", "notes", "changelog", "summary", default=""))
+
+
+def blurb_of(x) -> str:
+    """A listing's description (Markdown on the website) as plain text, line breaks kept."""
+    return tidy(pick(x, "description", "summary", "short_description", default=""), lines=True)
 
 
 def title_of(x) -> str:
-    return str(pick(x, "title", "name", default="untitled"))
+    return tidy(pick(x, "title", "name", default="")) or "untitled"
 
 
 def kind_of(x) -> str:
@@ -316,25 +362,49 @@ def kind_of(x) -> str:
     return {"game_type": "gametype", "game type": "gametype", "variant": "gametype", "map_variant": "map"}.get(k, k)
 
 
+def authors_of(x) -> list[dict]:
+    """The listing's authors, the original owner first: [{"user_id", "username", "is_owner"}]. A listing may have
+    several; Forge's stable id for each is user_id."""
+    a = x.get("authors") if isinstance(x, dict) else None
+    out = [{"user_id": str(pick(e, "user_id", "id", default="")),
+            "username": tidy(pick(e, "username", "display_name", "name", default="")),
+            "is_owner": e.get("is_owner") is True}
+           for e in a if isinstance(e, dict)] if isinstance(a, list) else []
+    return sorted((e for e in out if e["username"] or e["user_id"]), key=lambda e: not e["is_owner"])
+
+
 def owner_of(x) -> str:
+    """The original owner's id: owner_id, which Forge keeps whoever else has since been added as an author."""
     o = pick(x, "owner_id", "author_id", "creator_id")
     if o is None and isinstance(x.get("owner"), dict):
         o = pick(x["owner"], "id", "owner_id")
+    if o is None:
+        o = next((e["user_id"] for e in authors_of(x) if e["is_owner"] and e["user_id"]), None)
     return str(o or "")
 
 
 def author_of(x) -> str:
+    """Who made it, as the names to show: every author, the owner first."""
+    if names := [e["username"] for e in authors_of(x) if e["username"]]:
+        return ", ".join(names)
     a = pick(x, "author", "owner_name", "owner_display_name", "author_name", "creator")
     if isinstance(a, dict):
         a = pick(a, "display_name", "name", "username", "handle")
     if not a and isinstance(x.get("owner"), dict):
         a = pick(x["owner"], "display_name", "name", "username", "handle")
-    return str(a or "")
+    return tidy(a)
 
 
 def is_withdrawn(x) -> bool:
+    """A listing or a version that Forge says is withdrawn."""
     return (str(pick(x, "status", "state", default="")).lower() in WITHDRAWN
             or pick(x, "withdrawn") is True or bool(pick(x, "withdrawn_at")))
+
+
+def usable(v) -> bool:
+    """Whether a version can be selected for an install: not withdrawn, and out rather than a draft."""
+    return (isinstance(v, dict) and not is_withdrawn(v)
+            and str(pick(v, "status", "state", default="")).lower() not in UNPUBLISHED)
 
 
 def versions_of(x) -> list[dict]:
@@ -342,42 +412,85 @@ def versions_of(x) -> list[dict]:
     return [e for e in v if isinstance(e, dict)] if isinstance(v, list) else []
 
 
-def latest_of(x) -> dict | None:
-    lv = pick(x, "latest_version", "current_version", "latest_release", "latest")
-    if isinstance(lv, dict):
-        return lv
-    if isinstance(lv, str):
-        return {"id": lv}
-    vs = versions_of(x)
+def when_of(v) -> datetime | None:
+    return parse_iso(pick(v, "published_at", "created_at", "released_at"))
+
+
+def newest(vs: list[dict]) -> dict | None:
+    """The most recent of some versions: by date when each has one, else the first, as Forge lists them."""
+    dated = [(when_of(v), v) for v in vs]
+    if dated and all(d for d, _ in dated):
+        return max(dated, key=lambda p: p[0])[1]
     return vs[0] if vs else None
 
 
-def ratings_of(x) -> tuple:
-    """(up, down, average, count), each None when the listing doesn't say."""
-    r = pick(x, "ratings", "rating_counts", "votes")
-    up = down = avg = count = None
-    if isinstance(r, dict):
-        up, down = num(pick(r, "up", "positive", "likes", "thumbs_up")), num(pick(r, "down", "negative", "dislikes",
-                                                                                      "thumbs_down"))
-        avg, count = num(pick(r, "average", "avg", "mean", "score")), num(pick(r, "count", "total"))
-    avg = avg if avg is not None else num(pick(x, "rating", "rating_average", "average_rating"))
-    count = count if count is not None else num(pick(x, "rating_count", "ratings_count"))
-    if count is None and up is not None:
-        count = up + (down or 0)
-    return up, down, avg, count
+def latest_of(x) -> dict | None:
+    """The newest version that can be installed. A version Forge has withdrawn is never it, even if the listing's
+    own latest_version still names it."""
+    gone = {version_id(v) for v in versions_of(x) if not usable(v)}
+    lv = pick(x, "latest_version", "current_version", "latest_release", "latest")
+    if isinstance(lv, dict) and usable(lv) and version_id(lv) not in gone:
+        return lv
+    if isinstance(lv, str) and lv not in gone:
+        return {"id": lv}
+    return newest([v for v in versions_of(x) if usable(v)])
+
+
+def votes_of(x) -> tuple:
+    """(thumbs up, thumbs down, votes), each None when the listing doesn't say. The star rating (rating_average,
+    rating_count) is archived and deprecated by Forge, doesn't rank anything, and isn't read."""
+    up, down, total = num(pick(x, "upvote_count")), num(pick(x, "downvote_count")), num(pick(x, "vote_count"))
+    if up is None and down is None:  # another spelling of the same thing
+        r = pick(x, "ratings", "rating_counts", "votes")
+        if isinstance(r, dict):
+            up = num(pick(r, "up", "positive", "likes", "thumbs_up"))
+            down = num(pick(r, "down", "negative", "dislikes", "thumbs_down"))
+    if total is None and (up is not None or down is not None):
+        total = (up or 0) + (down or 0)
+    return up, down, total
+
+
+def metrics_of(x) -> dict:
+    m = x.get("metrics") if isinstance(x, dict) else None
+    return m if isinstance(m, dict) else {}
 
 
 def recent_of(x, window: str = ""):
     """Recent downloads: for the window asked for when the listing breaks them down, else what it gives."""
-    r = pick(x, "recent_downloads", "downloads_recent", "window_downloads", "downloads_window")
-    if isinstance(r, dict):
-        r = pick(r, window, "7d", "30d", "24h")
-    return num(r)
+    for src in (x, metrics_of(x)):
+        r = pick(src, "recent_downloads", "downloads_recent", "window_downloads", "downloads_window",
+                 f"recent_downloads_{window}", f"downloads_{window}")
+        if isinstance(r, dict):
+            r = pick(r, window, "7d", "30d", "24h")
+        if num(r) is not None:
+            return num(r)
+    return None
+
+
+def views_of(x):
+    """Lifetime views of the listing page."""
+    for src in (x, metrics_of(x)):
+        if (n := num(pick(src, "view_count", "views"))) is not None:
+            return n
+    return None
+
+
+def history_since(x, window: str = "") -> datetime | None:
+    """When Forge began recording download history, if that is later than the start of `window`: the recent count
+    then covers only part of it. Recent windows fill from deployment onward and nothing is backfilled."""
+    began = parse_iso(pick(metrics_of(x), "download_history_started_at"))
+    span = WINDOW_SECONDS.get(window)
+    return began if began and span and began > datetime.now(timezone.utc) - timedelta(seconds=span) else None
 
 
 def compat_of(x):
-    return pick(x, "compatibility", "compatible_versions", "reclaimer_versions", "compatible_with", "requires",
-                "game_version")
+    """What a listing says it runs on. Compatibility is set per version and frozen when it's published, so the
+    newest installable version's says when the listing itself doesn't."""
+    keys = ("compatibility", "compatible_versions", "reclaimer_versions", "compatible_with", "requires", "game_version")
+    spec = pick(x, *keys)
+    if spec is None and (v := latest_of(x)):
+        spec = pick(v, *keys)
+    return spec
 
 
 def version_tuple(v) -> tuple:
@@ -433,6 +546,44 @@ def before(s: str, seconds: float) -> str:
     return utc_iso(d - timedelta(seconds=seconds)) if d else s
 
 
+def change_listing(c: dict) -> str:
+    return str(pick(c, "listing_id", "id", default=""))
+
+
+def change_key(c: dict) -> str:
+    """What makes a changes-feed entry the same entry when the overlap reads it again: the listing, the time, and
+    which versions it published or withdrew. Deduplication is by these, as the docs ask, never by position."""
+    key = "|".join([change_listing(c), *(str(pick(c, k, default="")) for k in ("version_id", "change", "updated_at"))])
+    for name, short in (("published_version_ids", "pub"), ("withdrawn_version_ids", "wd")):
+        if ids := id_list(c.get(name)):
+            key += f"|{short}:{','.join(sorted(ids))}"
+    return key
+
+
+def active_now(c: dict, now: datetime | None = None) -> bool:
+    """Whether a favourites collection is on: it starts at starts_at (inclusive) and ends at ends_at (exclusive). A
+    bound it doesn't give is open, and one that can't be read leaves the collection as Forge sent it."""
+    now = now or datetime.now(timezone.utc)
+    start, end = parse_iso(pick(c, "starts_at")), parse_iso(pick(c, "ends_at"))
+    return (start is None or start <= now) and (end is None or now < end)
+
+
+def favourite_listings(collections: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """The listings the collections feature, one after another in each collection's order and without repeats, and a
+    note for each saying which collection it's in and until when."""
+    out, seen, notes = [], set(), {}
+    for c in collections:
+        by_id = {listing_id(x): x for x in c.get("listings") or [] if isinstance(x, dict) and listing_id(x)}
+        order = [i for i in id_list(c.get("listing_ids")) if i in by_id]
+        for lid in order + [i for i in by_id if i not in order]:
+            if lid not in seen:
+                seen.add(lid)
+                out.append(by_id[lid])
+                end = str(pick(c, "ends_at", default=""))[:10]
+                notes[lid] = tidy(pick(c, "title", default="Favourites")) + (f", until {end}" if end else "")
+    return out, notes
+
+
 def sha_hex(v) -> str:
     """A manifest's SHA-256 as 64 lowercase hex digits: bare, or as sha256:... Anything else can't be checked."""
     s = str(v or "").strip()
@@ -485,6 +636,11 @@ class Cache:
         if self.dir:
             with contextlib.suppress(OSError):
                 write_atomic(self._file(url), json.dumps({"url": url, "at": time.time(), "body": body}))
+
+    def drop(self, url: str) -> None:
+        if self.dir:
+            with contextlib.suppress(OSError):
+                self._file(url).unlink()
 
 
 class ForgeClient:
@@ -543,6 +699,8 @@ class ForgeClient:
                     data = json.loads(body) if len(body) <= MAX_JSON else None
                 except ValueError:
                     data = None
+                if isinstance(data, list):  # an unpaginated array, as /api/favourites sends: kept as items
+                    data = {"items": data}
                 if not isinstance(data, dict):
                     raise ForgeError(502, "not a JSON object" if data is not None or len(body) <= MAX_JSON
                                      else "reply too large")
@@ -582,6 +740,17 @@ class ForgeClient:
                                                  "window": window if sort in WINDOWED else None, **(more or {})},
                                max_age=0 if fresh else 60)
         return items_of(reply), next_page(reply), reply
+
+    async def favourites(self, fresh: bool = False) -> tuple[list[dict], dict]:
+        """(the collections on now, the reply itself). The feed lists active collections, but a copy served from the
+        cache while Forge is down may be old, so the dates are checked here too. It's read apart from the listings'
+        own changes: curation and its schedule move on their own."""
+        reply = await self.get("/api/favourites", max_age=0 if fresh else 60)
+        return [c for c in items_of(reply) if active_now(c)], reply
+
+    def forget(self, lid: str) -> None:
+        """Drop the kept copy of a listing: Forge has said it changed, so the next look fetches it again."""
+        self.cache.drop(self.url(f"/api/listings/{quote(lid, safe='')}"))
 
     async def listing(self, lid: str, background: bool = False) -> dict:
         reply = await self.get(f"/api/listings/{quote(lid, safe='')}", max_age=0 if background else 60,
