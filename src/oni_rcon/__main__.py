@@ -4,13 +4,15 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+import tempfile
 from pathlib import Path
 
 from . import __version__, update
-from .config import Server, default_config, load_config, parse_target, resolve_passwords, user_config
+from .config import Server, default_config, forge_settings, load_config, parse_target, resolve_passwords, user_config
+from .forge import ForgeSetup, Secret, cache_root, load_key
 
-DEMO_HINT = ("Three pretend servers to look around. Click a player, try the buttons, and press ? for a guide. "
-             "When you're ready, + ADD SERVER (left) connects your own.")
+DEMO_HINT = ("Three pretend servers to look around, and a pretend ReclaimerForge on F6. Click a player, try the "
+             "buttons, and press ? for a guide. When you're ready, + ADD SERVER (left) connects your own.")
 NEW_HINT = "You're in. Click a player for what you can do, or press ? for a guide."
 
 
@@ -52,8 +54,12 @@ def main() -> None:
                 a.by = a.by or by
         if demo:
             from .demo import start_in_thread
+            from .forgefake import start_demo
             servers = [Server(port=p, password="demo") for p in start_in_thread()]
             hint = hint or DEMO_HINT
+            url, key = start_demo()  # a pretend Forge too, with a pretend key: the real one is never touched
+            scratch = Path(tempfile.mkdtemp(prefix="oni-rcon-demo-"))
+            forge = ForgeSetup(Secret(key), "the demo", url=url, poll=30, state_dir=scratch, cache_dir=scratch)
         elif targets:
             try:
                 servers = [parse_target(t, ssh=a.ssh) for t in targets]
@@ -64,13 +70,27 @@ def main() -> None:
             for s in servers:
                 s.password = s.password or typed.get(s.where, "")
         resolve_passwords(servers)
+        if not demo:
+            forge = forge_setup(path)
 
         from .app import OniApp
         result = OniApp(servers, by=a.by or cfg_by or login(), intro=not a.no_intro, updater=updater,
-                        hint=hint).run()
+                        hint=hint, forge=forge).run()
         if result != "setup":
             return
         setup, updater = True, None  # + ADD SERVER: back to the setup screen, then round again; updates checked once
+
+
+def forge_setup(path: Path | None) -> ForgeSetup:
+    """Your own ReclaimerForge key, and where Forge things are kept. No key: the console runs as ever, without it."""
+    settings = forge_settings(path)
+    found = load_key(settings)
+    try:
+        poll = max(60.0, float(settings.get("forge_poll", 600)))  # the key's quota is shared with browsing F6
+    except (TypeError, ValueError):
+        poll = 600.0
+    return ForgeSetup(found.key, found.source, found.error, poll=poll, state_dir=user_config().parent,
+                      cache_dir=cache_root(), config=path)
 
 
 def login() -> str:

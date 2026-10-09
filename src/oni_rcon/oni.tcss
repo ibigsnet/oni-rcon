@@ -34,12 +34,12 @@ Screen { background: $background; }
 .-wide #sidebar { width: 46; }
 #tabs TabPane.-from { offset-x: 4; }
 #tabs TabPane.-slide { transition: offset 220ms out_cubic; }
-DataTable, RichLog, #sitrep, #dossier-box, #theatre {
+DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box {
     border: round $primary 35%;
     border-title-color: $primary;
     background: $background;
 }
-DataTable:focus, RichLog:focus, #dossier-box:focus-within { border: round $secondary; border-title-color: $secondary; }
+DataTable:focus, RichLog:focus, #dossier-box:focus-within, #listing-box:focus-within { border: round $secondary; border-title-color: $secondary; }
 RichLog { border-subtitle-color: $warning; }
 DataTable > .datatable--header { background: $panel; color: $primary; text-style: none; }
 DataTable > .datatable--cursor { background: $primary 30%; color: $foreground; }
@@ -76,6 +76,24 @@ Blacklist { height: 1fr; }
 .bar Button { margin-right: 1; min-width: 0; }
 
 #console-log { height: 1fr; padding: 0 1; }
+
+ForgePane { height: 1fr; }
+#forge-bar { height: auto; }
+#forge-q { width: 1fr; }
+#forge-sort { width: 22; }
+#forge-window { width: 13; }
+#forge-main { height: 1fr; }
+#listings { width: 3fr; height: 1fr; }
+#listing-box { width: 2fr; min-width: 44; height: 1fr; padding: 0 1; border-subtitle-color: $text-muted; }
+#versions { height: auto; max-height: 10; margin-top: 1; scrollbar-size-horizontal: 0; }
+#forge-actions { height: auto; grid-size: 3; grid-gutter: 1 1; margin: 1 0; }
+#forge-actions Button { width: 1fr; min-width: 0; }
+#forge-raw-box { background: $background; border-top: hkey $primary 25%; padding: 0; }
+#forge-raw-box CollapsibleTitle { color: $text-muted; padding: 0; }
+#forge-raw-box CollapsibleTitle:hover, #forge-raw-box CollapsibleTitle:focus { color: $secondary; background: transparent; }
+#forge-raw-box Contents { padding: 0; }
+#forge-credit { margin-top: 1; border-top: hkey $primary 25%; padding-top: 1; }
+.-narrow #listing-box { min-width: 36; }
 #console-bar { height: auto; }
 #cmd { width: 1fr; }
 #raw { width: auto; }

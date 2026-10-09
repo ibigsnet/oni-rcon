@@ -22,6 +22,7 @@ servers first.
 | **F3 Operations** | Sitrep for the selected server with the vote under way and its tally; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
+| **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked, over the last 24 hours, 7 days or 30 days, and search it. Each listing shows its type, author, rating, recent downloads, and whether it runs on the selected server's version; its file lists every version. `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
 
 Also:
 
@@ -163,7 +164,7 @@ port = 11775
 
 [ReclaimerForge](https://www.reclaimerforge.net) is the community catalog of forged maps, gametypes and playlists for
 Reclaimer. oni-rcon reads it with **your own API key**: none ships with oni-rcon, and every admin uses their own.
-Without one, everything else works as before.
+Without one, everything else works as before. `oni-rcon --demo` brings a pretend Forge to try F6 with.
 
 **Get a key** on reclaimerforge.net with the `catalog:read` and `assets:download` scopes, and nothing more. oni-rcon
 never writes, uploads or publishes anything there.
@@ -173,6 +174,9 @@ never writes, uploads or publishes anything there.
 1. `forge_api_key_env = "NAME"` in the config file: the key is in that environment variable
 2. `forge_api_key_command = [...]`: the first line a command prints, from your password manager say
 3. `$ONI_RCON_FORGE_KEY`
+
+Or press `k` on F6 and type it, for this session. Choose **Remember it** there to save it in the config file instead;
+that's off unless you pick it, and the file is then readable only by you.
 
 ```toml
 forge_api_key_env = "RECLAIMERFORGE_KEY"
@@ -204,7 +208,7 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 
 | Key | Action |
 |---|---|
-| `F1`–`F5` | Assets · Intercepts · Operations · Blacklist · Console |
+| `F1`–`F6` | Assets · Intercepts · Operations · Blacklist · Console · Forge |
 | `1`–`9` | select server |
 | `g` | go to any server: the list puts the busiest first and filters as you type |
 | `Ctrl+B` | broadcast |
@@ -216,7 +220,8 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
-| any key | skip the boot sequence; `F1`–`F5` also open that tab (`--no-intro` skips it for good) |
+| `s w n k y` | on the Forge catalog: sort, time window, next page, API key, copy listing ID |
+| any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good) |
 | `Ctrl+Q` | quit |
 
 ## Field names
@@ -234,12 +239,21 @@ uv run oni-rcon --demo
 ```
 
 The demo servers (`oni_rcon/demo.py`) speak the same protocol as a real server and are what the tests run against.
+`oni_rcon/forgefake.py` is a pretend ReclaimerForge, serving the API as `oni_rcon/forge.py` reads it, so neither the
+tests nor `--demo` ever reach the real site. Where the developer docs leave a field name or a page shape open, the
+assumption is written down at the top of `forge.py`.
 Animations follow Textual's `TEXTUAL_ANIMATIONS` (`none`, `basic` or `full`), so `TEXTUAL_ANIMATIONS=none oni-rcon`
 turns them off.
 
 To release, bump `__version__` in `src/oni_rcon/__init__.py`, commit, and push a matching tag (`git tag v0.2.0 &&
 git push --tags`). The release workflow builds the Windows and Linux binaries and publishes them, and running copies
 pick the new version up on their next start.
+
+## Thanks
+
+To the builder of [ReclaimerForge](https://www.reclaimerforge.net), who keeps the community's catalog of forged maps,
+gametypes and playlists running on their own time, and gave this integration the nod. F6 is only there because that
+work is. oni-rcon doesn't speak for ReclaimerForge; it's a separate community project with its own terms.
 
 ## Disclaimer
 

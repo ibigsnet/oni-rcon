@@ -245,3 +245,99 @@ def test_compatibility():
     assert compatible({"min": "0.9.5"}, "0.9.7") and not compatible({"max": "0.9.6"}, "0.9.7")
     assert compatible({"reclaimer": ">=0.9.8"}, "0.9.7") is False
     assert compatible(None, "0.9.7") is None and compatible(">=0.9", "") is None and compatible("soon", "0.9.7") is None
+
+
+# --- the F6 tab ---------------------------------------------------------------------------------------------------
+async def until(pilot, cond, tries: int = 120) -> bool:
+    for _ in range(tries):
+        await pilot.pause(0.05)
+        if cond():
+            return True
+    return False
+
+
+def plain(widget) -> str:
+    """What a Static shows, as text: rendered the way Rich would, Groups and tables included."""
+    import io
+
+    from rich.console import Console
+    console = Console(width=120, file=io.StringIO(), record=True, color_system=None)
+    console.print(widget.content)
+    return console.export_text()
+
+
+def forge_app(ports, fk, tmp_path, key=KEY, servers=None, **kw):
+    from oni_rcon.app import OniApp
+    from oni_rcon.config import Server
+    from oni_rcon.forge import ForgeSetup
+    setup = ForgeSetup(Secret(key) if key else None, "pytest" if key else "", url=fk.base, poll=3600,
+                       state_dir=tmp_path / "state", cache_dir=tmp_path / "cache", **kw)
+    return OniApp(servers or [Server(port=p, password="demo") for p in ports], by="pytest", intro=False, forge=setup)
+
+
+def test_the_forge_tab(fake, tmp_path):
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: all(st.online for st in app.stations))
+            assert not any(path.startswith("/api") for path, *_ in fake.seen)  # nothing asked until F6 is opened
+            await pilot.press("f6")
+            t = app.query_one("#listings")
+            assert await until(pilot, lambda: t.row_count == 25)
+            assert fake.seen[0][1]["sort"] == "trending"
+            assert "requests left this minute" in t.border_subtitle
+            assert await until(pilot, lambda: app.query_one("#versions").row_count > 0)  # the file brings versions
+            file = plain(app.query_one("#listing"))
+            x = app.cur_listing()
+            assert "CATALOG ENTRY" in file and x["title"] in file and x["author"] in file and "on Slayer" in file
+            assert "Section Three" in plain(app.query_one("#forge-credit"))
+
+            app.query_one("#listings").focus()
+            await pilot.press("s")  # trending -> rising, fetched again
+            assert await until(pilot, lambda: any(q.get("sort") == "rising" for _, q, _ in fake.seen))
+            await pilot.press("s")  # rising -> latest: a window means nothing to it
+            assert await until(pilot, lambda: app.query_one("#forge-window").disabled)
+
+            await pilot.press("slash")
+            assert app.focused is app.query_one("#forge-q")
+            await pilot.press(*"grif")
+            assert t.row_count == 1  # narrows what's loaded as it's typed
+            await pilot.press("enter")
+            assert await until(pilot, lambda: any(q.get("q") == "grif" for _, q, _ in fake.seen))
+
+            fake.fail["/api/listings"] = [503] * 8
+            app.query_one("#forge-q").value = ""
+            await pilot.press("ctrl+r")  # fresh, past the cache: Forge is down, so the last copy shows, flagged
+            assert await until(pilot, lambda: "OFFLINE COPY" in str(t.border_subtitle), 200)
+            seen = "\n".join(line.text for line in app.query_one("#console-log").lines)
+            assert KEY not in seen and KEY not in plain(app.query_one("#listing-raw"))
+    asyncio.run(go())
+
+
+def test_the_forge_tab_without_a_key(fake, tmp_path):
+    from oni_rcon.app import Form
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        cfg = tmp_path / "c.toml"
+        cfg.write_text("[[server]]\nport = 1\n")
+        app = forge_app(ports, fake, tmp_path, key=None, config=cfg)
+        async with app.run_test(size=(170, 50)) as pilot:
+            await pilot.press("f6")
+            await pilot.pause()
+            assert "NO KEY" in plain(app.query_one("#listing")) and not fake.seen
+            app.query_one("#listings").focus()
+            await pilot.press("k")
+            assert await until(pilot, lambda: isinstance(app.screen, Form))
+            assert app.screen.query_one("#field-remember").value == "no"  # remembering is opted into
+            app.screen.query_one("#field-key").value = KEY
+            app.screen.query_one("#field-key").focus()
+            await pilot.press("enter")
+            assert await until(pilot, lambda: app.query_one("#listings").row_count == 25)
+            assert fake.seen[-1][2] and KEY not in cfg.read_text()  # sent with the key; not saved
+            assert "TYPED THIS SESSION" in str(app.query_one("#listing-box").border_subtitle)
+    asyncio.run(go())

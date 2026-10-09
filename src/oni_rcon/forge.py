@@ -575,11 +575,11 @@ class ForgeClient:
         return body
 
     async def listings(self, sort: str = "trending", window: str = "7d", query: str = "", page_size: int = 50,
-                       more: dict | None = None) -> tuple[list, dict | None, dict]:
+                       more: dict | None = None, fresh: bool = False) -> tuple[list, dict | None, dict]:
         """(listings, the query for the next page or None, the reply itself)."""
         reply = await self.get("/api/listings", {"page_size": page_size, "sort": sort, "q": query.strip(),
                                                  "window": window if sort in WINDOWED else None, **(more or {})},
-                               max_age=60)
+                               max_age=0 if fresh else 60)
         return items_of(reply), next_page(reply), reply
 
     async def listing(self, lid: str, background: bool = False) -> dict:
