@@ -1921,6 +1921,8 @@ class OniApp(App):
     # --- input -----------------------------------------------------------------------------------------------
     @on(ListView.Highlighted, "#stations")
     def _station(self, e: ListView.Highlighted) -> None:
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         if e.list_view.index is not None and e.list_view.index != self.sel:
             self.sel = e.list_view.index
             self.cur.alerts = 0  # looked at now
@@ -1932,10 +1934,14 @@ class OniApp(App):
 
     @on(DataTable.RowHighlighted, "#players")
     def _row(self, _) -> None:
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         self.paint_dossier()
 
     @on(TabbedContent.TabActivated)
     def _tab(self, e: TabbedContent.TabActivated) -> None:
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         if e.pane.id == "forge" and not self.forge_opened:  # fetched when first wanted, not at every start
             self.forge_opened = True
             self.forge_load()
