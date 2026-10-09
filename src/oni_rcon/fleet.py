@@ -227,6 +227,12 @@ class FleetApp(OniApp):
         # The long-running controller handles updates even when every terminal is closed.
         pass
 
+    def tick_super(self):
+        # Cached fleet counts are not a native event stream. Do not imply "all quiet" from missing events.
+        if not self.sup.last:
+            self.sup.last = 'Native event feed not connected'
+        super().tick_super()
+
     def paint_listing(self):
         super().paint_listing()
         for selector in ('#fg-install', '#fg-load', '#fg-key', '#fg-ack'):

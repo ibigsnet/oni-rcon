@@ -2,7 +2,7 @@
 import asyncio
 import threading
 import time
-from .forge import ForgeError, author_of, listing_id, recent_of, title_of
+from .forge import ForgeError, active_now, author_of, is_withdrawn, listing_id, recent_of, title_of, votes_of
 from .safety import clean
 
 
@@ -29,17 +29,17 @@ class ManagedForgeClient:
 
     async def listings(self, sort='trending', window='7d', query='', page_size=50, more=None, fresh=False):
         data = await self.snapshot(fresh)
-        rows = [x for x in data.get('items', []) if query.casefold() in
+        rows = [x for x in data.get('items', []) if not is_withdrawn(x) and query.casefold() in
                 (title_of(x) + ' ' + author_of(x) + ' ' + ' '.join(x.get('tags', []))).casefold()]
         if sort == 'unrated':
-            rows = [x for x in rows if not x.get('rating_count')]
+            rows = [x for x in rows if votes_of(x)[2] == 0]
         if sort == 'rising' and window != '7d':
             raise ForgeError(502, 'The shared rising ranking is collected for 7d; choose that window.')
         rank = {
             'latest': lambda x: x.get('created_at') or '',
             'updated': lambda x: x.get('updated_at') or '',
             'downloads': lambda x: x.get('download_count') or 0,
-            'rated': lambda x: (x.get('rating_average') or 0, x.get('rating_count') or 0),
+            'rated': lambda x: (votes_of(x)[0] or 0, -(votes_of(x)[1] or 0)),
             'unrated': lambda x: x.get('created_at') or '',
             'overlooked': lambda x: -(x.get('download_count') or 0),
             'trending': lambda x: recent_of(x, window) or 0,
@@ -52,6 +52,19 @@ class ManagedForgeClient:
         age = max(0, time.time() - (data.get('at') or 0))
         return rows[offset:offset + page_size], ({'page': page + 1} if offset + page_size < len(rows) else None), {
             '_stale': int(age) if age > 900 else 0, 'at': data.get('at')}
+
+    async def favourites(self, fresh=False):
+        """Read-only curated collections from the provider cache, with no key or direct Forge request."""
+        data = await self.snapshot(fresh)
+        collections = data.get('favourites')
+        if not isinstance(collections, list):
+            raise ForgeError(502, 'Curated favourites are not available in the controller catalog yet.')
+        age = max(0, time.time() - (data.get('favourites_at') or data.get('at') or 0))
+        active = [dict(c, listings=[x for x in c.get('listings', [])
+                                   if isinstance(x, dict) and not is_withdrawn(x)])
+                  for c in collections if isinstance(c, dict) and active_now(c)]
+        return active, {
+            '_stale': int(age) if age > 900 else 0, 'at': data.get('favourites_at') or data.get('at')}
 
     async def listing(self, lid, background=False):
         data = await self.snapshot()

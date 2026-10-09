@@ -23,6 +23,7 @@ Screen { background: $background; }
 #add-server { width: 100%; margin: 1 1 0 1; background: $background; color: $text-muted; text-style: none; }
 #add-server:hover, #add-server:focus { color: $primary; background: $primary 10%; }
 #sidebar > Center { height: 1fr; align-vertical: middle; }
+#super { height: auto; padding: 1 1 0 1; border-top: hkey $primary 40%; }
 #uplink { height: auto; padding: 1; border-top: hkey $primary 40%; }
 
 #tabs { width: 1fr; }
