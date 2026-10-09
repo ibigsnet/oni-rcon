@@ -866,8 +866,37 @@ class Card(Static):
     """A station in the sidebar. A card never changes size, so a repaint skips the layout pass: with a fleet of
     them repainting every second, layout was most of what the console spent its time on."""
 
+    wide = 0  # its width, as last laid out: asking per repaint re-arranges the whole screen, with 200 of them
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.wide = event.size.width
+
     def show(self, content) -> None:
         self.update(content, layout=False)
+
+
+class Stations(ListView):
+    """The sidebar list. A card scrolled out of it isn't redrawn: Textual re-arranges the whole screen for a repaint of
+    something it isn't showing, and with 200 stations that was most of what the console spent its time on."""
+
+    def sync(self) -> None:
+        """Works out which cards are in view, and draws the ones that just came into it."""
+        app, high = self.app, self.outer_size.height
+        if not high:  # not laid out yet, or hidden: everything counts
+            return
+        row, top = (2 if app.fleet else 4), int(self.scroll_y)
+        seen = range(top // row, (top + high - 1) // row + 1)
+        if seen != app.seen:
+            app.seen = seen
+            for st in app.stations[seen.start:seen.stop]:
+                app.paint_card(st)
+
+    def on_resize(self) -> None:
+        self.sync()
+
+    def watch_scroll_y(self, old: float, new: float) -> None:
+        super().watch_scroll_y(old, new)
+        self.sync()
 
 
 class Roster(DataTable):
@@ -910,6 +939,25 @@ class Feed(RichLog):
     has no width, and a plain RichLog then wraps everything written to it at 78 columns."""
     unread = 0
     inset = 8  # what the tabs' width loses to the border, padding and scrollbar; measured whenever it's shown
+    room = 0  # what a line wraps to while shown, 0 while hidden. Measured when that changes, never per line: the
+    #           first size read after a write re-arranges the whole screen, and that was most of what a couple of
+    #           hundred servers' events cost
+
+    def measure(self) -> None:
+        if self.size.width:
+            self.room = self.scrollable_content_region.width
+            self.app.tabs_width = self.app.query_one(TabbedContent).size.width
+            self.inset = self.app.tabs_width - self.room + (
+                0 if self.show_vertical_scrollbar else self.styles.scrollbar_size_vertical)  # as if the bar is there
+
+    def on_resize(self, event: events.Resize) -> None:  # RichLog's own runs as well
+        self.measure()
+
+    def on_show(self) -> None:
+        self.measure()
+
+    def on_hide(self) -> None:
+        self.room = 0
 
     def watch_scroll_y(self, old: float, new: float) -> None:
         super().watch_scroll_y(old, new)
@@ -920,13 +968,12 @@ class Feed(RichLog):
 
     def write(self, content, width: int | None = None, expand: bool = False, shrink: bool = True,
               scroll_end: bool | None = None, animate: bool = False):
-        tabs = self.app.query_one(TabbedContent).size.width
-        if self.size.width:  # as if the scrollbar is there: it will be once the log fills
-            self.inset = tabs - self.scrollable_content_region.width + (
-                0 if self.show_vertical_scrollbar else self.styles.scrollbar_size_vertical)
-        elif width is None and tabs > self.inset:  # as wide as the line, up to what's there once shown
+        if width is None and (self.room or self.app.tabs_width > self.inset):
             console = self.app.console
-            width = min(measure_renderables(console, console.options, [content]).maximum, tabs - self.inset)
+            line = measure_renderables(console, console.options, [content]).maximum
+            # shown: RichLog's own sum, spelled out so it doesn't ask for the size. Hidden: as wide as the line, up
+            # to what's there once shown
+            width = max(min(line, self.room), self.min_width) if self.room else min(line, self.app.tabs_width - self.inset)
         if not self.auto_scroll:
             self.unread += 1
             self.border_subtitle = f"▼ {self.unread} NEW  ·  End to follow"
@@ -954,6 +1001,8 @@ class CommandInput(Input):
 class OniApp(App):
     CSS_PATH = "oni.tcss"
     TITLE = "ONI RCON"
+    seen = range(1 << 30)  # the cards in view in the sidebar, once it's laid out: the rest aren't redrawn
+    tabs_width = 0  # the tabs' width as last laid out, for the feeds written to while hidden
     BINDINGS = [
         Binding("f1", "tab('assets')", "Assets"), Binding("f2", "tab('intercepts')", "Intercepts"),
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
@@ -1013,7 +1062,7 @@ class OniApp(App):
         yield Static(id="masthead")
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
-                yield ListView(*[ListItem(c) for c in self.cards], id="stations")
+                yield Stations(*[ListItem(c) for c in self.cards], id="stations")
                 yield Button("+ ADD SERVER", id="add-server", compact=True)
                 with Center():
                     yield Static(id="crest")
@@ -1170,6 +1219,7 @@ class OniApp(App):
     def on_resize(self) -> None:
         self.set_class(self.size.width < 140, "-narrow")  # on the app: the boot screen may be the one on top
         self.set_class(self.size.width >= 200, "-wide")
+        self.set_class(self.size.width < 120, "-tight")  # F3's sitrep and button grid no longer fit side by side
         self.paint_masthead()
         self.call_after_refresh(self.refit)
         # the sidebar crest takes what the station cards, the add button and the uplink leave, and goes when that's
@@ -1182,6 +1232,7 @@ class OniApp(App):
     def refit(self) -> None:
         """After a resize, once laid out: the panels that shape themselves to the room they have."""
         if self.is_running:
+            self.tabs_width = self.query_one(TabbedContent).size.width
             self.paint_dossier()
             self.paint_ops()
 
@@ -1544,6 +1595,9 @@ class OniApp(App):
 
     def paint_card(self, st: Station) -> None:
         """Draws the station's card, if anything it shows has changed: most seconds, for most of a fleet, nothing."""
+        if st.index not in self.seen:
+            st.drawn = ()  # drawn when it scrolls into view
+            return
         card, s = self.cards[st.index], st.data.get("status", {})
         state = st.rcon.state if st.rcon else "connecting"
         glyph, color = STATE[state]
@@ -1552,7 +1606,7 @@ class OniApp(App):
         elif self.beating(st):
             color = "#B4F5D0"  # a heartbeat: brighter for a moment every few seconds
         n, mx = num(s.get("players")), num(s.get("max_players"))
-        width = card.size.width or 33
+        width = card.wide or 33
         if not st.online:  # why, in words to act on, and when it tries again
             left = st.retry_at - time.monotonic()
             detail = (self.why(st), int(left) + 1 if left > 0 else 0)
@@ -1600,6 +1654,8 @@ class OniApp(App):
         self.frame += 1
         now, moving = time.monotonic(), self.animation_level != "none"
         for i, (st, card) in enumerate(zip(self.stations, self.cards)):
+            if i not in self.seen:
+                continue
             pulsing = moving and st.flash > now
             if pulsing:  # red swelling and fading, about once a second
                 card.parent.styles.background = Color.parse(RED).with_alpha(0.1 + 0.3 * abs(self.frame % 6 - 3) / 3)

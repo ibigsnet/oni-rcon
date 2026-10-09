@@ -65,6 +65,9 @@ Assets { height: 1fr; }
 .ops-head { color: $primary 70%; margin-top: 1; }
 .ops-grid { height: auto; grid-size: 3; grid-gutter: 1 1; margin-top: 1; }
 .ops-grid Button { width: 1fr; min-width: 0; }
+/* under 120 columns the tab is too narrow for both: the buttons squeezed to nothing, and Textual raised measuring them */
+.-tight #ops-top { layout: vertical; }
+.-tight #sitrep, .-tight #ops-panel { width: 100%; min-width: 0; }
 #ops-bottom { height: 1fr; min-height: 6; }
 #rotation { width: 1fr; height: 1fr; }
 #theatre { width: 1fr; height: 1fr; padding: 0 1; }
