@@ -14,6 +14,11 @@ by = "your-name"              # who you are in the server's admin log (default: 
 forge_api_key_env = "RECLAIMERFORGE_KEY"
 forge_poll = 600              # seconds between checks for updates to what you've installed (60 at least)
 
+# Player ping. RCON doesn't report it; the server only logs it when a player joins ("ping 42 ms"). Give a command
+# that follows that log and prints new lines, and the PING column fills in. {port} is the server's RCON port; with
+# `ssh` set the command runs on that host, otherwise on this machine. Above the first [table], like the rest.
+# ping_log = "docker logs -f --since 12h reclaimer-server-$(({port}-49175))-1 2>&1"
+
 [defaults]                    # applies to every [[server]] unless it sets the key itself
 ssh = "admin@game-box"        # tunnel through this SSH destination (key auth; leave out for direct)
 host = "127.0.0.1"            # RCON address as seen from the ssh destination (the server's default bind)

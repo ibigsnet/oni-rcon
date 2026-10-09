@@ -6,6 +6,7 @@ import contextlib
 import json
 import re
 import shlex
+import shutil
 import threading
 import time
 from collections import Counter, deque
@@ -42,7 +43,7 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     compatible, favourite_listings, history_since, id_list, is_withdrawn, kind_of, latest_of,
                     listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
-from .install import InstallError, place, plan, size_words, target_for
+from .install import SSH_OPTS, InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
@@ -269,6 +270,14 @@ def bar(v, width: int = 5) -> Text:
     return gauge(v, width, GREEN if v > .6 else AMBER if v > .3 else RED)
 
 
+# The server's RCON has no ping. It logs one line per player as they connect, and `maxping` judges that number.
+JOIN_PING = re.compile(r"player ID ([0-9a-f]+), ping (\d+) ms")
+
+
+def ping_cell(ms) -> Text:
+    return Text("—", DIM) if ms is None else Text(str(ms), GREEN if ms < 100 else AMBER if ms < 200 else RED)
+
+
 def team_strip(teams: list, width: int = 24) -> Text | None:
     """The score race between the teams as one bar, for under the roster. None without at least two teams."""
     if len(teams) < 2:
@@ -471,6 +480,7 @@ class Station:
     tag: str = ""  # the community tag its reported name starts with, when the label leaves it off
     drawn: tuple = ()  # what its card shows now: repainted only when this changes
     polled: float = 0.0  # when its players were last fetched by the slow poll
+    pings: dict = field(default_factory=dict)  # player ID -> the ping they joined with, from the server's log
 
     @property
     def online(self) -> bool:
@@ -653,6 +663,8 @@ GUIDE = [
     ("F1  ASSETS  ·  the players", [
         ("Pick a player", "Click a row, or move with ↑ ↓. Their file opens on the right, with buttons to tell, kick, "
                           "ban, mute, move or allow them through a VPN."),
+        ("Ping", "PING is what a player joined with, read from the server's log (needs ping_log in the config; "
+                  "RCON has no live ping). Over 200 is red."),
         ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  y copy their ID"),
         ("Flags", "ADM an admin  ·  MUT muted  ·  KIA dead right now  ·  NEW just joined  ·  ★5 on a killing spree"),
         ("Their file", "The glyph is drawn from their player ID: the same player always gets the same one. Medals and "
@@ -1164,7 +1176,7 @@ class OniApp(App):
     def on_mount(self) -> None:
         self.register_theme(ONI)
         self.theme = "oni"
-        cols = {"#players": ["#", "CALLSIGN", "TEAM", "SCORE", "K", "D", "K/D", "HEALTH", "SHIELD", "FLAGS"],
+        cols = {"#players": ["#", "CALLSIGN", "TEAM", "SCORE", "K", "D", "K/D", "PING", "HEALTH", "SHIELD", "FLAGS"],
                 "#rotation": ["#", "MAP", "MODE"], "#bans": ["TYPE", "TARGET", "NAME", "REASON", "EXPIRES", "BY"],
                 "#vpn": ["ALLOWED THROUGH VPN", "NOTE"],
                 "#listings": ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"],
@@ -1209,6 +1221,8 @@ class OniApp(App):
                            on_late=self.on_late_reply)
             self.by_rcon[st.rcon] = st
             st.worker = self.run_worker(st.rcon.run(), group="rcon", exit_on_error=False)
+            if s.ping_log:
+                self.run_worker(self.follow_pings(st), group="pings", exit_on_error=False)
 
         self.set_interval(1, self.tick)
         self.set_interval(3, self.poll_fast)
@@ -1225,6 +1239,36 @@ class OniApp(App):
         self.on_resize()
         if self.updater:  # a thread of its own rather than a worker: a slow download must not hold up quitting
             threading.Thread(target=self.check_update, daemon=True).start()
+
+    async def follow_pings(self, st: Station) -> None:
+        """Follows the server's log for the ping each player joined with. Restarts, slowing down, if it ends."""
+        s, delay = st.server, 2
+        while True:
+            if s.ssh:
+                if not (ssh := shutil.which("ssh")):
+                    return
+                # the remote shell holds ssh's stdin and kills the follower when it closes: a dropped link or a quit
+                # leaves no `docker logs -f` behind
+                proc = await asyncio.create_subprocess_exec(
+                    ssh, *SSH_OPTS, s.ssh, f"{s.ping_log} & p=$!; cat >/dev/null; kill $p", limit=1 << 20,
+                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            else:
+                proc = await asyncio.create_subprocess_shell(
+                    s.ping_log, limit=1 << 20, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.STDOUT)
+            try:
+                async for line in proc.stdout:
+                    if m := JOIN_PING.search(line.decode(errors="replace")):
+                        delay = 2
+                        st.pings[m[1]] = int(m[2])
+                        if len(st.pings) > 5000:  # ponytail: oldest out; a week of joins on a busy server fits
+                            del st.pings[next(iter(st.pings))]
+            finally:
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60)
 
     def check_update(self) -> None:
         try:
@@ -1776,7 +1820,7 @@ class OniApp(App):
             rows.append((key, [str(pick(p, "number", default="")), Text(name, TEAM_COLOR.get(team, WHITE)),
                                Text(team.upper() or "—", TEAM_COLOR.get(team, DIM)), str(pick(p, "score", default="—")),
                                str(k if k is not None else "—"), str(d if d is not None else "—"), kd,
-                               bar(p.get("health")), bar(p.get("shields")), flags]))
+                               ping_cell(st.pings.get(str(pick(p, "player_id", "id")))), bar(p.get("health")), bar(p.get("shields")), flags]))
         t = self.query_one("#players", Roster)
         t.fill(rows)
         st.painted = st.painted or "players" in st.data  # everyone here at the first look isn't news
@@ -1832,6 +1876,8 @@ class OniApp(App):
             head = side
         rows = [("PLAYER ID", pick(p, "player_id", "id", default="—")),
                 ("ADDRESS", Text(redact_addr(pick(p, "address", "ip"), self.redact), RED if self.redact else WHITE)),
+                ("JOIN PING", Text.assemble(ping_cell(ms), (" ms", DIM)) if (ms := self.cur.pings.get(
+                    str(pick(p, "player_id", "id")))) is not None else Text("—", DIM)),
                 ("HEALTH", bar(p.get("health"), 14)), ("SHIELDS", bar(p.get("shields"), 14)),
                 ("LAST DEATH", f"{pick(p, 'seconds_since_last_death')}s ago"
                  if isinstance(pick(p, "seconds_since_last_death"), (int, float)) else "—")]

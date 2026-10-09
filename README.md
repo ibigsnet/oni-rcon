@@ -169,6 +169,19 @@ port = 11774
 port = 11775
 ```
 
+### Player ping
+
+The PLAYERS tab has a PING column (green under 100 ms, amber under 200, red above). RCON has no ping, so it's the
+number the server logs when someone joins, the same one `maxping` uses: a join-time reading, not a live one. To fill
+it in, give oni-rcon a command that follows the server log, as a top-level key above the first `[table]`:
+
+```toml
+ping_log = "docker logs -f --since 12h my-server-{port}"   # {port} = that server's RCON port
+```
+
+It runs on the `ssh` host (or locally when there's none), is restarted if the connection drops, and stops with
+oni-rcon. Without it the column shows a dash. The dossier shows the same number as JOIN PING.
+
 ## ReclaimerForge
 
 [ReclaimerForge](https://www.reclaimerforge.net) is the community catalog of forged maps, gametypes and playlists for

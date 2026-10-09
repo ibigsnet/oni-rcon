@@ -7,7 +7,7 @@ import pytest
 from rich.text import Text
 
 from oni_rcon import app as appmod
-from oni_rcon.app import (Boot, Form, Help, OniApp, Pick, emblem, explain, parse_command, redact_data, render_event,
+from oni_rcon.app import (JOIN_PING, Boot, Form, Help, OniApp, Pick, emblem, explain, parse_command, redact_data, render_event,
                           resolve, same, sides, split_tag, target_of)
 from oni_rcon.art import biosig, decrypt, hbar, spark, split_bar
 from oni_rcon.config import Server, add_servers, load_config, parse_target, resolve_passwords
@@ -345,6 +345,36 @@ def test_app_keeps_the_selection_and_redacts():
             assert app.condition()[0] == "RED" and other.alerts == app.unseen == 1
             await pilot.press("f2")  # every station's alerts are in the feed: seen
             assert app.unseen == 0
+
+    asyncio.run(go())
+
+
+def test_join_ping_comes_from_the_log(tmp_path):
+    line = "[S] Bob connected from 203.0.113.9 (player ID ab12cd, ping 77 ms)."
+    assert JOIN_PING.search(line).groups() == ("ab12cd", "77") and not JOIN_PING.search("[S] Bob left")
+    cfg = tmp_path / "c.toml"
+    cfg.write_text('ping_log = "tail -f /log/{port}"\n[[server]]\nport = 5\n[[server]]\nurl = "ws://x/y"\n')
+    ours, remote = load_config(cfg)[1]
+    assert ours.ping_log == "tail -f /log/5" and remote.ping_log == ""
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        pid = keep[0].players[0]["player_id"]
+        script = tmp_path / "log.py"
+        script.write_text(f"print({line.replace('ab12cd', pid)!r})\n")
+        servers = [Server(port=p, password="demo") for p in ports]
+        servers[0].ping_log = f'"{sys.executable}" "{script}"'
+        app = OniApp(servers, by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players")
+            for _ in range(60):  # the follower starts a process: give it a moment
+                await pilot.pause(0.1)
+                if app.stations[0].pings:
+                    break
+            assert app.stations[0].pings == {pid: 77}
+            app.paint_players()
+            t = app.query_one("#players")
+            assert "77" in [str(c) for r in range(t.row_count) for c in t.get_row_at(r)]
 
     asyncio.run(go())
 

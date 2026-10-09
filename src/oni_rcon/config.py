@@ -22,6 +22,8 @@ class Server:
     password_env: str = ""
     password_command: str | list[str] = ""
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
+    # not a [[server]] key (older versions refuse unknown ones): set from the top-level ping_log by load_config
+    ping_log: str = field(default="", init=False)
 
     def __post_init__(self):
         if not (self.url or self.port):
@@ -68,6 +70,10 @@ def load_config(path: Path) -> tuple[str, list[Server]]:
         raise SystemExit(f"{path}: {e}") from None
     if not servers:
         raise SystemExit(f"{path}: no [[server]] entries")
+    tmpl = data.get("ping_log")
+    if isinstance(tmpl, str):  # {port} = the server's RCON port; run on its ssh destination, or here without one
+        for s in servers:
+            s.ping_log = "" if s.url else tmpl.replace("{port}", str(s.port))
     return data.get("by", ""), servers
 
 
