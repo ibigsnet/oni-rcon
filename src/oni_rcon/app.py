@@ -2460,21 +2460,29 @@ class OniApp(App):
 
     @on(DataTable.RowHighlighted, "#listings")
     def _listing_row(self, _) -> None:
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         self.paint_listing()
 
     @on(Select.Changed, "#forge-sort, #forge-window")
     def _forge_order(self, _) -> None:
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         if self.forge_opened:
             self.forge_load()
         self.paint_forge()
 
     @on(Input.Changed, "#forge-q")
     def _forge_filter(self, _) -> None:
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         self.paint_forge()
 
     @on(Input.Submitted, "#forge-q")
     def _forge_search(self, e: Input.Submitted) -> None:
         e.stop()
+        if not self.is_running:  # a late event while quitting: the widgets are already gone
+            return
         self.forge_opened = True
         self.forge_load()
         self.query_one("#listings").focus()

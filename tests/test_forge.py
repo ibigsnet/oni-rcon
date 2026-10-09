@@ -575,6 +575,25 @@ def test_the_older_change_spelling_still_reads(fake, tmp_path):
     asyncio.run(go())
 
 
+def test_late_forge_events_while_quitting_are_ignored(fake, tmp_path):
+    """A RowHighlighted, Select.Changed or Input event still queued as the app quits is handled with its widgets
+    already gone. That raised NoMatches('#listing') on CI, after the test itself had passed."""
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: app.cur.online)
+            await pilot.press("f6")
+            assert await until(pilot, lambda: app.query_one("#listings").row_count == 25)
+        assert not app.is_running
+        for handler in (app._listing_row, app._forge_order, app._forge_filter):
+            handler(None)  # the widgets are gone: nothing to paint, and nothing raised
+        app._forge_search(type("Late", (), {"stop": lambda self: None})())
+    asyncio.run(go())
+
+
 def test_the_forge_tab_without_a_key(fake, tmp_path):
     from oni_rcon.app import Form
     from oni_rcon.demo import serve_fakes
