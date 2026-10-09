@@ -1,4 +1,4 @@
-> **IBIGS maintained copy:** On fleet-console run `oni-rcon`. See [IBIGS setup and limitations](IBIGS.md) and [source review](SECURITY-REVIEW.md). The upstream self-updater described below is disabled in this copy.
+> **IBIGS maintained copy:** On fleet-console run `oni-rcon`. See [IBIGS setup and limitations](IBIGS.md) and [source review](SECURITY-REVIEW.md). Startup update checks are disabled.
 
 # oni-rcon
 
@@ -10,10 +10,8 @@ allowances and a raw command console, wrapped in Office of Naval Intelligence, S
 
 ![Assets tab: players table and personnel dossier](docs/assets.png)
 
-**[Download for Windows](https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-windows-x64.exe)** · [Linux](https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-linux-x64) ·
-or `uv tool install git+https://github.com/viik2k/oni-rcon`. The first time it opens a setup screen: type your server's
-address and RCON password, it tests them, and you're in. Or choose **Try the demo** to look around three simulated
-servers first.
+On fleet-console, run `oni-rcon`. From a clone: `uv sync`, then `uv run oni-rcon`. A direct connection opens a setup screen:
+type the server address and RCON password, and it tests them. **Try the demo** looks around three simulated servers.
 
 ## What it does
 
@@ -64,31 +62,19 @@ Also:
 
 ## Install
 
-You need a Project Reclaimer dedicated server with RCON turned on (tested against 0.9.7).
+On fleet-console, run `oni-rcon`. The launcher and the fleet limits are in [IBIGS.md](IBIGS.md).
 
-**Windows:** download [`oni-rcon-windows-x64.exe`](https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-windows-x64.exe) and double-click it. The build
-isn't code-signed, so SmartScreen may stop it the first time: choose **More info**, then **Run anyway**. The setup screen
-takes it from there.
-
-**Linux:**
+From a clone, with Python 3.11+:
 
 ```
-curl -Lo oni-rcon https://github.com/viik2k/oni-rcon/releases/latest/download/oni-rcon-linux-x64
-chmod +x oni-rcon
-./oni-rcon --demo
+uv sync
+uv run oni-rcon
 ```
 
-**With Python 3.11+** (any OS, macOS included):
+`uv run oni-rcon --demo` opens three simulated servers. This copy does not check GitHub for a newer binary on startup.
 
-```
-uv tool install git+https://github.com/viik2k/oni-rcon
-```
-
-or `pipx install git+https://github.com/viik2k/oni-rcon`. From a clone, `uv tool install .` also works.
-
-**Updates.** The downloads update themselves: at start they check GitHub for a newer release, swap it in, and tell you
-to restart. A Python install tells you to run `uv tool upgrade oni-rcon` instead. Set `ONI_RCON_NO_UPDATE=1` to turn
-the check off.
+A direct connection needs a Project Reclaimer dedicated server with RCON turned on (tested against 0.9.7). The setup
+screen asks for the address and password and tests them before saving.
 
 Use a terminal with true colour and a font that has box-drawing glyphs, such as Windows Terminal, iTerm2, kitty or
 WezTerm. At least 140×40 looks best.
@@ -207,9 +193,8 @@ The demo servers (`oni_rcon/demo.py`) speak the same protocol as a real server a
 Animations follow Textual's `TEXTUAL_ANIMATIONS` (`none`, `basic` or `full`), so `TEXTUAL_ANIMATIONS=none oni-rcon`
 turns them off.
 
-To release, bump `__version__` in `src/oni_rcon/__init__.py`, commit, and push a matching tag (`git tag v0.2.0 &&
-git push --tags`). The release workflow builds the Windows and Linux binaries and publishes them, and running copies
-pick the new version up on their next start.
+`__version__` lives in `src/oni_rcon/__init__.py`. This copy does not publish release binaries from a tag, and a running
+console does not replace itself. Updates ship as a reviewed source build; see [IBIGS.md](IBIGS.md).
 
 ## Disclaimer
 

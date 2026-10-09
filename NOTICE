@@ -5,9 +5,9 @@ SPDX-License-Identifier: GPL-3.0-or-later
 This project is released under the GNU General Public License, version 3
 or any later version. See LICENSE.
 
-The 0.2.1 snapshot taken from https://github.com/viik2k/oni-rcon
-is copyright (c) 2026 Arche Labs and remains available under the MIT
-license that follows.
+Upstream oni-rcon from https://github.com/viik2k/oni-rcon, through
+release 0.3.0, is copyright (c) 2026 Arche Labs and remains available
+under the MIT license that follows.
 
 MIT License
 

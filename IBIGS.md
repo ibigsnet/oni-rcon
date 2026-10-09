@@ -20,7 +20,7 @@ The container is built locally as `ibigs/reclaimer-terminal`, uses an immutable 
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) at commit `8f888563e917567c7f0d36789bbbbd0a147222d8` (upstream 0.2.0), reviewed on 2026-10-08. The MIT license and Arche Labs copyright are retained. This is a local maintained branch, `ibigs/fleet`; no public fork was published.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release 0.3.0. The 2026-10-08 source review covers commit `8f888563e917567c7f0d36789bbbbd0a147222d8`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
@@ -28,4 +28,4 @@ Management adapter: `/home/user/Games/ProjectReclaimer/dashboard/reclaimer_contr
 
 Upstream self-updating binaries are disabled in code. Updates require source review, the test suite, a pinned dependency audit, a new image tag, and a launcher update. Build using `Dockerfile.ibigs`; `requirements.lock` pins all runtime dependencies and hashes. Keep one prior image for rollback. Do not copy an upstream release executable over the maintained build.
 
-Validation: 30 terminal tests, private API/agent tests, a live rendered terminal, read-only native status probes, and a dependency audit with no known vulnerabilities reported. No production broadcasts, bans, kicks, stops or restarts were used as UI tests.
+Validation on 2026-10-08: private API/agent tests, a live rendered terminal, read-only native status probes, and a dependency audit with no known vulnerabilities reported. The console test suite passed 39 tests after the 0.3.0 merge. No production broadcasts, bans, kicks, stops or restarts were used as UI tests.
