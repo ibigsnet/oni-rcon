@@ -43,6 +43,15 @@ Also:
 - **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down or something you installed
   from Forge has been withdrawn; RED when a call for an admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
   or the Intercepts tab.
+- **The Superintendent.** A small green face at the bottom of the sidebar, on every tab, that watches the feed of every
+  server and reacts as an admin would: it welcomes a join, startles at a call for an admin, scowls at a cheat flag,
+  approves a kick or a ban, is impressed by a medal, is unimpressed by a mute and winks at the server's own messages.
+  The word under it says how it feels, and the words beside it say what it reacted to, with addresses redacted like
+  everywhere else. It blinks now and then. It takes a moment to settle into each mood and then relaxes, a busy fleet
+  doesn't make it flicker, and an alert pulses it red until it's over. It is drawn the way the emblem is, from the
+  Halo ASCII archive piece, and it never goes away: it grows to 16 pixels across when the terminal is tall enough,
+  shrinks to 12 and then 8 as it gets short, and the station list scrolls to make room before the Superintendent or
+  the operator line does. With `TEXTUAL_ANIMATIONS=none` it changes expression at once and never blinks.
 - **Broadcast to one server or all.** `Ctrl+B`. `@all` messages and commands go out 4 servers at a time, each reply
   goes in the command log on one line, and a tally closes it ("79 stations · 77 ok · 2 no reply yet"). A command that
   gets no reply in 10 seconds is never resent, and if its reply comes later the log shows it.

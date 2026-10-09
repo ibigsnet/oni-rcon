@@ -40,13 +40,14 @@ from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
                     Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
                     compatible, favourite_listings, history_since, id_list, is_withdrawn, kind_of, latest_of,
-                    listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, title_of, usable, utc_iso,
+                    listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .install import InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
 from .stats import Rounds
+from .superintendent import BIG, MINI, SMALL, Superintendent, card as sup_card
 
 ONI = Theme(name="oni", primary=AMBER, secondary=CYAN, accent=CYAN, warning="#E8A33D", error=RED, success=GREEN,
             foreground=WHITE, background=INK, surface="#0B0F14", panel="#111821", dark=True)
@@ -143,6 +144,8 @@ TIPS = {
     "fg-ack": "Say you've seen that it was withdrawn: CONDITION goes back to GREEN. It stays flagged.  Key: a",
     "fg-key": "Load your own ReclaimerForge API key.  Key: k",
     "fg-more": "Fetch the next page of the catalog.  Key: n",
+    "super": "The Superintendent watches every server's feed and reacts: it welcomes a join, startles at a call for an "
+             "admin, scowls at a cheat flag, approves a kick or ban, is impressed by a medal and unimpressed by a mute.",
     "forge-sort": "How the catalog is ordered, what ReclaimerForge is featuring (favourites), or what's installed "
                   "on this server.  Key: s",
     "forge-window": "The stretch of time trending and rising count over.  Key: w",
@@ -406,6 +409,22 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
     return line
 
 
+def reaction_words(ev: dict, names: dict, redact: bool = True) -> str:
+    """A few plain words for what the Superintendent reacted to, under its face. Addresses are blanked while they're
+    redacted, and anything a stranger typed has its control characters dropped."""
+    kind, name = str(ev.get("event", "?")), who(pick(ev, "name", "player", "from", "sender"), names)
+    if kind == "kill" and ev.get("_medals"):
+        return tidy(f"{ev['_medals'][-1]}: {who(pick(ev, 'killer'), names)}")
+    if kind == "join":
+        return tidy(f"{name} joined")
+    if kind in ("kick", "ban", "mute"):
+        reason = pick(ev, "reason", "text")
+        return tidy(f"{kind} {name}" + (f": {redact_text(str(reason), redact)}" if reason else ""))
+    if kind == "chat" and ev.get("channel") != "server":
+        return tidy(f"{name}: {redact_text(str(ev.get('text', '')), redact)}")
+    return tidy(describe(ev, names, redact).plain)
+
+
 def render_event(label: str, ev: dict, names: dict, redact: bool = True, width: int = 14) -> Text:
     """One feed line for a pushed event: time, station, glyph, then what it says."""
     kind = str(ev.get("event", "?"))
@@ -627,6 +646,9 @@ GUIDE = [
         ("Go to", "g lists every server, the busiest first: type part of a name and press Enter."),
         ("Tabs", "F1 to F6, or click the names along the top."),
         ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
+        ("Superintendent", "The small green face on the left, on every tab, watches every server's feed. It welcomes a "
+                           "join, startles at a call for an admin, scowls at a cheat flag, approves a kick or ban, is "
+                           "impressed by a medal and unimpressed by a mute; the word under it says how it feels."),
     ]),
     ("F1  ASSETS  ·  the players", [
         ("Pick a player", "Click a row, or move with ↑ ↓. Their file opens on the right, with buttons to tell, kick, "
@@ -979,6 +1001,7 @@ class OniApp(App):
         self.forge_next: dict | None = None  # the query for the catalog's next page
         self.forge_note, self.forge_stale, self.forge_opened = "", 0, False
         self.featured: dict[str, str] = {}  # listing id -> the favourites collection it's in, while that view is up
+        self.sup, self.sup_key, self.sup_fit = Superintendent(), None, None  # it, what it drew, the layout it fits
         self.versions_for = ""  # the listing whose versions the table shows: its cursor starts on the newest installable
         self.detail_want: str | None = None  # the listing whose versions are being fetched
         self.watching, self.watch_said = False, ""  # a look at the changes feed under way; the last fault told
@@ -1017,6 +1040,7 @@ class OniApp(App):
                 yield Button("+ ADD SERVER", id="add-server", compact=True)
                 with Center():
                     yield Static(id="crest")
+                yield Static(id="super")  # always shown: the crest above gives way before it does
                 yield Static(id="uplink")
             with TabbedContent(id="tabs", initial="assets"):
                 with TabPane("[dim]F1[/] ASSETS", id="assets"):
@@ -1141,6 +1165,7 @@ class OniApp(App):
         self.set_interval(3, self.poll_fast)
         self.set_interval(1, self.poll_slow)
         self.set_interval(0.15, self.animate_cards)
+        self.set_interval(0.12, self.tick_super)
         self.set_interval(self.fsetup.poll, self.forge_watch)
         self.set_timer(5, self.forge_watch)  # once soon after start, for what changed while the console was closed
         self.paint_all()
@@ -1174,10 +1199,51 @@ class OniApp(App):
         self.call_after_refresh(self.refit)
         # the sidebar crest takes what the station cards, the add button and the uplink leave, and goes when that's
         # too little
-        free = self.size.height - 11 - len(self.tunnels) - (2 if self.fleet else 4) * len(self.stations)
+        self.fit_sidebar()
+        free = (self.size.height - 11 - self.sup_rows() - len(self.tunnels)
+                - (2 if self.fleet else 4) * len(self.stations))
         crest = self.query_one("#crest", Static)
         crest.update(art := emblem(min(free, 16), 32))
         crest.display = bool(art.plain)
+
+    def sidebar_room(self) -> tuple[int, int, int]:
+        """(rows the sidebar has once the add button and the uplink are counted, what all the station cards need,
+        the card height)."""
+        card = 2 if self.fleet else 4
+        return self.size.height - 10 - len(self.tunnels), card * len(self.stations), card
+
+    def sup_size(self) -> int:
+        """The Superintendent's face: the biggest that fits, across (its words need 14 cells beside it) and down with
+        every station card showing; failing that the list gives up rows (it scrolls) to two cards, then to one;
+        failing that the smallest face, which is what a very short terminal gets."""
+        room, need, card = self.sidebar_room()
+        across = self.query_one("#sidebar").size.width - 2  # a cell of padding each side of the strip
+        for n, spare in [(BIG, need), (SMALL, need), (MINI, need), (SMALL, 2 * card), (MINI, 2 * card), (MINI, card)]:
+            if across >= n + 1 + 14 and room - min(need, spare) >= n // 2 + 2:
+                return n
+        return MINI
+
+    def sup_rows(self) -> int:
+        """Rows its strip takes: the face, a line above it and the rule over that."""
+        return self.sup_size() // 2 + 2
+
+    def fit_sidebar(self) -> None:
+        """The strip and the uplink stay on screen: the station list takes what they leave, and scrolls past it."""
+        room, _, card = self.sidebar_room()
+        self.query_one("#stations").styles.max_height = max(card, room - self.sup_rows())
+    def tick_super(self) -> None:
+        """Redraw the Superintendent when its face or words changed: a blink, an easing expression, a new reaction."""
+        if not self.is_running:  # the timer can fire once more while quitting
+            return
+        self.sup.motion = self.animation_level != "none"
+        box, n = self.query_one("#super", Static), self.sup_size()
+        if (n, self.size) != self.sup_fit:  # the terminal or the sidebar changed: the list makes room again
+            self.sup_fit = n, self.size
+            self.fit_sidebar()
+        art, key = sup_card(self.sup, box.content_size.width or 27, n)
+        if key != self.sup_key:
+            self.sup_key = key
+            box.update(art)
 
     def refit(self) -> None:
         """After a resize, once laid out: the panels that shape themselves to the room they have."""
@@ -1421,6 +1487,7 @@ class OniApp(App):
                                            who(pick(ev, "victim"), names), time.monotonic())
         st.activity.append(time.monotonic())
         self.log_event(st, ev)
+        self.sup.react(ev, reaction_words(ev, names, self.redact) if self.sup.wants(ev) else "")
         if kind == "chat" and ev.get("channel") != "server" and ALERT.search(text):
             self.notify(redact_text(f"{who(pick(ev, 'name', 'player'), names)}: {text}", self.redact),
                         title=f"CALL FOR ADMIN · {st.label}", severity="warning", timeout=12)
@@ -2019,6 +2086,8 @@ class OniApp(App):
 
     def action_redact(self) -> None:
         self.redact = not self.redact
+        if self.redact:
+            self.sup.last = ""  # what it last reacted to may have shown an address a moment ago
         self.paint_all()
         self.notify("Addresses redacted." if self.redact else "Addresses visible. Mind your stream.",
                     title="REDACTION", severity="information" if self.redact else "warning")
