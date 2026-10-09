@@ -17,7 +17,7 @@ SORTS = [
     ('Needs attention first', 'health'),
 ]
 STATES = [
-    ('All states', 'all'),
+    ('All current servers', 'all'),
     ('Players online', 'occupied'),
     ('Empty running', 'empty'),
     ('Running', 'running'),
@@ -77,7 +77,7 @@ def state_matches(row, state, snapshot_fresh=True):
     standby = stopped and row.get('spare') and row.get('desired_running') is False and not row.get('operator_hold')
     count = live_count(row, snapshot_fresh) if not retired else None
     return bool({
-        'all': True,
+        'all': not retired,
         'occupied': count is not None and count > 0,
         'empty': count == 0,
         'running': running,

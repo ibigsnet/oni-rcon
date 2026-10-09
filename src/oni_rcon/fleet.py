@@ -13,7 +13,8 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Input, ListView, Select, Static, TabbedContent
 from rich.text import Text
-from .app import OniApp, Station, Confirm, Form
+from .app import OniApp, Station, Confirm, Form, Roster, target_of
+from .player_search import PlayerSearch, matching_players, coverage_text
 from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_count, matching_rows,
                       server_tags, tagged_message)
 from .config import Server
@@ -55,7 +56,7 @@ class Fleet:
         self.view, self.rows, self.updated, self.locks = {}, {}, 0, {}
 
     def request(self, path, body=None, timeout=25):
-        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read'):
+        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players'):
             raise ValueError('unsupported management route')
         headers = {'Authorization':'Bearer '+self.token,'Accept':'application/json'}
         if body is not None:
@@ -162,6 +163,7 @@ class FleetApp(OniApp):
     BINDINGS=[*[b for b in OniApp.BINDINGS if b.key not in ('ctrl+r', *map(str,range(1,10)))],
               Binding('f6','lifecycle','Container'),Binding('ctrl+r','refresh_fleet','Refresh fleet'),
               Binding('ctrl+f','search_servers','Search',priority=True),
+              Binding('ctrl+g','search_players','Find player',priority=True),
               Binding('f7','sort_servers','Sort'),Binding('f8','filter_servers','Filter'),
               *[Binding(str(i),f'visible_station({i-1})',show=False) for i in range(1,10)]]
     CSS='''
@@ -182,10 +184,12 @@ class FleetApp(OniApp):
     .-narrow #fleet-sort { width: 24; }
     .-narrow #fleet-node { width: 13; }
     .-narrow #fleet-state { width: 21; }
+    PlayerSearch .dialog { width: 94%; max-width: 150; height: 85%; }
     '''
 
     def __init__(self, fleet, *, search='', node='all', state='all', sort='players'):
         self.fleet=fleet
+        self.inventory_lock=asyncio.Lock()
         self.catalog=dict(fleet.rows)
         self.browse_search,self.browse_node,self.browse_state,self.browse_sort=search,node,state,sort
         self.browser_ready=False
@@ -196,7 +200,7 @@ class FleetApp(OniApp):
         servers=[Server(url='fleet://'+r['id'],name=self.label(r)) for r in matching_rows(fleet.rows.values(),sort=sort)]
         super().__init__(servers,by='fleet-console terminal',intro=False,updater=None,
                          rcon_factory=lambda *args:FleetRcon(fleet,*args),
-                         hint='Ctrl+F search · F7 sort · F8 state filter · Enter selects a result · RESET clears filters. Sorting keeps the selected server. Native chat/kill streaming is not connected in fleet mode.')
+                         hint='Ctrl+F server search · Ctrl+G find player across all nodes · F7 sort · F8 state filter · RESET shows all current servers. Native chat/kill streaming is not connected in fleet mode.')
 
     def compose_toolbar(self):
         with Vertical(id='fleet-browser'):
@@ -224,7 +228,8 @@ class FleetApp(OniApp):
 
     def browser_summary(self):
         if not self.browser_ready:return
-        self.query_one('#fleet-summary',Static).update(Text(f'{len(self.visible_ids)}/{len(self.stations)} servers shown'))
+        current_shown=sum(ident in self.fleet.rows for ident in self.visible_ids)
+        self.query_one('#fleet-summary',Static).update(Text(f'{current_shown}/{len(self.fleet.rows)} current servers'))
         ident=self.cur.server.url.removeprefix('fleet://')
         excluded=ident not in self.visible_ids
         message=('No matches · ' if not self.visible_ids else '')+'Selected: '+self.cur.label
@@ -290,6 +295,35 @@ class FleetApp(OniApp):
 
     def action_search_servers(self):
         self.query_one('#fleet-search',Input).focus()
+
+    @work(exclusive=True,group='dialog')
+    async def action_search_players(self):
+        result=await self.push_screen_wait(PlayerSearch(self.fleet))
+        if not result:return
+        ident=result['server']['id']
+        try:
+            await self.refresh_inventory()
+            row=self.fleet.rows.get(ident)
+            if not row or row.get('process_generation')!=result['server'].get('process_generation'):
+                raise ValueError('Server changed; search again for the player’s current location.')
+            reply=await self.fleet.read(ident,'players')
+            if not reply.get('ok'):
+                raise ValueError('Could not verify the player’s current server; refresh the search.')
+            if not any(target_of(p).lower()==result['id'] for p in reply.get('data',{}).get('players',[])):
+                raise ValueError('Player has moved or left; refresh the search to find them again.')
+            station=self.server_items[ident].station
+            station.data['players']=reply['data']
+            self.select_fleet_station(ident)
+            self.action_tab('assets')
+            self.call_after_refresh(self.focus_found_player,ident,result['id'])
+        except Exception as exc:self.notify(str(exc),title='Player location changed',severity='warning')
+
+    def focus_found_player(self,ident,player_id):
+        if self.cur.rcon.ident!=ident:return
+        self.paint_players()
+        roster=self.query_one('#players',Roster)
+        if player_id in roster.ids:roster.move_cursor(row=roster.ids.index(player_id))
+        roster.focus()
 
     def action_sort_servers(self):
         self.query_one('#fleet-sort',Select).focus()
@@ -358,6 +392,13 @@ class FleetApp(OniApp):
 
     @work(exclusive=True,group='fleet-refresh')
     async def action_refresh_fleet(self):
+        await self.refresh_inventory()
+
+    async def refresh_inventory(self):
+        async with self.inventory_lock:
+            await self._refresh_inventory()
+
+    async def _refresh_inventory(self):
         try:
             await asyncio.to_thread(self.fleet.refresh)
             self.catalog={ident:{**row,'_retired':True,'fresh':False} for ident,row in self.catalog.items()}
@@ -468,6 +509,7 @@ def main():
     parser.add_argument('--list',action='store_true',help='list registered lobbies without opening the TUI')
     parser.add_argument('--probe',metavar='LOBBY_ID',help='read native status for one registered lobby')
     parser.add_argument('--tags',action='store_true',help='list broadcast/search tags and running-server counts')
+    parser.add_argument('--find-player',metavar='NAME',help='find a player name or ID across every current server')
     parser.add_argument('--search',default='',help='filter by name, node, map, mode or port; quotes group phrases')
     parser.add_argument('--node',default='all',type=str.casefold,help='filter to one node, e.g. node-c or node-d')
     parser.add_argument('--state',choices=[v for _,v in STATES],default='all',help='filter servers by state')
@@ -476,7 +518,15 @@ def main():
     fleet=Fleet();fleet.refresh()
     if args.node!='all' and args.node not in {r['node'] for r in fleet.rows.values()}:
         parser.error('unknown node: '+args.node)
-    if args.tags:
+    if args.find_player is not None:
+        directory=fleet.request('/api/players')
+        matches=matching_players(directory,args.find_player)
+        for player in matches:
+            server=player['server'];address=f"{server.get('public_ip') or server['node']}:{server['port']}"
+            print(f"{player['name']} · {server['name']} · {server['node'].upper()} · {address} · ID {player['id'][:8]}…")
+        print(coverage_text(directory,len(matches)))
+        if not matches:print('No matching players in available fresh rosters.')
+    elif args.tags:
         tags=sorted({t for r in fleet.rows.values() for t in server_tags(r)})
         for tag in tags:
             rows=[r for r in fleet.rows.values() if tag in server_tags(r)]
