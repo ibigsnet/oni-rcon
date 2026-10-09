@@ -19,9 +19,10 @@ servers first.
 |---|---|
 | **F1 Assets** | Live player table per server: team, score, K/D, health and shield bars, admin, dead and spree flags, and the score race between the teams along the bottom. The dossier shows the selected player's file, a biometric glyph drawn from their player ID, the medals they've earned and the raw JSON. `t` tell · `k` kick · `b` ban · `m` mute · `j` team · `v` VPN allow · `y` copy ID |
 | **F2 Intercepts** | One feed from every server: chat (team and server), kills with weapon, joins, leaves, kicks, bans, votes and game phases. Kills carry their Halo 3 medals: double kill through killionaire, killing spree through invincible, and killjoy. Filter by chat, combat, traffic, moderation or ops; scroll up to read back and it holds still. Chat that mentions admins or cheating raises a toast and the terminal bell |
-| **F3 Operations** | Sitrep for the selected server with the vote under way and its tally; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
+| **F3 Operations** | Sitrep for the selected server with the vote under way and its tally, and the title and author of the map or gametype playing when it came from ReclaimerForge; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next, end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
+| **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked, over the last 24 hours, 7 days or 30 days, and search it. Each listing shows its type, author, rating, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. `i` install on this server · `l` load it now · `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
 
 Also:
 
@@ -39,8 +40,8 @@ Also:
   listing each one, and the console stays light enough for a web terminal: a card is redrawn only when what it shows
   changes, status polls are spread over 15 seconds instead of fired together, and servers sign in 8 at a time with
   jittered reconnects.
-- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down; RED when a call for an
-  admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
+- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down or something you installed
+  from Forge has been withdrawn; RED when a call for an admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
   or the Intercepts tab.
 - **Broadcast to one server or all.** `Ctrl+B`. `@all` messages and commands go out 4 servers at a time, each reply
   goes in the command log on one line, and a tally closes it ("79 stations · 77 ok · 2 no reply yet"). A command that
@@ -159,6 +160,85 @@ port = 11774
 port = 11775
 ```
 
+## ReclaimerForge
+
+[ReclaimerForge](https://www.reclaimerforge.net) is the community catalog of forged maps, gametypes and playlists for
+Reclaimer. oni-rcon reads it with **your own API key**: none ships with oni-rcon, and every admin uses their own.
+Without one, everything else works as before. `oni-rcon --demo` brings a pretend Forge to try F6 with.
+
+**Get a key** on reclaimerforge.net with the `catalog:read` and `assets:download` scopes, and nothing more. oni-rcon
+never writes, uploads or publishes anything there.
+
+**Give it to oni-rcon.** The first of these that's set wins:
+
+1. `forge_api_key_env = "NAME"` in the config file: the key is in that environment variable
+2. `forge_api_key_command = [...]`: the first line a command prints, from your password manager say
+3. `$ONI_RCON_FORGE_KEY`
+
+Or press `k` on F6 and type it, for this session. Choose **Remember it** there to save it in the config file instead;
+that's off unless you pick it, and the file is then readable only by you.
+
+```toml
+forge_api_key_env = "RECLAIMERFORGE_KEY"
+# or: forge_api_key_command = ["pass", "show", "reclaimerforge/api-key"]
+```
+
+These go at the top of the config file, above `[defaults]` and the `[[server]]` blocks: TOML reads a key that comes
+after a table as part of that table.
+
+### Installing on a server
+
+Pick a listing on F6, pick a version (the newest is picked for you), and press `i`. oni-rcon fetches that version's
+manifest, downloads every file and checks each one against the manifest's size and SHA-256 before any of it is used,
+copies them into the server's content folder, checks them again there, and only then moves them into place. A file
+that fails a check is thrown away and nothing is installed. Replacing anything already there asks first, with ABORT
+picked. `◉` in the catalog marks what's installed on the selected server.
+
+Tell oni-rcon where each server loads content from with `content_dir`, in `[defaults]` or a `[[server]]` block:
+
+```toml
+[defaults]
+ssh = "admin@game-box"
+content_dir = "~/reclaimer/content"   # on the game box, for a server reached over ssh
+```
+
+- **Behind `--ssh`**, files go to the same SSH destination as the tunnel, with the same key authentication, and need a
+  POSIX shell and `sha256sum` on the game box (the Reclaimer docker host has both). With docker, name the host folder
+  that's mounted into the container.
+- **On this machine** (no `ssh`), it's a plain copy.
+- **Reached by a `ws://` or `wss://` link**, a server can't be installed to, and F6 says so.
+- Servers that share a `content_dir` share an install: it shows on all of them.
+
+**Loading is a separate step.** Whether a dedicated server picks up new content while it runs is up to the server, so
+installing never loads anything. Once the server lists the new map or gametype, `l` on F6 loads it, the same as LOAD
+MAP+MODE on F3. If it isn't listed yet, the server needs a restart, which oni-rcon can't do for you. A playlist is
+installed like anything else, but using it means pointing the server's playlist setting at it, and oni-rcon doesn't
+edit `dedicated.toml`. What's installed where is kept in `forge-state.json`, beside the config file.
+
+### Updates and withdrawals
+
+While anything is installed, oni-rcon reads Forge's changes feed every 10 minutes (`forge_poll = 600`, in seconds, at
+the top of the config; 60 at least) and, every 6 hours, fetches each installed listing whole for anything the feed
+missed. Those background checks stop well short of the key's quota, so browsing F6 always has room.
+
+- **A new version** gets one toast, says which servers run the old one, and marks the listing `▲` on F6.
+- **A withdrawn listing** gets a toast and a line in the feed, is flagged `⚠ WITHDRAWN` in the F3 rotation wherever
+  it's in it, and turns the masthead to **CONDITION AMBER** until you acknowledge it: on F6, `s` to INSTALLED HERE,
+  pick it, then `a`. It stays installed and flagged; what to do about it is yours to decide.
+
+### Rounds played
+
+oni-rcon counts the rounds each server plays, per map and gametype, from the status it already polls, and keeps them
+in `rounds.jsonl` beside the config file, one line per round: when it started and ended, the peak and final player
+counts, the Forge listing it came from if any, and whether the console saw it from the start. Nothing is sent
+anywhere. ReclaimerForge plans to take "verified host feedback" one day, and the lines are shaped for that; there's
+no endpoint for it yet, so for now they're yours to read. No player names, IDs or addresses go in, and servers are
+named as they name themselves, never by address or SSH login. Like medals, it counts only what the console saw.
+
+oni-rcon keeps to the key's quota (120 requests a minute): it reads the rate-limit headers on every reply, waits out a
+`429` for as long as Forge asks, and keeps recent replies so it doesn't ask twice. Those replies and every verified
+download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` elsewhere.
+
 ## Security
 
 - **RCON is plain text.** Keep the server's `[rcon] address` on `127.0.0.1` and reach it with `--ssh` (or a VPN). Never
@@ -167,12 +247,17 @@ port = 11775
   config that lives in a repo. `oni-rcon.toml` is in `.gitignore`.
 - **Mind the tool limit.** A server admits 4 RCON tools at once, and oni-rcon uses one connection per server.
 - **Kicks and bans name you.** They go into the server's admin log under your `--by` name.
+- **Your Forge key goes to reclaimerforge.net and nowhere else.** It travels in the `Authorization` header over HTTPS:
+  never in a URL, and never to a download link on another host. It never shows in the command log, a toast, a raw
+  JSON view or an error: anything shaped like a key (`rfk_…`) is blanked on screen, so it can't leak into a stream or
+  a screenshot. It's written to the config file only if you tick to remember it, and the file is then owner-only.
+  A key that was ever pasted somewhere public (a chat, an issue, a screenshot) should be revoked and replaced.
 
 ## Keys
 
 | Key | Action |
 |---|---|
-| `F1`–`F5` | Assets · Intercepts · Operations · Blacklist · Console |
+| `F1`–`F6` | Assets · Intercepts · Operations · Blacklist · Console · Forge |
 | `1`–`9` | select server |
 | `g` | go to any server: the list puts the busiest first and filters as you type |
 | `Ctrl+B` | broadcast |
@@ -184,7 +269,8 @@ port = 11775
 | `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
-| any key | skip the boot sequence; `F1`–`F5` also open that tab (`--no-intro` skips it for good) |
+| `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (or INSTALLED HERE), time window, next page, API key, copy listing ID |
+| any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good) |
 | `Ctrl+Q` | quit |
 
 ## Field names
@@ -202,12 +288,21 @@ uv run oni-rcon --demo
 ```
 
 The demo servers (`oni_rcon/demo.py`) speak the same protocol as a real server and are what the tests run against.
+`oni_rcon/forgefake.py` is a pretend ReclaimerForge, serving the API as `oni_rcon/forge.py` reads it, so neither the
+tests nor `--demo` ever reach the real site. Where the developer docs leave a field name or a page shape open, the
+assumption is written down at the top of `forge.py`.
 Animations follow Textual's `TEXTUAL_ANIMATIONS` (`none`, `basic` or `full`), so `TEXTUAL_ANIMATIONS=none oni-rcon`
 turns them off.
 
 To release, bump `__version__` in `src/oni_rcon/__init__.py`, commit, and push a matching tag (`git tag v0.2.0 &&
 git push --tags`). The release workflow builds the Windows and Linux binaries and publishes them, and running copies
 pick the new version up on their next start.
+
+## Thanks
+
+To the builder of [ReclaimerForge](https://www.reclaimerforge.net), who keeps the community's catalog of forged maps,
+gametypes and playlists running on their own time, and gave this integration the nod. F6 is only there because that
+work is. oni-rcon doesn't speak for ReclaimerForge; it's a separate community project with its own terms.
 
 ## Disclaimer
 

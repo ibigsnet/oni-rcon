@@ -498,11 +498,13 @@ def test_a_fleet():
             assert labels[:2] == ["BRAVO · Big Team", "ALPHA · Big Team"]  # the same name twice keeps its tag
 
             calls, busy, most = [], 0, 0
-            for st in app.stations:  # count how many are in flight at once
+            for st in app.stations:  # count how many says are in flight at once: the status polls go on meanwhile
                 real = st.rcon.call
 
                 async def slow(command, *args, real=real, **kw):
                     nonlocal busy, most
+                    if command != "say":
+                        return await real(command, *args, **kw)
                     busy += 1
                     most = max(most, busy)
                     await asyncio.sleep(0.02)

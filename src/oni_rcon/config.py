@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextlib
 import getpass
 import os
+import re
 import subprocess
 import tomllib
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ class Server:
     password: str = field(default="", repr=False)
     password_env: str = ""
     password_command: str | list[str] = ""
+    content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
 
     def __post_init__(self):
         if not (self.url or self.port):
@@ -96,16 +98,71 @@ def resolve_passwords(servers: list[Server]) -> None:
             raise SystemExit(f"{s.where}: empty RCON password")
 
 
-def _run(cmd: str | list[str]) -> str:
-    # A string runs through the shell; a list runs as-is (no quoting surprises, works the same on Windows).
+class CommandFailed(Exception):
+    pass
+
+
+def run_command(cmd: str | list[str], what: str) -> str:
+    """The first line a command prints. A string runs through the shell; a list runs as-is (no quoting surprises,
+    works the same on Windows)."""
     try:
         r = subprocess.run(cmd, shell=isinstance(cmd, str), capture_output=True, text=True, timeout=60,
                            stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as e:  # not installed, or waiting on something that never comes
-        raise SystemExit(f"password_command failed: {e}") from None
+        raise CommandFailed(f"{what} failed: {e}") from None
     if r.returncode:
-        raise SystemExit(f"password_command exited {r.returncode}: {r.stderr.strip()}")
+        raise CommandFailed(f"{what} exited {r.returncode}: {r.stderr.strip()}")
     return r.stdout.splitlines()[0] if r.stdout else ""
+
+
+def _run(cmd: str | list[str]) -> str:
+    try:
+        return run_command(cmd, "password_command")
+    except CommandFailed as e:
+        raise SystemExit(str(e)) from None
+
+
+def forge_settings(path: Path | None) -> dict:
+    """The config file's top-level forge_* keys: where the Forge API key comes from, and how often to check for
+    updates. Empty without a file, or with one load_config has already said is unreadable."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if k.startswith("forge_")}
+
+
+def write_atomic(path: Path, text: str, private: bool = False) -> None:
+    """Write through a temp file, so a crash midway leaves the old file whole. `private`: owner-only on Linux and
+    macOS (Windows profiles are per-user already)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    if private:
+        with contextlib.suppress(OSError):
+            tmp.chmod(0o600)
+    os.replace(tmp, path)
+
+
+def remember_forge_key(path: Path, key: str) -> None:
+    """Save the Forge API key in the config file: only ever when the operator ticks for it. It goes in at the top,
+    after the opening comments, where a top-level key is always valid TOML, or replaces one saved there before."""
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.is_file() else []
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    line = f"forge_api_key = {toml_str(key)}\n"
+    tables = next((i for i, x in enumerate(lines) if x.startswith("[")), len(lines))
+    old = next((i for i, x in enumerate(lines[:tables]) if re.match(r"forge_api_key\s*=", x)), None)
+    if old is not None:
+        lines[old] = line
+    else:
+        lines.insert(next((i for i, x in enumerate(lines) if x.strip() and not x.lstrip().startswith("#")),
+                          len(lines)), line)
+    text = "".join(lines)
+    if tomllib.loads(text).get("forge_api_key") != key:  # never leave the operator a config that won't load
+        raise ValueError("the key couldn't be saved in that config file")
+    write_atomic(path, text, private=True)
 
 
 def toml_str(s: str) -> str:
