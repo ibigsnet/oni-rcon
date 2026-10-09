@@ -594,6 +594,28 @@ def test_late_forge_events_while_quitting_are_ignored(fake, tmp_path):
     asyncio.run(go())
 
 
+def test_late_row_station_and_tab_events_while_quitting_are_ignored(tmp_path):
+    """The same race in the handlers every tab shares: a highlight or tab event still queued as the app quits was
+    handled with its widgets gone. CI hit it in _row (NoMatches '#dossier') after a test's last repaint."""
+    from types import SimpleNamespace as NS
+
+    from oni_rcon.app import OniApp
+    from oni_rcon.config import Server
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("A", 16, 2), ("B", 16, 2)])
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: all(st.online for st in app.stations))
+            app.stations[0].alerts = 1  # something unseen, so opening the feed would repaint
+        assert not app.is_running
+        app._row(None)
+        app._station(NS(list_view=NS(index=1)))  # another station chosen: it would repaint everything
+        app._tab(NS(pane=NS(id="intercepts")))
+    asyncio.run(go())
+
+
 def test_the_forge_tab_without_a_key(fake, tmp_path):
     from oni_rcon.app import Form
     from oni_rcon.demo import serve_fakes
