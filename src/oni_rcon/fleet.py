@@ -13,7 +13,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Input, ListView, Select, Static, TabbedContent
 from rich.text import Text
-from .app import OniApp, Station, Confirm, Form, Roster, target_of
+from .app import OniApp, Station, Card, Confirm, Form, Roster, target_of
 from .art import DIM
 from .player_search import PlayerSearch, matching_players, coverage_text
 from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_count, matching_rows,
@@ -303,6 +303,7 @@ class FleetApp(OniApp):
                 listing.index=list(listing.children).index(selected) if selected.display else None
             self.visible_ids=visible
             for station in self.stations:self.paint_card(station)
+            self.call_after_refresh(listing.sync)
         self.browser_summary()
 
     @on(Input.Changed,'#fleet-search')
@@ -445,11 +446,13 @@ class FleetApp(OniApp):
             known={s.rcon.ident for s in self.stations if s.rcon}
             for ident,row in sorted(self.fleet.rows.items()):
                 if ident in known:continue
-                server=Server(url='fleet://'+ident,name=self.label(row));station=Station(server,server.name)
-                card=Static(classes='card');self.stations.append(station);self.cards.append(card)
+                server=Server(url='fleet://'+ident,name=self.label(row))
+                station=Station(server,server.name,index=len(self.stations))
+                card=Card(classes='card');self.stations.append(station);self.cards.append(card)
                 item=ServerItem(station,card);self.server_items[ident]=item
                 await self.query_one('#stations',ListView).append(item)
                 station.rcon=self.rcon_factory(server.url,'',self.by,self.on_rcon_event,self.on_rcon_state)
+                self.by_rcon[station.rcon]=station
                 station.worker=self.run_worker(station.rcon.run(),group='rcon',exit_on_error=False)
             for station in self.stations:
                 row=self.fleet.rows.get(station.rcon.ident)

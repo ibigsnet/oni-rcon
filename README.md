@@ -1,6 +1,9 @@
-## IBIGS 0.6 integration (9 October 2026)
+## IBIGS 0.7 integration (9 October 2026)
 
-This fork includes upstream 0.6.0 plus the existing fleet search, sorting, tagged broadcasts and player directory.
+This fork includes upstream 0.7.0 plus the existing fleet search, sorting, tagged broadcasts and player directory.
+The sidebar redraws only visible cards while preserving command targets through sorting and dynamic discovery.
+Operations now fits 80-column terminals, bans show their moderator correctly, and customer/direct mode can opt in
+to join-time ping from server logs. The managed fleet has no log access, so missing ping remains unknown.
 Forge now shows thumbs-up/down votes, all authors, curated favourites, views, release notes, and individual release
 withdrawals. Multiple withdrawn releases remain flagged until every affected local lobby has moved on. The new
 Superintendent reacts to direct RCON events; in fleet mode it explicitly says the native event feed is not connected.
@@ -179,6 +182,37 @@ port = 11774
 [[server]]
 port = 11775
 ```
+
+### Player ping
+
+The PLAYERS tab has a PING column (green under 100 ms, amber under 200, red above). RCON has no ping, so it's the
+number the server logs when someone joins, the same one `maxping` uses: a join-time reading, not a live one. To fill
+it in, give oni-rcon a command that follows the server log, as a top-level key above the first `[table]`:
+
+```toml
+ping_log = ["tail", "-F", "/srv/reclaimer/logs/{port}.log"]  # {port} = that server's RCON port
+```
+
+Use an **argument array**, not a shell string. A literal `{port}` in each argument is replaced with that server's
+RCON port; pipes, redirects, arithmetic, `$()` and `~` are not expanded. For Docker logs, an operator who already
+has permission may use `["docker", "logs", "--follow", "--since", "12h", "my-server-{port}"]`. This setting does
+not grant Docker or log access. If names require a more complex lookup, write and review a local helper and pass
+its path and `{port}` as separate arguments.
+
+It runs on the `ssh` host (or locally when there's none), restarts with bounded backoff when the source exits, and
+stops with oni-rcon. SSH log readers require a POSIX host with `setsid` and a previously trusted SSH host key.
+Arguments are quoted individually on SSH; closing the terminal cleans up the reader's process group. Only player
+IDs and join-time milliseconds are kept in memory. Raw log text and addresses are not displayed or saved.
+
+Without a matching log record the column shows `—`, including players who joined before the available log window.
+That means **unknown**, not zero latency. The dossier labels the value JOIN PING; it is not ongoing packet loss or
+latency monitoring. WebSocket-URL and fleet-console fleet connections never start log readers, and RCON connection latency
+is never substituted for player ping.
+
+The customer `oni` wrapper's automatically generated lobby list does not enable a log reader. For an optional
+operator-managed configuration, run `oni --config /absolute/path/to/oni-rcon.toml` with your own server entries,
+credential environment variables and the top-level array above. Keep that configuration private; do not edit the
+wrapper's generated list because the next launch replaces it. This source update does not change client permissions.
 
 ## ReclaimerForge
 

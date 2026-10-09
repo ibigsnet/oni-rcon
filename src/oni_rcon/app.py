@@ -43,6 +43,7 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .install import InstallError, place, plan, size_words, target_for
+from .pings import JOIN_PING, follow_join_pings
 from .medals import Medals
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
@@ -280,6 +281,13 @@ def bar(v, width: int = 5) -> Text:
     return gauge(v, width, GREEN if v > .6 else AMBER if v > .3 else RED)
 
 
+# The server's RCON has no ping. It logs one line per player as they connect, and `maxping` judges that number.
+
+
+def ping_cell(ms) -> Text:
+    return Text("—", DIM) if ms is None else Text(str(ms), GREEN if ms < 100 else AMBER if ms < 200 else RED)
+
+
 def team_strip(teams: list, width: int = 24) -> Text | None:
     """The score race between the teams as one bar, for under the roster. None without at least two teams."""
     if len(teams) < 2:
@@ -482,6 +490,7 @@ class Station:
     tag: str = ""  # the community tag its reported name starts with, when the label leaves it off
     drawn: tuple = ()  # what its card shows now: repainted only when this changes
     polled: float = 0.0  # when its players were last fetched by the slow poll
+    pings: dict = field(default_factory=dict)  # player ID -> the ping they joined with, from the server's log
 
     @property
     def online(self) -> bool:
@@ -664,6 +673,8 @@ GUIDE = [
     ("F1  ASSETS  ·  the players", [
         ("Pick a player", "Click a row, or move with ↑ ↓. Their file opens on the right, with buttons to tell, kick, "
                           "ban, mute, move or allow them through a VPN."),
+        ("Ping", "PING is what a player joined with, read from the server's log (needs ping_log in the config; "
+                  "RCON has no live ping). Over 200 is red."),
         ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  y copy their ID"),
         ("Flags", "ADM an admin  ·  MUT muted  ·  KIA dead right now  ·  NEW just joined  ·  ★5 on a killing spree"),
         ("Their file", "The glyph is drawn from their player ID: the same player always gets the same one. Medals and "
@@ -899,8 +910,40 @@ class Card(Static):
     """A station in the sidebar. A card never changes size, so a repaint skips the layout pass: with a fleet of
     them repainting every second, layout was most of what the console spent its time on."""
 
+    wide = 0  # its width, as last laid out: asking per repaint re-arranges the whole screen, with 200 of them
+
+    def on_resize(self, event: events.Resize) -> None:
+        self.wide = event.size.width
+
     def show(self, content) -> None:
         self.update(content, layout=False)
+
+
+class Stations(ListView):
+    """The sidebar list. A card scrolled out of it isn't redrawn: Textual re-arranges the whole screen for a repaint of
+    something it isn't showing, and with 200 stations that was most of what the console spent its time on."""
+
+    def sync(self) -> None:
+        """Works out which cards are in view, and draws the ones that just came into it."""
+        app, high = self.app, self.outer_size.height
+        if not high:  # not laid out yet, or hidden: everything counts
+            return
+        row, top = (2 if app.large_fleet else 4), int(self.scroll_y)
+        # Managed fleets reorder/filter DOM children without changing stable station identities.
+        shown = [item for item in self.children if item.display]
+        visible = shown[top // row:(top + high - 1) // row + 1]
+        seen = {app.station_index(item) for item in visible}
+        if seen != app.seen:
+            app.seen = seen
+            for index in seen:
+                app.paint_card(app.stations[index])
+
+    def on_resize(self) -> None:
+        self.sync()
+
+    def watch_scroll_y(self, old: float, new: float) -> None:
+        super().watch_scroll_y(old, new)
+        self.sync()
 
 
 class Roster(DataTable):
@@ -943,6 +986,25 @@ class Feed(RichLog):
     has no width, and a plain RichLog then wraps everything written to it at 78 columns."""
     unread = 0
     inset = 8  # what the tabs' width loses to the border, padding and scrollbar; measured whenever it's shown
+    room = 0  # what a line wraps to while shown, 0 while hidden. Measured when that changes, never per line: the
+    #           first size read after a write re-arranges the whole screen, and that was most of what a couple of
+    #           hundred servers' events cost
+
+    def measure(self) -> None:
+        if self.size.width:
+            self.room = self.scrollable_content_region.width
+            self.app.tabs_width = self.app.query_one(TabbedContent).size.width
+            self.inset = self.app.tabs_width - self.room + (
+                0 if self.show_vertical_scrollbar else self.styles.scrollbar_size_vertical)  # as if the bar is there
+
+    def on_resize(self, event: events.Resize) -> None:  # RichLog's own runs as well
+        self.measure()
+
+    def on_show(self) -> None:
+        self.measure()
+
+    def on_hide(self) -> None:
+        self.room = 0
 
     def watch_scroll_y(self, old: float, new: float) -> None:
         super().watch_scroll_y(old, new)
@@ -953,14 +1015,13 @@ class Feed(RichLog):
 
     def write(self, content, width: int | None = None, expand: bool = False, shrink: bool = True,
               scroll_end: bool | None = None, animate: bool = False):
-        tabs = self.app.query_one(TabbedContent).size.width
-        if self.size.width:  # as if the scrollbar is there: it will be once the log fills
-            self.inset = tabs - self.scrollable_content_region.width + (
-                0 if self.show_vertical_scrollbar else self.styles.scrollbar_size_vertical)
-        elif width is None and tabs > self.inset:  # as wide as the line, up to what's there once shown
+        if width is None and (self.room or self.app.tabs_width > self.inset):
             console = self.app.console
-            available = tabs - self.inset
-            width = min(measure_renderables(console, console.options.update(width=available), [content]).maximum, available)
+            available = self.room or self.app.tabs_width - self.inset
+            line = measure_renderables(console, console.options.update(width=available), [content]).maximum
+            # shown: RichLog's own sum, spelled out so it doesn't ask for the size. Hidden: as wide as the line, up
+            # to what's there once shown
+            width = max(min(line, self.room), self.min_width) if self.room else min(line, self.app.tabs_width - self.inset)
         if not self.auto_scroll:
             self.unread += 1
             self.border_subtitle = f"▼ {self.unread} NEW  ·  End to follow"
@@ -990,6 +1051,8 @@ class OniApp(App):
     TITLE = "ONI RCON"
     FORGE_KEY = 'F6'
     TRACK_ROUNDS = True
+    seen = range(1 << 30)  # the cards in view in the sidebar, once it's laid out: the rest aren't redrawn
+    tabs_width = 0  # the tabs' width as last laid out, for the feeds written to while hidden
     BINDINGS = [
         Binding("f1", "tab('assets')", "Assets"), Binding("f2", "tab('intercepts')", "Intercepts"),
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
@@ -1132,7 +1195,7 @@ class OniApp(App):
         yield from ()
 
     def compose_stations(self) -> ComposeResult:
-        yield ListView(*[ListItem(c) for c in self.cards], id="stations")
+        yield Stations(*[ListItem(c) for c in self.cards], id="stations")
 
     def station_index(self, item: ListItem) -> int:
         return list(self.query_one("#stations", ListView).children).index(item)
@@ -1143,7 +1206,7 @@ class OniApp(App):
     def on_mount(self) -> None:
         self.register_theme(ONI)
         self.theme = "oni"
-        cols = {"#players": ["#", "CALLSIGN", "TEAM", "SCORE", "K", "D", "K/D", "HEALTH", "SHIELD", "FLAGS"],
+        cols = {"#players": ["#", "CALLSIGN", "TEAM", "SCORE", "K", "D", "K/D", "PING", "HEALTH", "SHIELD", "FLAGS"],
                 "#rotation": ["#", "MAP", "MODE"], "#bans": ["TYPE", "TARGET", "NAME", "REASON", "EXPIRES", "BY"],
                 "#vpn": ["ALLOWED THROUGH VPN", "NOTE"],
                 "#listings": ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"],
@@ -1188,6 +1251,8 @@ class OniApp(App):
                                        gate=gate, on_late=self.on_late_reply)
             self.by_rcon[st.rcon] = st
             st.worker = self.run_worker(st.rcon.run(), group="rcon", exit_on_error=False)
+            if s.ping_log:
+                self.run_worker(self.follow_pings(st), group="pings", exit_on_error=False)
 
         self.set_interval(1, self.tick)
         self.set_interval(3, self.poll_fast)
@@ -1204,6 +1269,9 @@ class OniApp(App):
         self.on_resize()
         if self.updater:  # a thread of its own rather than a worker: a slow download must not hold up quitting
             threading.Thread(target=self.check_update, daemon=True).start()
+
+    async def follow_pings(self, st: Station) -> None:
+        await follow_join_pings(st.server, st.pings)
 
     def check_update(self) -> None:
         try:
@@ -1223,6 +1291,7 @@ class OniApp(App):
     def on_resize(self) -> None:
         self.set_class(self.size.width < 140, "-narrow")  # on the app: the boot screen may be the one on top
         self.set_class(self.size.width >= 200, "-wide")
+        self.set_class(self.size.width < 120, "-tight")  # F3's sitrep and button grid no longer fit side by side
         self.paint_masthead()
         self.call_after_refresh(self.refit)
         # the sidebar crest takes what the station cards, the add button and the uplink leave, and goes when that's
@@ -1276,6 +1345,7 @@ class OniApp(App):
     def refit(self) -> None:
         """After a resize, once laid out: the panels that shape themselves to the room they have."""
         if self.is_running:
+            self.tabs_width = self.query_one(TabbedContent).size.width
             self.paint_dossier()
             self.paint_ops()
 
@@ -1640,6 +1710,9 @@ class OniApp(App):
 
     def paint_card(self, st: Station) -> None:
         """Draws the station's card, if anything it shows has changed: most seconds, for most of a fleet, nothing."""
+        if st.index not in self.seen:
+            st.drawn = ()  # drawn when it scrolls into view
+            return
         card, s = self.cards[st.index], st.data.get("status", {})
         state = st.rcon.state if st.rcon else "connecting"
         glyph, color = STATE[state]
@@ -1648,7 +1721,7 @@ class OniApp(App):
         elif self.beating(st):
             color = "#B4F5D0"  # a heartbeat: brighter for a moment every few seconds
         n, mx = num(s.get("players")), num(s.get("max_players"))
-        width = card.size.width or 33
+        width = card.wide or 33
         if not st.online:  # why, in words to act on, and when it tries again
             left = st.retry_at - time.monotonic()
             detail = (self.why(st), int(left) + 1 if left > 0 else 0)
@@ -1659,7 +1732,7 @@ class OniApp(App):
             # a step at a time: redrawn with every event, a few busy servers keep the whole sidebar repainting
             steps = 10 if self.large_fleet else max(4, width - 13)
             detail = (tuple(where), phase, tuple(st.rate(steps, 5, whole=self.large_fleet)))
-        key = (state, glyph, color, st.label, st.alerts, n, mx, width, self.large_fleet, detail)
+        key = (state, glyph, color, st.label, st.alerts, n, mx, width, self.large_fleet, detail, self.station_number(st))
         if key == st.drawn:
             return
         st.drawn = key
@@ -1696,6 +1769,8 @@ class OniApp(App):
         self.frame += 1
         now, moving = time.monotonic(), self.animation_level != "none"
         for i, (st, card) in enumerate(zip(self.stations, self.cards)):
+            if i not in self.seen:
+                continue
             pulsing = moving and st.flash > now
             if pulsing:  # red swelling and fading, about once a second
                 card.parent.styles.background = Color.parse(RED).with_alpha(0.1 + 0.3 * abs(self.frame % 6 - 3) / 3)
@@ -1749,7 +1824,7 @@ class OniApp(App):
             rows.append((key, [str(pick(p, "number", default="")), Text(name, TEAM_COLOR.get(team, WHITE)),
                                Text(team.upper() or "—", TEAM_COLOR.get(team, DIM)), str(pick(p, "score", default="—")),
                                str(k if k is not None else "—"), str(d if d is not None else "—"), kd,
-                               bar(p.get("health")), bar(p.get("shields")), flags]))
+                               ping_cell(st.pings.get(str(pick(p, "player_id", "id")))), bar(p.get("health")), bar(p.get("shields")), flags]))
         t = self.query_one("#players", Roster)
         t.fill(rows)
         st.painted = st.painted or "players" in st.data  # everyone here at the first look isn't news
@@ -1805,6 +1880,8 @@ class OniApp(App):
             head = side
         rows = [("PLAYER ID", pick(p, "player_id", "id", default="—")),
                 ("ADDRESS", Text(redact_addr(pick(p, "address", "ip"), self.redact), RED if self.redact else WHITE)),
+                ("JOIN PING", Text.assemble(ping_cell(ms), (" ms", DIM)) if (ms := self.cur.pings.get(
+                    str(pick(p, "player_id", "id")))) is not None else Text("—", DIM)),
                 ("HEALTH", bar(p.get("health"), 14)), ("SHIELDS", bar(p.get("shields"), 14)),
                 ("LAST DEATH", f"{pick(p, 'seconds_since_last_death')}s ago"
                  if isinstance(pick(p, "seconds_since_last_death"), (int, float)) else "—")]
@@ -1917,7 +1994,7 @@ class OniApp(App):
                 rows.append((key, [Text(kind, color), shown, str(pick(e, "name", default="")),
                                    str(pick(e, "reason", default="")),
                                    Text(left, RED if left == "PERMANENT" else DIM if left == "expired" else AMBER),
-                                   str(pick(e, "by", "group", default=""))]))
+                                   str(pick(e, "banned_by", "by", default=""))]))
         t = self.query_one("#bans", Roster)
         t.fill(rows)
         t.border_title = f"BLACKLIST · {len(rows)}"

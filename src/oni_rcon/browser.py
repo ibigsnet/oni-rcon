@@ -5,7 +5,8 @@ import shlex
 import re
 
 from textual.binding import Binding
-from textual.widgets import Input, ListItem, ListView
+from textual.widgets import Input, ListItem
+from .app import Stations
 
 SORTS = [
     ('Players: most first', 'players'),
@@ -139,7 +140,7 @@ class ServerItem(ListItem):
         self.station = station
 
 
-class ServerList(ListView):
+class ServerList(Stations):
     BINDINGS = [Binding('home', 'first_server', show=False), Binding('end', 'last_server', show=False)]
 
     def move_visible(self, direction):
