@@ -5,6 +5,13 @@
 
 by = "your-name"              # who you are in the server's admin log (default: your login name)
 
+# Your own ReclaimerForge API key (catalog:read and assets:download scopes only), first that's set wins:
+#   forge_api_key_env = "RECLAIMERFORGE_KEY"            (an environment variable on this machine)
+#   forge_api_key_command = ["pass", "show", "forge"]   (first line of a command's output)
+#   $ONI_RCON_FORGE_KEY
+# Keep these above the first [table]. No key: the console works as ever, just without Forge.
+forge_api_key_env = "RECLAIMERFORGE_KEY"
+
 [defaults]                    # applies to every [[server]] unless it sets the key itself
 ssh = "admin@game-box"        # tunnel through this SSH destination (key auth; leave out for direct)
 host = "127.0.0.1"            # RCON address as seen from the ssh destination (the server's default bind)

@@ -159,6 +159,33 @@ port = 11774
 port = 11775
 ```
 
+## ReclaimerForge
+
+[ReclaimerForge](https://www.reclaimerforge.net) is the community catalog of forged maps, gametypes and playlists for
+Reclaimer. oni-rcon reads it with **your own API key**: none ships with oni-rcon, and every admin uses their own.
+Without one, everything else works as before.
+
+**Get a key** on reclaimerforge.net with the `catalog:read` and `assets:download` scopes, and nothing more. oni-rcon
+never writes, uploads or publishes anything there.
+
+**Give it to oni-rcon.** The first of these that's set wins:
+
+1. `forge_api_key_env = "NAME"` in the config file: the key is in that environment variable
+2. `forge_api_key_command = [...]`: the first line a command prints, from your password manager say
+3. `$ONI_RCON_FORGE_KEY`
+
+```toml
+forge_api_key_env = "RECLAIMERFORGE_KEY"
+# or: forge_api_key_command = ["pass", "show", "reclaimerforge/api-key"]
+```
+
+These go at the top of the config file, above `[defaults]` and the `[[server]]` blocks: TOML reads a key that comes
+after a table as part of that table.
+
+oni-rcon keeps to the key's quota (120 requests a minute): it reads the rate-limit headers on every reply, waits out a
+`429` for as long as Forge asks, and keeps recent replies so it doesn't ask twice. Those replies and every verified
+download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` elsewhere.
+
 ## Security
 
 - **RCON is plain text.** Keep the server's `[rcon] address` on `127.0.0.1` and reach it with `--ssh` (or a VPN). Never
@@ -167,6 +194,11 @@ port = 11775
   config that lives in a repo. `oni-rcon.toml` is in `.gitignore`.
 - **Mind the tool limit.** A server admits 4 RCON tools at once, and oni-rcon uses one connection per server.
 - **Kicks and bans name you.** They go into the server's admin log under your `--by` name.
+- **Your Forge key goes to reclaimerforge.net and nowhere else.** It travels in the `Authorization` header over HTTPS:
+  never in a URL, and never to a download link on another host. It never shows in the command log, a toast, a raw
+  JSON view or an error: anything shaped like a key (`rfk_…`) is blanked on screen, so it can't leak into a stream or
+  a screenshot. It's written to the config file only if you tick to remember it, and the file is then owner-only.
+  A key that was ever pasted somewhere public (a chat, an issue, a screenshot) should be revoked and replaced.
 
 ## Keys
 
