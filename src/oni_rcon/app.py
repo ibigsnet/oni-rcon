@@ -8,7 +8,7 @@ import re
 import shlex
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from os.path import commonprefix
@@ -68,6 +68,13 @@ ADDRESS_KEYS = {"address", "ip", "ip_address", "addr"}
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 REFS = ("killer", "victim", "name", "player", "from", "sender")  # event fields that can name a player by engine ID
 SPREE = 5  # kills without dying that make a spree, and earn the marker in the roster
+FLEET = 12  # more stations than this: slimmer cards, a summary on the boot screen, paced fan-out
+FANOUT = 4  # an @all command or broadcast reaches this many stations at a time
+SIGN_INS = 8  # stations signing in at once
+SLOW_POLL = 15  # seconds in which every station's status comes round once
+QUIET_PHASES = {"", "unknown", "none"}  # a phase that says nothing: left off the card, for the map and mode
+SEPARATORS = (" · ", " | ", " - ", " — ", ": ")  # between a community's tag and a server's own name
+FREE_TEXT = {"say": 0, "tell": 1, "kick": 1, "servername": 0}  # console commands whose last argument is the rest
 
 OPS = [("load", "LOAD MAP+MODE", "primary"), ("map", "CHANGE MAP", "default"), ("mode", "CHANGE MODE", "default"),
        ("nextmap", "QUEUE NEXT", "default"), ("endround", "END ROUND", "warning"), ("endgame", "END GAME", "error"),
@@ -242,9 +249,9 @@ def team_strip(teams: list, width: int = 24) -> Text | None:
     parts = [(max(score, 0), TEAM_COLOR.get(team, WHITE)) for team, _, score in teams]
     if len(teams) == 2:
         (a, _, sa), (b, _, sb) = teams
-        return Text.assemble((f" {a.upper()} {sa} ", f"bold {parts[0][1]}"), split_bar(parts, width),
-                             (f" {sb} {b.upper()} ", f"bold {parts[1][1]}"))
-    names = Text("  ").join(Text(f"{t.upper()} {s}", f"bold {c}") for (t, _, s), (_, c) in zip(teams, parts))
+        return Text.assemble((f" {a.upper()} {sa} ", parts[0][1]), split_bar(parts, width),
+                             (f" {sb} {b.upper()} ", parts[1][1]))
+    names = Text("  ").join(Text(f"{t.upper()} {s}", c) for (t, _, s), (_, c) in zip(teams, parts))
     return Text(" ") + names + Text(" ") + split_bar(parts, width) + Text(" ")
 
 
@@ -297,6 +304,34 @@ def q(a: str) -> str:
     return f'"{a}"' if not a or " " in a else a
 
 
+def parse_command(line: str) -> list[str]:
+    """A console line as the command and its arguments. Quotes group words as in a shell, except in the message a
+    say, tell, kick or rename carries: that's the rest of the line as typed, so an apostrophe in it is just one, and
+    the server gets it as one argument rather than word by word."""
+    lex = shlex.shlex(line, posix=True)
+    lex.whitespace_split, lex.commenters = True, ""
+    words = [lex.get_token()]
+    lead = FREE_TEXT.get((words[0] or "").lower())
+    if lead is None:
+        return [w for w in [*words, *lex] if w is not None]
+    while len(words) <= lead and (w := lex.get_token()) is not None:
+        words.append(w)
+    rest = lex.instream.read().strip()
+    if len(rest) > 1 and rest[0] == rest[-1] and rest[0] in "'\"" and rest[0] not in rest[1:-1]:
+        rest = rest[1:-1]  # quoted whole, as a shell would want it
+    return [w for w in words if w is not None] + ([rest] if rest else [])
+
+
+def split_tag(name: str) -> tuple[str, str]:
+    """("ALPHA", "Big Team Rockets") for "ALPHA · Big Team Rockets"; ("", name) when it carries no tag."""
+    at = [(i, sep) for sep in SEPARATORS if 0 < (i := name.find(sep)) <= 24]
+    if not at:
+        return "", name
+    i, sep = min(at)
+    own = name[i + len(sep):].strip()
+    return (name[:i].strip(), own) if own else ("", name)
+
+
 def describe(ev: dict, names: dict, redact: bool = True) -> Text:
     """What an event says, after its time and station. Known kinds get a layout; anything else prints its fields."""
     kind = str(ev.get("event", "?"))
@@ -305,21 +340,21 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
     if kind == "chat":
         ch = str(ev.get("channel", "all"))
         if ch == "server":
-            line.append("[SERVER] ", f"bold {AMBER}")
+            line.append("[SERVER] ", AMBER)
             line.append(redact_text(str(ev.get("text", "")), redact), AMBER)
         else:
             team = str(pick(ev, "team", default=ch.removeprefix("team").strip())).lower()
             line.append(f"[{ch.upper()}] ", DIM)
-            line.append(who(pick(ev, "name", "player", "from", "sender"), names), f"bold {TEAM_COLOR.get(team, WHITE)}")
+            line.append(who(pick(ev, "name", "player", "from", "sender"), names), TEAM_COLOR.get(team, WHITE))
             line.append(": " + redact_text(str(ev.get("text", "")), redact))
     elif kind == "kill":
         killer, victim = pick(ev, "killer"), pick(ev, "victim")
         k, v = who(killer, names), who(victim, names)
         if killer is None or k == v:
-            line.append(v, "bold")
+            line.append(v, WHITE)
             line.append(" died", DIM)
         else:
-            line.append(k, "bold")
+            line.append(k, WHITE)
             line.append(" ✕ ", RED)
             line.append(v)
         how = pick(ev, "weapon", "damage", "cause", "how")
@@ -327,13 +362,13 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
             line.append(f"  [{how}]", DIM)
         for medal in ev.get("_medals") or ():  # padded with blank braille, not spaces: wrap between pills only
             line.append("  ")
-            line.append(f"\u2800{medal}\u2800".replace(" ", "\u2800"), f"bold {INK} on {GOLD}")
+            line.append(f"\u2800{medal}\u2800".replace(" ", "\u2800"), f"{INK} on {GOLD}")
     else:
-        line.append(kind.upper(), f"bold {CATS[cat]}")
+        line.append(kind.upper(), CATS[cat])
         rest = {k: v for k, v in ev.items() if k not in ("type", "event", "time")}
         name = rest.pop("name", None) or rest.pop("player", None)
         if name is not None:
-            line.append(f"  {who(name, names)}", "bold")
+            line.append(f"  {who(name, names)}", WHITE)
         text = rest.pop("text", None)
         if text:
             line.append(f"  {redact_text(str(text), redact)}")
@@ -360,14 +395,14 @@ def vote_text(v) -> Text:
         return Text("none under way", DIM)
     if not isinstance(v, dict):
         return Text(json.dumps(v))
-    t = Text(str(pick(v, "subject", "type", "kind", default="vote")).upper(), f"bold {AMBER}")
+    t = Text(str(pick(v, "subject", "type", "kind", default="vote")).upper(), AMBER)
     if target := pick(v, "target", "player", "name"):
         t.append(f" {target}")
     yes, no = num(pick(v, "yes", "for")), num(pick(v, "no", "against"))
     if yes is not None or no is not None:
         yes, no = yes or 0, no or 0
-        t += Text.assemble(("\nYES ", DIM), (f"{yes} ", f"bold {GREEN}"), split_bar([(yes, GREEN), (no, RED)], 6),
-                           (f" {no}", f"bold {RED}"), (" NO", DIM))
+        t += Text.assemble(("\nYES ", DIM), (f"{yes} ", GREEN), split_bar([(yes, GREEN), (no, RED)], 6),
+                           (f" {no}", RED), (" NO", DIM))
     return t
 
 
@@ -387,6 +422,10 @@ class Station:
     retry_at: float = 0.0  # when the next reconnect attempt goes out
     first_seen: dict = field(default_factory=dict)  # player key -> when their row first appeared
     painted: bool = False  # players drawn once: anyone new after this gets a NEW flag
+    index: int = 0  # its place in the sidebar
+    tag: str = ""  # the community tag its reported name starts with, when the label leaves it off
+    drawn: tuple = ()  # what its card shows now: repainted only when this changes
+    polled: float = 0.0  # when its players were last fetched by the slow poll
 
     @property
     def online(self) -> bool:
@@ -400,9 +439,14 @@ class Station:
     def names(self) -> dict:
         return {p.get("engine_id"): str(pick(p, "name", default="?")) for p in self.players if p.get("engine_id") is not None}
 
-    def rate(self, buckets: int, span: float) -> list[int]:
-        """Events in each of the last `buckets` stretches of `span` seconds, oldest first."""
+    def rate(self, buckets: int, span: float, whole: bool = False) -> list[int]:
+        """Events in each of the last `buckets` stretches of `span` seconds, oldest first. `whole` leaves out the
+        stretch still under way, so the counts change once a stretch rather than with every event."""
         now, out = time.monotonic(), [0] * buckets
+        if whole:
+            now -= now % span
+        while self.activity and now - self.activity[0] > 300:  # older than any card's trace
+            self.activity.popleft()
         for t in self.activity:
             if 0 <= (i := buckets - 1 - int((now - t) // span)) < buckets:
                 out[i] += 1
@@ -554,6 +598,7 @@ GUIDE = [
     ("GETTING AROUND", [
         ("Servers", "Your servers are on the left. Click one, or press 1 to 9. A green ◉ is connected; a red ○ "
                     "says why it isn't, and retries by itself."),
+        ("Go to", "g lists every server, the busiest first: type part of a name and press Enter."),
         ("Tabs", "F1 to F5, or click the names along the top."),
         ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
     ]),
@@ -568,7 +613,8 @@ GUIDE = [
     ("F2  INTERCEPTS  ·  what's happening", [
         ("The feed", "Chat, kills, joins, kicks and bans from every server, newest at the bottom. Scroll up to read "
                      "back; it holds still until you press End."),
-        ("Talk back", "Type in the box at the bottom to chat as [Server]. Start with @all to reach every server."),
+        ("Talk back", "Type in the box at the bottom to chat as [Server]. Start with @all to reach every server: they "
+                      "go out a few at a time, and the command log tallies how it went."),
         ("Medals", "Kills carry their Halo 3 medals as they happen: double kill and up, sprees, killjoys."),
         ("Alerts", "Chat asking for an admin, or naming a cheat, pops up, beeps and turns the CONDITION at the top red. "
                    "Servers you aren't looking at show a ⚑ count until you open them or this feed."),
@@ -597,14 +643,20 @@ class Help(Dialog):
     BINDINGS = [Binding("escape,question_mark,q", "dismiss", show=False)]
 
     def compose(self) -> ComposeResult:
-        parts = []
+        crest = Table.grid(padding=(0, 3))
+        crest.add_column()
+        crest.add_column(vertical="middle")
+        crest.add_row(emblem(8, 16), Text.assemble(("OFFICE OF NAVAL INTELLIGENCE\n", AMBER),
+                                                   ("SECTION THREE  ·  REMOTE CONSOLE TERMINAL\n\n", DIM),
+                                                   ("Every key, button and readout, in plain words.", WHITE)))
+        parts = [crest, Text()]
         for section, rows in GUIDE:
             g = Table.grid(padding=(0, 2))
             g.add_column(style=CYAN, no_wrap=True, width=14)
             g.add_column()
             for k, v in rows:
                 g.add_row(k, Text(v, WHITE))
-            parts += [Text(section, f"bold {AMBER}"), g, Text()]
+            parts += [Text(section, AMBER), g, Text()]
         with Vertical(classes="dialog help"):
             yield Static("FIELD MANUAL", classes="dialog-title")
             with VerticalScroll(id="help-body"):
@@ -619,6 +671,7 @@ class Boot(Screen):
     """The splash: decrypts the title and materialises the emblem while the stations sign in. Any key skips it,
     and F1 to F5 go straight to their tab. With animations off (TEXTUAL_ANIMATIONS) it all appears at once."""
     HEADING = "O F F I C E   O F   N A V A L   I N T E L L I G E N C E"
+    SHOW_DOWN = 5  # a fleet's stations that can't connect, listed by name; any more are counted
 
     def compose(self) -> ComposeResult:
         with Vertical(id="boot"):
@@ -630,8 +683,10 @@ class Boot(Screen):
 
     def on_mount(self) -> None:
         self.t0, self.done, self.drawn = time.monotonic(), None, None
-        # fixed, so the emblem doesn't shift as lines come in: one per tunnel and station, the rest, the progress bar
-        self.query_one("#boot-log").styles.height = len(self.app.stations) + len(self.app.tunnels) + 5
+        # fixed, so the emblem doesn't shift as lines come in: one per tunnel and station (a fleet gets a tally and
+        # the stations that can't connect), the rest, the progress bar
+        self.lines = len(self.app.tunnels) + (2 + self.SHOW_DOWN if self.app.large_fleet else len(self.app.stations)) + 5
+        self.query_one("#boot-log").styles.height = self.lines
         self.set_interval(0.07, self.tick)
         self.tick()
 
@@ -643,20 +698,20 @@ class Boot(Screen):
     @staticmethod
     def dotted(k: str, v: str, color: str) -> Text:
         dots = max(3, min(46 - len(k), 59 - len(k) - len(v)))  # a long value takes from the dots, not the next line
-        return Text(f"> {k} ", WHITE) + Text("." * dots, DIM) + Text(f" {v}\n", f"bold {color}")
+        return Text(f"> {k} ", WHITE) + Text("." * dots, DIM) + Text(f" {v}\n", color)
 
     def tick(self) -> None:
         app, el = self.app, time.monotonic() - self.t0
         t = el if app.animation_level == "full" else 9.0  # past every effect: drawn whole at once
         # leave room for the title, the log (a line per tunnel and station) and the progress bar
-        rows = app.size.height - 14 - len(app.stations) - len(app.tunnels)
+        rows = app.size.height - 9 - self.lines
         if t < 1.9 or self.drawn != rows:  # materialise, sweep once, then leave it be
             self.query_one("#boot-emblem", Static).update(
                 emblem(rows, reveal=t / 0.9, scan=(t - 0.8) / 0.9 if 0.8 < t < 1.7 else None))
             self.drawn = rows
         self.query_one("#boot-title", Static).update(Text.assemble(
-            ("\n" + decrypt(self.HEADING, t / 0.8, int(t / 0.07)) + "\n", f"bold {AMBER}"),
-            ("SECTION THREE  ·  REMOTE CONSOLE TERMINAL  ·  ", DIM), ("TOP SECRET", f"bold {RED}")))
+            ("\n" + decrypt(self.HEADING, t / 0.8, int(t / 0.07)) + "\n", AMBER),
+            ("SECTION THREE  ·  REMOTE CONSOLE TERMINAL  ·  ", DIM), ("TOP SECRET", RED)))
 
         spin = SPIN[int(el * 8) % 4]
         log = [("AUTHENTICATING OPERATOR", app.by.upper(), AMBER, True),
@@ -665,7 +720,17 @@ class Boot(Screen):
             v, c = ((f"{spin} OPENING", AMBER) if tun.state == "opening" else ("ESTABLISHED", GREEN)
                     if tun.state == "up" else (explain(tun.detail, short=True), RED))
             log.append((f"SSH TUNNEL {tun.dest.upper()[:34]}", v, c, tun.state != "opening"))
-        log += [(f"[{i + 1}] {st.label.upper()[:34]}", *app.link(st, spin)) for i, st in enumerate(app.stations)]
+        links = [(f"[{i + 1}] {st.label.upper()[:34]}", *app.link(st, spin)) for i, st in enumerate(app.stations)]
+        if app.large_fleet:  # a line each would scroll off the screen and take a quarter of a second apiece
+            up, settled = sum(st.online for st in app.stations), all(ok for *_, ok in links)
+            log.append((f"STATIONS 1-{len(links)}", f"{'' if settled else spin + ' '}{up}/{len(links)} SECURE",
+                        GREEN if up == len(links) else AMBER if not settled or up else RED, settled))
+            down = [line for line in links if line[3] and line[2] == RED]
+            log += down[:self.SHOW_DOWN]
+            if len(down) > self.SHOW_DOWN:
+                log.append((f"AND {len(down) - self.SHOW_DOWN} MORE", "SEE THE SIDEBAR", RED, True))
+        else:
+            log += links
         steps = int(el / 0.22)
         out = Text()
         for k, v, c, _ in log[:steps]:
@@ -703,13 +768,31 @@ class Blacklist(Vertical):
                 Binding("a", "app.bl('vpnallow')", "VPN allow"), Binding("r", "app.bl('vpnrevoke')", "VPN revoke")]
 
 
+def same(a, b) -> bool:
+    """Whether two cells read and look the same. Text's own == leaves out its base style, the colour a name
+    takes from its team."""
+    if isinstance(a, Text) and isinstance(b, Text):
+        return a.plain == b.plain and a.style == b.style and a.spans == b.spans
+    return type(a) is type(b) and a == b
+
+
+class Card(Static):
+    """A station in the sidebar. A card never changes size, so a repaint skips the layout pass: with a fleet of
+    them repainting every second, layout was most of what the console spent its time on."""
+
+    def show(self, content) -> None:
+        self.update(content, layout=False)
+
+
 class Roster(DataTable):
     """A table refreshed in place. Rows stay put, so a refresh never scrolls the view, and the cursor stays with
-    the selected row's id when rows come, go or reorder: an unban must hit the entry the operator chose."""
+    the selected row's id when rows come, go or reorder: an unban must hit the entry the operator chose. Only the
+    cells that changed are touched: a poll that finds the same numbers redraws nothing."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.ids: list[str] = []
+        self.cells: list[list] = []
 
     @property
     def selected(self) -> str | None:
@@ -717,19 +800,22 @@ class Roster(DataTable):
 
     def fill(self, rows: list[tuple[str, list]]) -> None:
         """rows: (id, cells) in display order."""
-        keep, have = self.selected, self.row_count
+        keep, have, changed = self.selected, self.row_count, len(rows) != self.row_count
         for r, (_, cells) in enumerate(rows):
             if r < have:
                 for c, v in enumerate(cells):
-                    self.update_cell_at(Coordinate(r, c), v, update_width=True)
+                    if not same(v, self.cells[r][c]):
+                        self.update_cell_at(Coordinate(r, c), v, update_width=True)
+                        changed = True
             else:
                 self.add_row(*cells, key=str(r))
         for r in range(have - 1, len(rows) - 1, -1):
             self.remove_row(str(r))
-        self.ids = [i for i, _ in rows]
+        self.ids, self.cells = [i for i, _ in rows], [list(cells) for _, cells in rows]
         if keep in self.ids and self.ids.index(keep) != self.cursor_row:
             self.move_cursor(row=self.ids.index(keep))
-        self.refresh()
+        if changed:
+            self.refresh()
 
 
 class Feed(RichLog):
@@ -789,6 +875,7 @@ class OniApp(App):
         Binding("f5", "tab('console')", "Console"), Binding("ctrl+b", "broadcast", "Broadcast"),
         Binding("ctrl+r", "refresh", "Refresh"), Binding("x", "redact", "Redact"),
         Binding("question_mark", "help", "Help"), Binding("slash", "focus_input", "Type", show=False),
+        Binding("g", "goto", "Go to", show=False),
         *[Binding(str(i), f"station({i - 1})", show=False) for i in range(1, 10)],
     ]
 
@@ -798,8 +885,11 @@ class OniApp(App):
         self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
         self.rcon_factory = rcon_factory
         self.frame, self.lit = 0, set()  # lit: cards mid-pulse
-        self.stations = [Station(s, s.name or s.where) for s in servers]
-        self.cards = [Static(classes="card") for _ in servers]
+        self.stations = [Station(s, s.name or s.where, index=i) for i, s in enumerate(servers)]
+        self.by_rcon: dict[Rcon, Station] = {}
+        self.cards = [Card(classes="card") for _ in servers]
+        self.large_fleet = len(servers) > FLEET
+        self.label_width = self.measure_labels()
         self.sel, self.redact, self.raw_events = 0, True, False
         self.feed: deque = deque(maxlen=3000)
         self.filters, self.local_only = set(CATS), False
@@ -895,7 +985,8 @@ class OniApp(App):
                 "#rotation": ["#", "MAP", "MODE"], "#bans": ["TYPE", "TARGET", "NAME", "REASON", "EXPIRES", "BY"],
                 "#vpn": ["ALLOWED THROUGH VPN", "NOTE"]}
         for sel, c in cols.items():
-            self.query_one(sel, DataTable).add_columns(*c)
+            if not (t := self.query_one(sel, DataTable)).columns:  # once, whatever mounts twice
+                t.add_columns(*c)
         for sel, title in {"#players": "ASSETS IN THEATRE", "#dossier-box": "DOSSIER", "#feed": "SIGINT FEED",
                            "#sitrep": "SITREP", "#theatre": "THEATRE", "#rotation": "ROTATION", "#bans": "BLACKLIST",
                            "#vpn": "VPN ALLOWANCES", "#console-log": "COMMAND LOG"}.items():
@@ -908,6 +999,7 @@ class OniApp(App):
         self.log_cmd(Text("ONI remote console. Commands go to the selected station; `@all` prefixes run on every "
                           "station; `help` asks the server; `clear` clears this log.", DIM))
 
+        self.set_class(self.large_fleet, "-fleet")
         remotes: dict[str, list] = {}
         for st in self.stations:
             if st.server.ssh and not st.server.url:
@@ -915,6 +1007,7 @@ class OniApp(App):
         for dest, r in remotes.items():
             self.tunnels[dest] = Tunnel(dest, r, self.on_tunnel)
             self.run_worker(self.tunnels[dest].run(), group="tunnels", exit_on_error=False)
+        gate = asyncio.Semaphore(SIGN_INS)
         for st in self.stations:
             s, ready = st.server, None
             if s.url:
@@ -924,12 +1017,14 @@ class OniApp(App):
                 url, ready = f"ws://127.0.0.1:{tun.local[(s.host, s.port)]}", tun.ready
             else:
                 url = f"ws://[{s.host}]:{s.port}" if ":" in s.host else f"ws://{s.host}:{s.port}"
-            st.rcon = self.rcon_factory(url, s.password, self.by, self.on_rcon_event, self.on_rcon_state, ready)
+            st.rcon = self.rcon_factory(url, s.password, self.by, self.on_rcon_event, self.on_rcon_state, ready,
+                                       gate=gate, on_late=self.on_late_reply)
+            self.by_rcon[st.rcon] = st
             st.worker = self.run_worker(st.rcon.run(), group="rcon", exit_on_error=False)
 
         self.set_interval(1, self.tick)
         self.set_interval(3, self.poll_fast)
-        self.set_interval(15, self.poll_slow)
+        self.set_interval(1, self.poll_slow)
         self.set_interval(0.15, self.animate_cards)
         self.paint_all()
         if self.intro:
@@ -957,11 +1052,12 @@ class OniApp(App):
 
     def on_resize(self) -> None:
         self.set_class(self.size.width < 140, "-narrow")  # on the app: the boot screen may be the one on top
+        self.set_class(self.size.width >= 200, "-wide")
         self.paint_masthead()
         self.call_after_refresh(self.refit)
         # the sidebar crest takes what the station cards, the add button and the uplink leave, and goes when that's
         # too little
-        free = self.size.height - 11 - len(self.tunnels) - 4 * len(self.stations)
+        free = self.size.height - 11 - len(self.tunnels) - (2 if self.large_fleet else 4) * len(self.stations)
         crest = self.query_one("#crest", Static)
         crest.update(art := emblem(min(free, 16), 32))
         crest.display = bool(art.plain)
@@ -999,11 +1095,12 @@ class OniApp(App):
     def on_rcon_state(self, rcon: Rcon, state: str, detail: str) -> None:
         if not self.is_running:  # a late reply or event while quitting: the widgets are already gone
             return
-        st = next(s for s in self.stations if s.rcon is rcon)
+        st = self.by_rcon[rcon]
         if state == "online":
             st.medals.new_game()  # what happened while we were away is unknown
             self.relabel()
             self.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn")
+            st.polled = time.monotonic()
             self.log_event(st, {"event": "uplink", "text": f"SECURE  {detail}"})
         elif state == "denied":
             self.log_event(st, {"event": "uplink", "text": f"SIGN-IN REFUSED: {detail}"})
@@ -1039,13 +1136,27 @@ class OniApp(App):
         pre = commonprefix(names) if len(set(names)) > 1 else ""
         cut = max(pre.rfind(" "), pre.rfind("|")) + 1
         before = [st.label for st in self.stations]
+        # several communities on one console ("ALPHA · Big Team", "BRAVO · Lockout"): the tag goes on the card's
+        # second line, and the label keeps what tells a server apart
+        tags = Counter(split_tag(n[cut:].strip(" |·-"))[0] for n in names)
         for st, n in zip(self.stations, reported):
             if n and not st.server.name:
                 st.label = n[cut:].strip(" |·-") or n
+                tag, own = split_tag(st.label)
+                st.label, st.tag = (own, tag) if tag and tags[tag] > 1 else (st.label, "")
+        seen = Counter(st.label for st in self.stations)
+        for st in self.stations:  # two communities can each run a "Big Team": those keep their tag
+            if st.tag and seen[st.label] > 1:
+                st.label, st.tag = f"{st.tag} · {st.label}", ""
+        self.label_width = self.measure_labels()
         for st in self.stations:
             self.paint_card(st)
         if [st.label for st in self.stations] != before:
             self.repaint_feed()  # the lines so far name stations as they were labelled then
+
+    def measure_labels(self) -> int:
+        """How wide the feed's station column is: as wide as the longest label, within reason."""
+        return max(4, min(18, max((len(s.label) for s in self.stations), default=4)))
 
     def reconnect(self, st: Station) -> None:
         st.worker.cancel()
@@ -1081,25 +1192,88 @@ class OniApp(App):
             self.fetch(self.cur, "vote")
 
     def poll_slow(self) -> None:
-        for st in self.stations:
-            self.fetch(st, "status", "players")
+        """Each second, the stations due: every one comes round once in SLOW_POLL seconds, spread out rather than
+        all at once, so a fleet is a steady trickle of requests and repaints instead of a burst. An empty server's
+        roster isn't asked for: its status says nobody's there, and a join brings the roster in."""
+        if not self.is_running:
+            return
+        now = time.monotonic()
+        due = sorted((st for st in self.stations if st.online and now - st.polled >= SLOW_POLL), key=lambda s: s.polled)
+        for st in due[:-(-len(self.stations) // SLOW_POLL)]:
+            st.polled = now
+            empty = num(st.data.get("status", {}).get("players")) == 0 and not st.players
+            self.fetch(st, "status", *(() if empty else ("players",)))
 
-    async def cmd(self, st: Station, command: str, *args: str, toast: bool = True, show_data: bool = False) -> dict:
-        """Run one command, write it to the command log (the audit trail), toast the result."""
+    async def cmd(self, st: Station, command: str, *args: str, toast: bool = True, show_data: bool = False,
+                  quiet: bool = False, brief: bool = False) -> dict:
+        """Run one command, write it to the command log (the audit trail), toast the result. `ok` comes back None
+        when no reply came in time: it may still have run. `quiet` keeps even a failure out of the toasts, and
+        `brief` logs only the station and its reply, for a fan-out that names the command once and sums up."""
         try:
             r = await st.rcon.call(command, *args)
+            r = {**r, "ok": bool(r.get("ok"))}  # None is kept for no reply at all
+        except TimeoutError as e:
+            r = {"ok": None, "text": str(e)}
         except Exception as e:
             r = {"ok": False, "text": str(e) or type(e).__name__}
-        ok = bool(r.get("ok"))
-        text = redact_text(str(r.get("text") or ("done" if ok else "failed")), self.redact)
-        self.log_cmd(Text(time.strftime("%H:%M:%S "), DIM) + Text(f"{st.label} ", CYAN)
-                     + Text(redact_text(f"» {' '.join([command, *map(q, args)])}", self.redact), "bold"))
-        self.log_cmd(Text(f"  {text}", GREEN if ok else RED))
+        self.log_reply(st, None if brief else " ".join([command, *map(q, args)]), r, show_data)
+        ok = r.get("ok")
+        if toast or not (ok or quiet):
+            self.notify(self.reply_text(r), title=f"{st.label} · {command.upper()}",
+                        severity="information" if ok else "warning" if ok is None else "error")
+        return r
+
+    def reply_text(self, r: dict) -> str:
+        ok = r.get("ok")
+        return redact_text(str(r.get("text") or ("done" if ok else "no reply" if ok is None else "failed")), self.redact)
+
+    def log_reply(self, st: Station, line: str | None, r: dict, show_data: bool = False, late: bool = False) -> None:
+        """The command and its reply in the command log; with no line, one line of station and reply."""
+        ok = r.get("ok")
+        reply = Text(self.reply_text(r), GREEN if ok else AMBER if ok is None else RED)
+        if line is None:
+            self.log_cmd(Text(f"  {'✓' if ok else '…' if ok is None else '✕'} ", reply.style)
+                         + Text(f"{st.label}  ", CYAN) + reply)
+        else:
+            self.log_cmd(Text(time.strftime("%H:%M:%S "), DIM) + Text(f"{st.label} ", CYAN)
+                         + Text(redact_text(f"{'« late reply to' if late else '»'} {line}", self.redact),
+                                DIM if late else WHITE))
+            self.log_cmd(Text("  ") + reply)
         if show_data and r.get("data") is not None:
             self.log_cmd(JSON.from_data(redact_data(r["data"], self.redact)))
-        if toast or not ok:
-            self.notify(text, title=f"{st.label} · {command.upper()}", severity="information" if ok else "error")
-        return r
+
+    def on_late_reply(self, rcon: Rcon, line: str, r: dict) -> None:
+        """A reply that came after its command timed out: logged, so the outcome isn't left a mystery."""
+        if self.is_running:
+            self.log_reply(self.by_rcon[rcon], line, r, late=True)
+
+    async def fanout(self, stations: list[Station], command: str, *args: str, show_data: bool = False) -> None:
+        """One command on many stations, FANOUT at a time. All at once, a fleet's replies queue up behind each
+        other until they time out, and whatever the servers share (a host, a tunnel, a gateway) takes the whole
+        burst. Each reply goes in the command log as usual; a fleet gets one tally at the end, not a toast each."""
+        gate, many = asyncio.Semaphore(FANOUT), len(stations) > 1
+        if many:
+            self.log_cmd(Text(time.strftime("%H:%M:%S "), DIM) + Text("@all ", CYAN) + Text(redact_text(
+                f"» {' '.join([command, *map(q, args)])}  →  {len(stations)} stations", self.redact), WHITE))
+
+        async def one(st: Station) -> dict:
+            async with gate:
+                return await self.cmd(st, command, *args, toast=False, show_data=show_data, quiet=many, brief=many)
+        results = await asyncio.gather(*(one(st) for st in stations))
+        if len(results) < 2 or not self.is_running:
+            return
+        ok, late = sum(r.get("ok") is True for r in results), sum(r.get("ok") is None for r in results)
+        bad = len(results) - ok - late
+        tally = Text.assemble((time.strftime("%H:%M:%S "), DIM), ("@all ", CYAN), (command, WHITE),
+                              (f"  ·  {len(results)} stations  ·  ", DIM), (f"{ok} ok", GREEN),
+                              *([("  ·  ", DIM), (f"{late} no reply yet", AMBER)] if late else []),
+                              *([("  ·  ", DIM), (f"{bad} failed", RED)] if bad else []))
+        self.log_cmd(tally)
+        self.notify(tally.plain[9:], title=f"@ALL {command.upper()}",
+                    severity="information" if ok == len(results) else "warning" if ok else "error")
+
+    def send_all(self, stations: list[Station], command: str, *args: str, show_data: bool = False) -> None:
+        self.run_worker(self.fanout(stations, command, *args, show_data=show_data), group="cmd", exit_on_error=False)
 
     def send(self, st: Station, command: str, *args: str, then: tuple = (), **kw) -> None:
         async def go():
@@ -1111,7 +1285,7 @@ class OniApp(App):
     def on_rcon_event(self, rcon: Rcon, ev: dict) -> None:
         if not self.is_running:  # a late reply or event while quitting: the widgets are already gone
             return
-        st = next(s for s in self.stations if s.rcon is rcon)
+        st = self.by_rcon[rcon]
         if self.raw_events:
             self.log_cmd(Text(f"{st.label} ◂ ", CYAN) + Text(json.dumps(redact_data(ev, self.redact)), DIM))
         names = st.names
@@ -1171,8 +1345,7 @@ class OniApp(App):
         return KIND.get(ev.get("event"), "ops") in self.filters and not (self.local_only and st not in (None, self.cur))
 
     def feed_line(self, st: Station | None, ev: dict) -> Text:
-        width = max(4, min(18, max(len(s.label) for s in self.stations)))
-        return render_event(st.label if st else "LINK", ev, {}, self.redact, width)  # resolved when it came in
+        return render_event(st.label if st else "LINK", ev, {}, self.redact, self.label_width)  # resolved on arrival
 
     # --- painting --------------------------------------------------------------------------------------------
     def paint(self, st: Station, what: tuple) -> None:
@@ -1208,10 +1381,13 @@ class OniApp(App):
             self.paint_card(st)
         rate = sum(sum(st.rate(1, 60)) for st in self.stations)
         live = any(st.online for st in self.stations)
-        self.query_one("#feed").border_title = Text.assemble(
-            ("SIGINT FEED  ", f"bold {AMBER}"),
+        title = Text.assemble(
+            ("SIGINT FEED  ", AMBER),
             ("●" if live else "○", RED if live and time.time() % 2 < 1 else blend(RED, INK, .4) if live else DIM),
             (f" LIVE · {rate}/min" if live else " NO SIGNAL", DIM))
+        feed = self.query_one("#feed")
+        if feed.border_title != title:
+            feed.border_title = title
 
     def paint_masthead(self) -> None:
         cond, color = self.condition()
@@ -1223,46 +1399,73 @@ class OniApp(App):
         g = Table.grid(expand=True)
         for j in ("left", "center", "right"):
             g.add_column(justify=j, no_wrap=True)
-        g.add_row(Text("▲ ", AMBER) + Text("OFFICE OF NAVAL INTELLIGENCE" if wide else "ONI", f"bold {AMBER}")
+        g.add_row(Text("▲ ", AMBER) + Text("OFFICE OF NAVAL INTELLIGENCE" if wide else "ONI", AMBER)
                   + Text("  ·  SECTION III" if self.size.width >= 160 else "", DIM),
                   Text.assemble((f" CONDITION {cond}" + (f" · ⚑ {unseen}" if unseen else "") + " ",
-                                 f"bold {INK} on {color}"),
+                                 f"{INK} on {color}"),
                                 (f"  {online}/{len(self.stations)} {'STATIONS SECURE' if wide else 'SECURE'}  ·  "
                                  f"{assets} ASSETS", CYAN if online else RED)),
-                  Text("TOP SECRET // " if wide else "", f"bold {RED}") + Text(f"OPERATOR {self.by.upper()}  ")
+                  Text("TOP SECRET // " if wide else "", RED) + Text(f"OPERATOR {self.by.upper()}  ")
                   + Text(time.strftime("%H:%M:%S"), DIM))
-        self.query_one("#masthead", Static).update(g)
+        self.query_one("#masthead", Static).update(g, layout=False)  # one line, always
+
+    def beating(self, st: Station) -> bool:
+        """Whether the station's heartbeat is lit this frame, each on a phase of its own. A fleet has none: dozens of
+        cards blinking out of step is noise, and each blink is a repaint. Its traces show which ones are alive."""
+        if self.animation_level == "none" or self.large_fleet or not st.online:
+            return False
+        return (self.frame + st.index * 7) % 20 < 2
 
     def paint_card(self, st: Station) -> None:
-        i = self.stations.index(st)
-        s = st.data.get("status", {})
+        """Draws the station's card, if anything it shows has changed: most seconds, for most of a fleet, nothing."""
+        card, s = self.cards[st.index], st.data.get("status", {})
         state = st.rcon.state if st.rcon else "connecting"
         glyph, color = STATE[state]
-        if self.animation_level != "none":
-            if state == "connecting":
-                glyph = SPIN[self.frame % 4]
-            elif state == "online" and self.frame % 20 < 2:
-                color = "#B4F5D0"  # a heartbeat: brighter for a moment every few seconds
+        if self.animation_level != "none" and state == "connecting":
+            glyph = SPIN[self.frame % 4]
+        elif self.beating(st):
+            color = "#B4F5D0"  # a heartbeat: brighter for a moment every few seconds
+        n, mx = num(s.get("players")), num(s.get("max_players"))
+        width = card.size.width or 33
+        if not st.online:  # why, in words to act on, and when it tries again
+            left = st.retry_at - time.monotonic()
+            detail = (self.why(st), int(left) + 1 if left > 0 else 0)
+        else:
+            phase = str(s.get("phase") or "")
+            where = [x for x in (st.tag, s.get("map"), s.get("mode")) if x]
+            # what's been happening there, in 5 s steps across what the card has room for. A fleet's cards move on
+            # a step at a time: redrawn with every event, a few busy servers keep the whole sidebar repainting
+            steps = 10 if self.large_fleet else max(4, width - 13)
+            detail = (tuple(where), phase, tuple(st.rate(steps, 5, whole=self.large_fleet)))
+        key = (state, glyph, color, st.label, st.alerts, n, mx, width, self.large_fleet, detail)
+        if key == st.drawn:
+            return
+        st.drawn = key
+
         g = Table.grid(expand=True, padding=(0, 1), pad_edge=False)
         g.add_column(no_wrap=True, overflow="ellipsis", ratio=1)
         g.add_column(justify="right", no_wrap=True)
-        n, mx = num(s.get("players")), num(s.get("max_players"))
         count = Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM)
-        g.add_row(Text(f"{glyph} ", color) + Text(f"{self.station_number(st)}  {st.label.upper()}", "bold"),
-                  Text.assemble((f"⚑ {st.alerts}  ", f"bold {RED}"), count) if st.alerts else count)
-        if not st.online:  # why, in words to act on, and when it tries again
-            left = st.retry_at - time.monotonic()
-            g.add_row(Text("   " + self.why(st), color if state != "connecting" else AMBER),
-                      Text(f"↻ {int(left) + 1}s", DIM) if left > 0 else Text("F3 ↻", DIM) if state == "denied" else Text())
-            self.cards[i].update(g)
+        g.add_row(Text(f"{glyph} ", color) + Text(f"{self.station_number(st)}  {st.label.upper()}", WHITE),
+                  Text.assemble((f"⚑ {st.alerts}  ", RED), count) if st.alerts else count)
+        if not st.online:
+            why, left = detail
+            g.add_row(Text("   " + why, color if state != "connecting" else AMBER),
+                      Text(f"↻ {left}s", DIM) if left else Text("F3 ↻", DIM) if state == "denied" else Text())
+            card.show(g)
             return
-        g.add_row(Text("   " + " · ".join(str(x).replace("_", " ") for x in (s.get("map"), s.get("mode")) if x), DIM),
-                  Text(str(s.get("phase") or "").replace("_", " ").upper(), GREEN if s.get("phase") == "in_game" else DIM))
+        where, phase, trace = detail
+        place = Text("   ") + Text(" · ").join(Text(str(x).replace("_", " "), CYAN if x == st.tag else DIM)
+                                                for x in where)
+        if self.large_fleet:  # two lines: who and how full, then where and what's been happening
+            g.add_row(place, spark(list(trace)))
+            card.show(g)
+            return
+        g.add_row(place, Text("" if phase.lower() in QUIET_PHASES else phase.replace("_", " ").upper(),
+                              GREEN if phase == "in_game" else DIM))
         full = n / mx if n is not None and mx else 0
-        # how full it is, then what's been happening there, in 5 s steps across what the card has room for
-        steps = max(4, (self.cards[i].size.width or 33) - 13)
-        self.cards[i].update(Group(g, Text("   ") + gauge(full, 8, RED if full >= 1 else AMBER if full >= .75 else GREEN)
-                                   + Text("  ") + spark(st.rate(steps, 5))))
+        card.show(Group(g, Text("   ") + gauge(full, 8, RED if full >= 1 else AMBER if full >= .75 else GREEN)
+                        + Text("  ") + spark(list(trace))))
 
     def animate_cards(self) -> None:
         """The 0.15 s frame: spinners, the online heartbeat, retry countdowns, and alert pulses."""
@@ -1281,13 +1484,15 @@ class OniApp(App):
                 pulsing = True  # one last repaint, back to the stylesheet's colour
             if pulsing:
                 card.notify_style_update()  # the card caches its parent's colour; a CSS transition can't do this
+                st.drawn = ()  # so it's drawn again over the new colour
             state = st.rcon.state if st.rcon else "connecting"
-            if (pulsing or moving and (state == "connecting" or state == "online" and self.frame % 20 in (0, 2))
+            if (pulsing or moving and (state == "connecting" or state == "online" and not self.large_fleet
+                                       and (self.frame + st.index * 7) % 20 in (0, 2))
                     or state != "online" and self.frame % 7 == 0):
                 self.paint_card(st)
 
     def paint_uplink(self) -> None:
-        t = Text.assemble(("OPERATOR  ", DIM), (self.by, f"bold {AMBER}"), "\n")
+        t = Text.assemble(("OPERATOR  ", DIM), (self.by, AMBER), "\n")
         for dest, tun in self.tunnels.items():
             glyph, color = {"up": ("◉", GREEN), "opening": ("◌", AMBER)}.get(tun.state, ("○", RED))
             t.append(f"SSH {dest}  ", DIM)
@@ -1307,7 +1512,7 @@ class OniApp(App):
             kd = f"{k / max(d, 1):.2f}" if isinstance(k, int) and isinstance(d, int) else "—"
             flags = Text()
             if (spree := st.medals.spree.get(name, 0)) >= SPREE:
-                flags.append(f"★{spree} ", f"bold {GOLD}")
+                flags.append(f"★{spree} ", GOLD)
             if p.get("admin"):
                 flags.append("ADM ", AMBER)
             if p.get("muted"):
@@ -1318,8 +1523,8 @@ class OniApp(App):
             key = key if key not in self.row_players else f"{key}~{i}"
             self.row_players[key] = p
             if now - st.first_seen.setdefault(key, now if st.painted else 0.0) < 12:
-                flags.append("NEW", f"bold {GREEN}")
-            rows.append((key, [str(pick(p, "number", default="")), Text(name, f"bold {TEAM_COLOR.get(team, WHITE)}"),
+                flags.append("NEW", GREEN)
+            rows.append((key, [str(pick(p, "number", default="")), Text(name, TEAM_COLOR.get(team, WHITE)),
                                Text(team.upper() or "—", TEAM_COLOR.get(team, DIM)), str(pick(p, "score", default="—")),
                                str(k if k is not None else "—"), str(d if d is not None else "—"), kd,
                                bar(p.get("health")), bar(p.get("shields")), flags]))
@@ -1339,10 +1544,10 @@ class OniApp(App):
         self.query_one("#player-actions").display = self.query_one("#raw-box").display = bool(p)
         if not p:
             if self.cur.online:
-                msg = Text.assemble(("NO ASSETS IN THEATRE\n\n", f"bold {DIM}"),
+                msg = Text.assemble(("NO ASSETS IN THEATRE\n\n", DIM),
                                     ("Nobody is playing on this server right now.\nPlayers appear here as they join.", DIM))
             else:
-                msg = Text.assemble(("STATION OFFLINE\n\n", f"bold {RED}"), (self.why(self.cur, short=False), WHITE),
+                msg = Text.assemble(("STATION OFFLINE\n\n", RED), (self.why(self.cur, short=False), WHITE),
                                     ("\n\nIt retries by itself. To retry now: F3, then RECONNECT.", DIM))
             box.update(Text("\n\n") + msg)
             box.styles.text_align = "center"
@@ -1362,13 +1567,13 @@ class OniApp(App):
                 g.add_row(a, b if isinstance(b, Text) else Text(str(b)))
             return g
         glyph, head = biosig(str(pick(p, "player_id", "id", default=name)), color), facts([
-            ("CALLSIGN", Text(name, f"bold {color}")),
+            ("CALLSIGN", Text(name, color)),
             ("SERVICE TAG", pick(p, "service_tag", "tag", default="—")),
             ("TEAM", Text(team.upper() or "—", TEAM_COLOR.get(team, DIM))),
             ("STATUS", " · ".join(["ALIVE" if p.get("alive") else "KIA" if p.get("alive") is False else "—"]
                                   + ["ADMIN"] * bool(p.get("admin")) + ["MUTED"] * bool(p.get("muted")))),
             ("SCORE", f"{pick(p, 'score', default='—')}    K {k if k is not None else '—'} / D {d if d is not None else '—'}"),
-            ("STREAK", Text(f"★ {spree} without dying", f"bold {GOLD}") if spree >= SPREE
+            ("STREAK", Text(f"★ {spree} without dying", GOLD) if spree >= SPREE
              else Text(f"{spree} without dying") if spree else Text("—", DIM))])
         if self.query_one("#dossier-box").content_size.width in range(1, 46):  # narrow: the glyph above the file
             head = Group(glyph, Text(), head)
@@ -1386,7 +1591,7 @@ class OniApp(App):
             rows.append(("GUESTS", str(len(guests) if isinstance(guests, list) else guests)))
         if earned:
             rows.append(("MEDALS", Text(" · ".join(f"{m} ×{n}" if n > 1 else m for m, n in earned.most_common()), GOLD)))
-        box.update(Group(Text("PERSONNEL FILE", f"bold {AMBER}") + Text("  //  CLASSIFIED", f"bold {RED}"), Text(),
+        box.update(Group(Text("PERSONNEL FILE", AMBER) + Text("  //  CLASSIFIED", RED), Text(),
                          head, Text(), facts(rows)))
         self.query_one("#dossier-raw", Static).update(JSON.from_data(redact_data(p, self.redact)))
 
@@ -1398,10 +1603,11 @@ class OniApp(App):
         g = Table.grid(padding=(0, 2))
         g.add_column(style=DIM, no_wrap=True)
         g.add_column()
-        for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), f"bold {AMBER}")),
+        for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), AMBER)),
                      ("UPLINK", f"{st.server.where}   v{info.get('version', '?')}"),
                      ("PUBLIC ADDRESS", Text(redact_addr(s.get("address"), self.redact), RED if self.redact else WHITE)),
-                     ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)),
+                     ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)
+                                if str(s.get("phase") or "").lower() not in QUIET_PHASES else Text("—", DIM)),
                      ("MAP", str(s.get("map") or "—")), ("MODE", str(s.get("mode") or "—")),
                      ("NEXT", str(s.get("next") or "playlist")),
                      ("PLAYERS", f"{s.get('players', '—')} / {s.get('max_players', '—')}"),
@@ -1425,7 +1631,7 @@ class OniApp(App):
             mp, md = str(pick(e, "map", "base_map", default="?")), str(pick(e, "mode", "game", default="?"))
             now = not marked and mp.lower().replace(" ", "_") == here
             marked |= now
-            style = f"bold {AMBER}" if now else ""
+            style = AMBER if now else ""
             rows.append((str(i), [Text("▶" if now else str(i), style), Text(mp, style), Text(md, style)]))
         self.query_one("#rotation", Roster).fill(rows)
 
@@ -1443,14 +1649,14 @@ class OniApp(App):
             top = max(max(s, 0) for *_, s in teams) or 1
             for team, n, score in teams:
                 c = TEAM_COLOR.get(team, WHITE)
-                g.add_row(Text(team.upper(), f"bold {c}"), Text(f"{n} ON FIELD", DIM), Text(str(score), f"bold {c}"),
+                g.add_row(Text(team.upper(), c), Text(f"{n} ON FIELD", DIM), Text(str(score), c),
                           hbar(max(score, 0) / top, width, c))
         else:  # free for all: the five best
             best = sorted(players, key=lambda p: -(num(pick(p, "score")) or 0))[:5]
             top = max(num(pick(best[0], "score")) or 0, 1)
             for p in best:
                 score = num(pick(p, "score")) or 0
-                g.add_row(Text(str(pick(p, "name", default="?")), "bold"), Text(""), Text(str(score), f"bold {AMBER}"),
+                g.add_row(Text(str(pick(p, "name", default="?")), WHITE), Text(""), Text(str(score), AMBER),
                           hbar(max(score, 0) / top, width, AMBER))
         leaders = sorted(players, key=lambda p: -(num(pick(p, "score")) or 0))[:3]
         lines = [Text("TOP GUNS  ", DIM) + Text(" · ").join(
@@ -1458,7 +1664,7 @@ class OniApp(App):
                  TEAM_COLOR.get(team_of(p), WHITE)) for p in leaders)]
         sprees = sorted(((n, name) for name, n in st.medals.spree.items() if n >= SPREE), reverse=True)
         if sprees:
-            lines.append(Text("ON A SPREE  ", DIM) + Text(" · ").join(Text(f"{name} ★{n}", f"bold {GOLD}")
+            lines.append(Text("ON A SPREE  ", DIM) + Text(" · ").join(Text(f"{name} ★{n}", GOLD)
                                                                     for n, name in sprees[:4]))
         self.query_one("#theatre", Static).update(Group(g, *lines))
 
@@ -1476,7 +1682,7 @@ class OniApp(App):
                 left = until(pick(e, "expires", "until"))
                 rows.append((key, [Text(kind, color), shown, str(pick(e, "name", default="")),
                                    str(pick(e, "reason", default="")),
-                                   Text(left, f"bold {RED}" if left == "PERMANENT" else DIM if left == "expired" else AMBER),
+                                   Text(left, RED if left == "PERMANENT" else DIM if left == "expired" else AMBER),
                                    str(pick(e, "by", "group", default=""))]))
         t = self.query_one("#bans", Roster)
         t.fill(rows)
@@ -1559,9 +1765,8 @@ class OniApp(App):
         targets = self.stations if text.startswith("@all ") else [self.cur]
         text = text.removeprefix("@all ").strip()
         live = [st for st in targets if st.online]
-        for st in live:
-            if text:
-                self.send(st, "say", text, toast=False)
+        if text and live:
+            self.send_all(live, "say", text)
         if text and not live:
             self.notify("Not connected: nothing was sent.", severity="warning")
 
@@ -1577,14 +1782,21 @@ class OniApp(App):
         if line == "clear":
             self.query_one("#console-log", RichLog).clear()
             return
-        targets = self.stations if line.startswith("@all ") else [self.cur]
+        fleet = line.startswith("@all ")
         try:
-            parts = shlex.split(line.removeprefix("@all "))
+            parts = parse_command(line.removeprefix("@all "))
         except ValueError as err:
             self.log_cmd(Text(f"  {err}", RED))
             return
-        for st in targets:
-            self.send(st, parts[0], *parts[1:], toast=False, show_data=True)
+        if not parts:
+            return
+        if fleet:  # the ones that are down would only fail: say so once, rather than once each
+            live = [st for st in self.stations if st.online]
+            if len(live) < len(self.stations):
+                self.log_cmd(Text(f"  {len(self.stations) - len(live)} station(s) offline: skipped", AMBER))
+            self.send_all(live, parts[0], *parts[1:], show_data=True)
+        else:
+            self.send(self.cur, parts[0], *parts[1:], toast=False, show_data=True)
 
     @on(Button.Pressed)
     def _button(self, e: Button.Pressed) -> None:
@@ -1623,6 +1835,26 @@ class OniApp(App):
         if i < len(self.stations):
             self.query_one("#stations", ListView).index = i
 
+    @work(exclusive=True, group="dialog")
+    async def action_goto(self) -> None:
+        """Every station in a list to type into, the ones with players first: 1 to 9 only reach so far."""
+        def order(st: Station):
+            return not st.online, -(num(st.data.get("status", {}).get("players")) or 0), st.index
+
+        def row(st: Station) -> Text:
+            s = st.data.get("status", {})
+            n, mx = num(s.get("players")), num(s.get("max_players"))
+            glyph, color = STATE[st.rcon.state if st.rcon else "connecting"]
+            return Text.assemble((f"{glyph} ", color), (f"{st.index + 1:>3}  ", DIM),
+                                 (f"{n}/{mx}  " if st.online and n is not None else "", AMBER if n else DIM),
+                                 (st.label, WHITE), (f"  {st.tag}" if st.tag else "", CYAN),
+                                 (f"  {str(s.get('map') or '').replace('_', ' ')}" if st.online
+                                  else f"  {self.why(st)}", DIM))
+        i = await self.push_screen_wait(Pick("GO TO STATION", [(row(st), str(st.index))
+                                                               for st in sorted(self.stations, key=order)]))
+        if i is not None:
+            self.action_station(int(i))
+
     def action_focus_input(self) -> None:
         tabs = self.query_one(TabbedContent)
         if tabs.active != "intercepts":
@@ -1642,6 +1874,7 @@ class OniApp(App):
 
     def get_system_commands(self, screen):
         yield from super().get_system_commands(screen)
+        yield SystemCommand("Go to station", "every station, the busiest first  (g)", self.action_goto)
         for i, st in enumerate(self.stations):  # the palette reads titles as markup, and labels come from servers
             yield SystemCommand(escape(f"Station {i + 1}: {st.label}"), escape(st.server.where),
                                 lambda i=i: self.action_station(i))
@@ -1665,10 +1898,11 @@ class OniApp(App):
                                              verb="TRANSMIT", required=("text",)))
         if f:
             targets = [st for st in (self.stations if f["scope"] == "all" else [self.cur]) if st.online]
-            for st in targets:
-                self.send(st, "say", f["text"], toast=False)
-            self.notify(f"Transmitted to {len(targets)} station(s)." if targets else "Not connected: nothing was sent.",
-                        title="BROADCAST", severity="information" if targets else "warning")
+            if targets:
+                self.send_all(targets, "say", f["text"])
+            if len(targets) < 2:  # a fleet's tally says how it went
+                self.notify(f"Transmitted to {targets[0].label}." if targets else "Not connected: nothing was sent.",
+                            title="BROADCAST", severity="information" if targets else "warning")
 
     @work(exclusive=True, group="dialog")
     async def action_player(self, what: str) -> None:
@@ -1709,7 +1943,7 @@ class OniApp(App):
             if f is not None:
                 self.send(st, "mute", t, *opt(f["time"]), *opt(f["reason"]), then=("players",))
         elif what == "team":
-            team = await self.push_screen_wait(Pick(f"MOVE {name} TO", [(Text(c.upper(), f"bold {TEAM_COLOR[c]}"), c)
+            team = await self.push_screen_wait(Pick(f"MOVE {name} TO", [(Text(c.upper(), TEAM_COLOR[c]), c)
                                                                          for c in TEAMS]))
             if team:
                 self.send(st, "team", t, team, then=("players",))
@@ -1720,7 +1954,7 @@ class OniApp(App):
                 self.send(st, "vpnallow", t, *opt(f["note"]), then=("vpn",))
 
     def entries(self, st: Station, what: str) -> list:
-        return [(Text.assemble((str(pick(e, "name", default="?")), "bold"), (f"  {e.get('kind', '')}", DIM),
+        return [(Text.assemble((str(pick(e, "name", default="?")), WHITE), (f"  {e.get('kind', '')}", DIM),
                                (f"  {e.get('reference', '')}", DIM)), str(pick(e, "reference", "name")))
                 for e in st.data.get(what, {}).get("entries") or []]
 

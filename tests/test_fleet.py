@@ -179,6 +179,7 @@ def test_fleet_input_dispatches_once_and_tags_only_broadcast():
         factory=Mock(wraps=app.rcon_factory)
         app.rcon_factory=factory
         app.send=Mock()
+        app.send_all=Mock()
         async with app.run_test(size=(120,40)) as pilot:
             await pilot.pause(.2)
             assert factory.call_count==1
@@ -193,17 +194,22 @@ def test_fleet_input_dispatches_once_and_tags_only_broadcast():
             await pilot.press('enter')
             await pilot.pause(.1)
             app.send.assert_not_called()
+            app.send_all.assert_not_called()
             await pilot.press('f2')
             say=app.query_one('#say',Input)
             say.focus();say.value='hello'
             await pilot.press('enter')
             await pilot.pause(.1)
-            assert app.send.call_count==1
-            app.send.reset_mock()
+            app.send.assert_not_called()
+            assert app.send_all.call_count==1
+            sent=app.send_all.call_args.args
+            assert sent[1:]==('say','hello') and len(sent[0])==1 and sent[0][0] is app.cur
+            app.send_all.reset_mock()
             say.value='@swat @snipers hello'
             await pilot.press('enter')
             await pilot.pause(.1)
             app.send.assert_not_called()
+            app.send_all.assert_not_called()
             fleet.broadcast_tags.assert_awaited_once_with(['swat','snipers'],'hello')
             fleet.broadcast_tags.reset_mock()
             await pilot.press('f5')
@@ -212,6 +218,7 @@ def test_fleet_input_dispatches_once_and_tags_only_broadcast():
             await pilot.pause(.1)
             fleet.broadcast_tags.assert_awaited_once_with(['swat'],'hello again')
             app.send.assert_not_called()
+            app.send_all.assert_not_called()
     asyncio.run(check())
 
 

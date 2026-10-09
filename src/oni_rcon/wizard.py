@@ -79,10 +79,11 @@ class SetupApp(App):
         with VerticalScroll(id="setup"):
             with Center():
                 yield Static(id="setup-emblem")
-            yield Static(Text.assemble(("O N I   R C O N\n", f"bold {AMBER}"),
+            yield Static(Text.assemble(("O N I   R C O N\n", AMBER),
                                        ("Let's connect to your Halo 3 server. You need its address and RCON password "
                                         "(dedicated.toml, under [rcon]).", DIM)), id="setup-title")
-            with Center():
+            with Center(), Horizontal(id="setup-main"):
+                yield Static(id="setup-side")
                 with Vertical(id="setup-form", classes="dialog"):
                     with Horizontal(classes="setup-row"):
                         with Vertical(classes="setup-wide"):
@@ -141,12 +142,16 @@ class SetupApp(App):
             f"saved in {shown}" if self.query_one("#remember", Checkbox).value else "you'll be asked for it each start")
 
     def fit_emblem(self) -> None:
-        """The emblem only in the rows the form leaves over, so the buttons never drop below the fold."""
-        used = sum(self.query_one(w).outer_size.height for w in ("#setup-title", "#setup-form")) + 4
+        """The emblem above the form in the rows it leaves over, so the buttons never drop below the fold; failing
+        that, beside the form in the columns it leaves over (a 120 x 30 terminal has room for the smallest)."""
+        form = self.query_one("#setup-form")
+        used = self.query_one("#setup-title").outer_size.height + form.outer_size.height + 4
         used += 5  # room for the status and the server list that appear as servers go in
-        art = emblem(self.size.height - used, 40)
-        self.query_one("#setup-emblem", Static).update(art)
-        self.query_one("#setup-emblem").display = bool(art.plain)
+        top = emblem(self.size.height - used, 40)
+        side = Text() if top.plain else emblem(form.outer_size.height, self.size.width - form.outer_size.width - 6)
+        for w, art in (("#setup-emblem", top), ("#setup-side", side)):
+            self.query_one(w, Static).update(art)
+            self.query_one(w).display = bool(art.plain)
 
     def server(self) -> Server | None:
         v = {k: self.query_one(f"#{k}", Input).value.strip() for k in ("address", "port", "password", "name", "ssh")}
@@ -179,9 +184,9 @@ class SetupApp(App):
             t.append(f"{s.name or s.where}   ", WHITE)
         for s in self.added:
             t.append("◉ ", GREEN)
-            t.append(f"{s.name or s.where}   ", f"bold {WHITE}")
+            t.append(f"{s.name or s.where}   ", WHITE)
         box = self.query_one("#setup-list", Static)
-        box.update(Text("YOUR SERVERS   ", f"bold {CYAN}") + t)
+        box.update(Text("YOUR SERVERS   ", CYAN) + t)
         box.display = bool(t)
         self.query_one("#start", Button).disabled = not (self.existing or self.added)
 

@@ -128,7 +128,7 @@ class Fleet:
 
 
 class FleetRcon:
-    def __init__(self, fleet, url, password, by, on_event, on_state, ready=None):
+    def __init__(self, fleet, url, password, by, on_event, on_state, ready=None, gate=None, on_late=None):
         self.fleet,self.ident=fleet,url.removeprefix('fleet://')
         self.on_event,self.on_state=on_event,on_state
         self.state,self.detail,self.info,self.password='connecting','',{},''
@@ -199,7 +199,7 @@ class FleetApp(OniApp):
         self.browser_nodes=sorted({r['node'] for r in self.catalog.values()})
         servers=[Server(url='fleet://'+r['id'],name=self.label(r)) for r in matching_rows(fleet.rows.values(),sort=sort)]
         super().__init__(servers,by='fleet-console terminal',intro=False,updater=None,
-                         rcon_factory=lambda *args:FleetRcon(fleet,*args),
+                         rcon_factory=lambda *args, **kwargs: FleetRcon(fleet, *args, **kwargs),
                          hint='Ctrl+F server search · Ctrl+G find player across all nodes · F7 sort · F8 state filter · RESET shows all current servers. Native chat/kill streaming is not connected in fleet mode.')
 
     def compose_toolbar(self):
