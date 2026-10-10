@@ -98,6 +98,10 @@ class TenantApp(OniApp):
         yield Button('SCHEDULED JOBS  F8', id='jobs-btn', compact=True)
         yield Button('UPDATES  F9', id='updates-btn', compact=True)
 
+    def sidebar_room(self):
+        room, need, card = super().sidebar_room()
+        return room - 4, need, card  # Three compact controls and their top margin.
+
     @on(Button.Pressed, '#jobs-btn')
     def _jobs_button(self, e: Button.Pressed) -> None:
         e.stop()

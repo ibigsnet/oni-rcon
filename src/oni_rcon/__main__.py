@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import os
 import sys
 import tempfile
@@ -29,7 +28,7 @@ def main() -> None:
     ap.add_argument("targets", nargs="*", help="PORT, HOST:PORT or ws(s)://URL of a server's RCON")
     ap.add_argument("-c", "--config", help="config file (default: $ONI_RCON_CONFIG, ./oni-rcon.toml, then the user config dir)")
     ap.add_argument("--ssh", metavar="DEST", default="", help="reach the targets through an SSH tunnel to DEST")
-    ap.add_argument("--by", help="your name in the server's admin log (default: config `by`, then your login)")
+    ap.add_argument("--by", help="public administrator name shown to players (default: config `by`, then Administrator)")
     ap.add_argument("--demo", action="store_true", help="run against three simulated servers, no setup needed")
     ap.add_argument("--setup", action="store_true", help="add servers with the setup screen")
     ap.add_argument("--intro", choices=["full", "quick", "off"],
@@ -126,10 +125,9 @@ def health_setup(path: Path | None) -> HealthSetup:
 
 
 def login() -> str:
-    try:
-        return getpass.getuser()
-    except Exception:  # no login name to be had, as in some containers
-        return "operator"
+    # RCON attributes moderation announcements to this name, not just private logs.
+    # A login or hostname is not an appropriate public-facing default.
+    return "Administrator"
 
 
 if __name__ == "__main__":

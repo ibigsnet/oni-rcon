@@ -1,6 +1,6 @@
 # IBIGS Reclaimer terminal
 
-## Customer VPS controls (0.8.1+ibigs.1)
+## Customer VPS controls (0.9.0+ibigs.2)
 
 Customers run `oni` in their VPS. F6 opens ReclaimerForge with their own API key; F7 starts and stops their lobbies;
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
@@ -60,7 +60,7 @@ The 0.8.1 integration includes the upstream Halo archive and larger Superintende
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.8.1](https://github.com/viik2k/oni-rcon/releases/tag/v0.8.1), upstream commit `ee5cbe60e0a55cd45b303f2d365144f373525fd3`. This source version is `0.8.1+ibigs.1`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. This source version is `0.9.0+ibigs.4`, a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
@@ -79,3 +79,17 @@ The 0.7 integration limits sidebar redraws to visible cards, fixes Operations at
 ## Customer lobby controls
 
 The customer console includes F7 and a sidebar button to start, stop or restart this VM’s lobbies through the local `oni` wrapper. It shows players before confirmation and defaults to abort. Occupied or unreadable lobbies require a second explicit disconnect confirmation. If an empty lobby gains players before the helper’s final check, the operation stops and asks you to reopen F7 to review occupancy. The panel fits 80-column terminals. This local customer helper does not add Docker access or power controls to the fleet-console fleet adapter.
+
+## 0.9 Health and startup
+
+fleet-console: `oni-rcon` opens the boot sequence and fleet. `oni-rcon --no-intro` skips it; `TEXTUAL_ANIMATIONS=full oni-rcon --intro full` shows the upstream Halo archive. Ctrl+P exposes the boot preference. Preferences persist under the terminal's dedicated `state` directory; existing sessions retain their installed image until closed.
+
+F10 on fleet-console shows all five nodes' cached host CPU, free RAM, RX/TX throughput, telemetry age, container start/restart counters and Docker OOM flags. One shared read covers the fleet every 15 seconds. It does not read native worker crash logs or report a blue-flame workaround as installed. The event list covers container changes observed while the console is open, not a historical incident archive. CPU is the host fraction, and network rates are host measurements, not a game tick-rate measurement. Stale readings are marked explicitly. Health refresh and appearance cannot change the selected command target.
+
+Customers use `oni`, with F10 for the local upstream crash-log reader; F7 power, F8 jobs and F9 updates remain available. An alert occupies a reserved line so showing and dismissing it cannot shift panels. Exit 137 without Docker OOMKilled is retained as an exit code, not labeled a proven memory kill. The separate source patch and its SHA-256 accompany the customer bundle and are applied by the provider build script before offline packaging.
+
+## Fixed sidebar and public identity
+
+The Superintendent and connection status are docked at the bottom of the sidebar. The server list has its own bounded scroll area; filtering, sorting, adding dynamic lobbies and moving between tabs cannot push the footer off screen. Customer F7/F8/F9 controls are included in the space budget. This changes layout only, without additional polling.
+
+The fleet-console display label is `IBIGS Admin`. Direct/customer RCON defaults to `Administrator`, preserving explicit `--by` or private configuration overrides. fleet-console sends actions through the authenticated management API and node-local Source RCON; it does not send the terminal label with moderation commands. The controller retains its authenticated actor in private audit records.

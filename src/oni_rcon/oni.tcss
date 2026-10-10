@@ -5,15 +5,14 @@ VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 
 #masthead { height: 1; padding: 0 1; background: $panel; color: $foreground; }
 #body { height: 1fr; }
-#banner { display: none; height: 1; padding: 0 1; }
-#banner.-on { display: block; background: $error; color: $background; }
+#banner { visibility: hidden; height: 1; padding: 0 1; }
+#banner.-on { visibility: visible; background: $error; color: $background; }
 #banner.-on.-warn { background: $warning; }
 #banner.-on.-dim { background: $error 55%; }
 #banner.-on.-warn.-dim { background: $warning 55%; }
 
 #sidebar { width: 36; border-right: vkey $primary 40%; }
-#stations { height: 1fr; background: $background; }
-#stations { height: auto; max-height: 1fr; }
+#stations { height: 1fr; min-height: 2; background: $background; overflow: hidden auto; }
 /* no background transitions here: Textual doesn't repaint the card inside, so it keeps the old colour */
 #stations > ListItem { padding: 0 1; height: 4; border-bottom: hkey $panel-lighten-1; background: $background; }
 #stations > ListItem:hover { background: $block-hover-background; }
@@ -36,7 +35,8 @@ VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 .jobs-history { height: auto; max-height: 8; overflow-y: auto; margin: 1 0; }
 .dialog.job-form { width: 85; max-width: 100%; height: 90%; }
 .job-fields { height: 1fr; }
-#sidebar > Center { height: 1fr; align-vertical: middle; }
+#sidebar > Center { height: auto; align-vertical: middle; }
+#sidebar-footer { dock: bottom; height: auto; }
 #super { height: auto; padding: 1 1 0 1; border-top: hkey $primary 40%; }
 #uplink { height: auto; padding: 1; border-top: hkey $primary 40%; }
 

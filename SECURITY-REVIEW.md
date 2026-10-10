@@ -1,3 +1,15 @@
+# Source review — 2026-10-10, upstream 0.9.0
+
+Reviewed upstream v0.9.0 and main through `10fe552c81e48e2a4c41d377a07e566ef0edc564`. The existing maintained merge is `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`; the 0.9.0+ibigs.2 release carries a separately hashed local patch against that base. Upstream adds Health reports and resolves player names across native ID formats. No malicious behavior was identified in this scoped source review. This is not a formal security audit or review of the upstream executable.
+
+The maintained health command accepts explicit arguments, bounds output to 2 MiB, has a timeout, cleans up helper process groups, and keeps strict SSH host verification. Customer helpers read local log/container/host data. F10 avoids the existing customer F7–F9 shortcuts. Upstream binary self-updating remains disabled; customer publication requires the existing signed IBIGS channel.
+
+fleet-console reads one bounded shared snapshot from the existing private fleet-console controller endpoint `192.0.2.10:9188` every 15 seconds, with redirects and environment proxies disabled and no authorization header. Only node resource readings and container metadata survive projection. It adds no game polling, socket mount, SSH key, raw log access or runtime privileges. Unknown/stale metrics remain unknown/stale. Worker crash-log and workaround-service coverage is explicitly unavailable in fleet mode. OOM flag transitions and observed container generations are events, not proof of player disconnections.
+
+Corrected an upstream diagnostic ambiguity: exit 137 alone does not prove an OOM; require Docker's OOMKilled flag. Reserved the health alert line so appearing/dismissing alerts do not shift terminal panels. Halo startup options now work in the managed fleet launcher; persistent boot preferences contain no credentials. Existing bright colors, reduced motion, bounded logs, selected-only native detail polling and safe command targets are retained.
+
+No runtime dependency declarations, pins or base-image digest changed in this pass. Source tests and live read-only canary evidence are recorded in `/home/user/outputs/reclaimer-oni-090-20261010`. No live game action is used to test terminal controls.
+
 # Source review — 2026-10-10, upstream 0.8.1
 
 Reviewed upstream range `dfd7a6124f510139f00377c3aff5fadc05802918` (0.7.0) through `ee5cbe60e0a55cd45b303f2d365144f373525fd3` (0.8.1). The changes add generated Halo archive artwork, boot preferences and sidebar sizing/rendering. They add no dependencies, network destinations, subprocess paths or runtime privileges. Boot preferences use the existing owner-only atomic writer. IBIGS retains reduced motion by default, pre-layout sidebar sizing, tenant/fleet selection, the injected RCON adapter and disabled upstream binary updates. Customer schedules and fixed maintenance actions remain local to their VPS. This is source review, not a formal audit or verification of upstream executables.
@@ -83,3 +95,5 @@ Changes made for the maintained build:
 The runtime lock contains Textual 8.2.8, websockets 17.2, Rich 15.0.0 and their pinned transitive dependencies. `pip-audit` reported no known vulnerabilities for that lock on the review date. This does not prove the absence of undiscovered vulnerabilities.
 
 Live validation used reads only. Native chat/kill streaming remains pending in fleet mode; the current adapter should not be represented as a complete replacement for the upstream event stream.
+
+The 0.9.0+ibigs.4 sidebar change adds no network destinations, dependencies or privileges. It includes the concurrently reviewed client public-identity default from ibigs.3; fleet-console uses a neutral display label while its authenticated controller identity remains available in private audit records. Native event coverage is unchanged.

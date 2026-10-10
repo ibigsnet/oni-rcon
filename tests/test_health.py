@@ -143,9 +143,9 @@ def test_oom_kills_and_restarts():
     old = box(oom="true", code=137, finished="2026-10-08T08:00:00Z")
     assert m.ingest("2", "h", old, now=T0 + 700) == [] and m.ingest("2", "h", old, now=T0 + 760) == []
     assert not [e for e in m.events if e.key == "2"]
-    # exit 137 with no flag is read as the kill it is
+    # Exit 137 also occurs after an operator SIGKILL; it cannot prove an OOM.
     m.ingest("1", "h", box(code=137, finished="2026-10-10T08:30:00Z"), now=T0 + 900)
-    assert [e.cls for e in m.recent() if e.key == "1"] == [OOM]
+    assert not [e for e in m.recent() if e.key == "1"]
 
 
 def test_the_hosts_counter_and_the_containers_flag_are_one_kill():

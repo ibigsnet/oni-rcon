@@ -235,7 +235,7 @@ def test_the_superintendent_is_always_there():
                     await pilot.press(tab)
                     await pilot.pause(0.1)
                     check_there(app, f"{size} on {tab}", app.sup_rows() - 2)
-                assert app.sup_size() == {(100, 20): MINI, (100, 24): MINI, (120, 30): SMALL, (120, 36): SMALL, (170, 50): XL,
+                assert app.sup_size() == {(100, 20): MINI, (100, 24): MINI, (120, 30): MINI, (120, 36): SMALL, (170, 50): XL,
                                           (210, 60): HUGE}[size], size  # the biggest faces need height; the largest, width
     asyncio.run(go())
 

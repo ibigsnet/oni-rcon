@@ -1312,8 +1312,9 @@ class OniApp(App):
                 yield Button("+ ADD SERVER", id="add-server", compact=True)
                 with Center():
                     yield Static(id="crest")
-                yield Static(id="super")  # always shown: the crest above gives way before it does
-                yield Static(id="uplink")
+                with Vertical(id="sidebar-footer"):
+                    yield Static(id="super")
+                    yield Static(id="uplink")
             with TabbedContent(id="tabs", initial="assets"):
                 with TabPane("F1 ASSETS", id="assets"):
                     with Assets():
@@ -1699,7 +1700,7 @@ class OniApp(App):
         # the sidebar crest takes what the station cards, the add button and the uplink leave, and goes when that's
         # too little
         self.fit_sidebar()
-        free = (self.size.height - 11 - self.sup_rows() - len(self.tunnels)
+        free = (self.size.height - 12 - self.sup_rows() - len(self.tunnels)
                 - (2 if self.large_fleet else 4) * len(self.stations))
         crest = self.query_one("#crest", Static)
         crest.update(art := emblem(min(free, 16), 32))
@@ -1709,7 +1710,7 @@ class OniApp(App):
         """(rows the sidebar has once the add button and the uplink are counted, what all the station cards need,
         the card height)."""
         card = 2 if self.large_fleet else 4
-        return self.size.height - 10 - len(self.tunnels), card * len(self.stations), card
+        return self.size.height - 11 - len(self.tunnels), card * len(self.stations), card
 
     def sup_across(self) -> int:
         default_width = 30 if self.size.width < 140 else 46 if self.size.width >= 200 else 36
@@ -1734,9 +1735,8 @@ class OniApp(App):
         return n // 2 + 2 + BELOW * below(n, self.sup_across())
 
     def fit_sidebar(self) -> None:
-        """The strip and the uplink stay on screen: the station list takes what they leave, and scrolls past it."""
-        room, _, card = self.sidebar_room()
-        self.query_one("#stations").styles.max_height = max(card, room - self.sup_rows())
+        """Reserve a fixed face inside the docked footer; only the server list scrolls."""
+        self.query_one("#super").styles.height = self.sup_rows()
     def tick_super(self) -> None:
         """Redraw the Superintendent when its face or words changed: a blink, an easing expression, a new reaction."""
         if not self.is_running:  # the timer can fire once more while quitting
@@ -1755,6 +1755,7 @@ class OniApp(App):
         """After a resize, once laid out: the panels that shape themselves to the room they have."""
         if self.is_running:
             self.tabs_width = self.query_one(TabbedContent).size.width
+            self.tick_super()  # The docked footer now has its measured width.
             self.paint_dossier()
             self.paint_ops()
 

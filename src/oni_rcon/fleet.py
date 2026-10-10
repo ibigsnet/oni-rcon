@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from pathlib import Path
 import shlex
 import time
 import urllib.error
 import urllib.request
 from textual import on, work
+from textual.app import SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Input, ListView, Select, Static, TabbedContent
@@ -21,6 +23,9 @@ from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_
 from .config import Server
 from .managed_forge import ManagedForgeClient
 from .safety import clean
+from .prefs import Prefs
+from .fleet_health import FleetHealthMixin, read_snapshot
+from . import __version__
 
 READS = frozenset('help status players maps modes nextmap vote bans vpn'.split())
 DISRUPTIVE = frozenset('map mode load endgame endround shuffle teamcount servername'.split())
@@ -57,6 +62,10 @@ class Fleet:
         self.token = Path(token_file).read_text().strip()
         self.opener=urllib.request.build_opener(NoRedirect(),urllib.request.ProxyHandler({}))
         self.view, self.rows, self.updated, self.locks = {}, {}, 0, {}
+        self.health_enabled = True
+
+    def health_snapshot(self):
+        return read_snapshot(self.opener)
 
     def request(self, path, body=None, timeout=25):
         if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players','/api/forge'):
@@ -161,7 +170,7 @@ class FleetRcon:
         return await self.fleet.submit(self.ident,'rcon',shlex.join([command,*map(str,args)]))
 
 
-class FleetApp(OniApp):
+class FleetApp(FleetHealthMixin, OniApp):
     TITLE='IBIGS Reclaimer Fleet'
     FORGE_KEY='F9'
     TRACK_ROUNDS=False  # Cached overview phases cannot prove completed rounds; fleet stats remain authoritative.
@@ -191,10 +200,14 @@ class FleetApp(OniApp):
     .-narrow #fleet-node { width: 13; }
     .-narrow #fleet-state { width: 21; }
     PlayerSearch .dialog { width: 94%; max-width: 150; height: 85%; }
+    #health-setup { height: auto; max-height: 4; padding: 0 1; }
+    #crashes { height: 8; min-height: 4; }
     '''
 
-    def __init__(self, fleet, *, search='', node='all', state='all', sort='players'):
+    def __init__(self, fleet, *, search='', node='all', state='all', sort='players', intro=False, prefs=None):
         self.fleet=fleet
+        self.fleet_health, self.fleet_health_error = {}, ''
+        self.fleet_health_due, self.fleet_health_busy = 0, False
         self.inventory_lock=asyncio.Lock()
         self.catalog=dict(fleet.rows)
         self.browse_search,self.browse_node,self.browse_state,self.browse_sort=search,node,state,sort
@@ -204,8 +217,8 @@ class FleetApp(OniApp):
         self.browser_fresh=True
         self.overview_updated = None
         self.browser_nodes=sorted({r['node'] for r in self.catalog.values()})
-        servers=[Server(url='fleet://'+r['id'],name=self.label(r)) for r in matching_rows(fleet.rows.values(),sort=sort)]
-        super().__init__(servers,by='fleet-console terminal',intro=False,updater=None,
+        servers=[Server(url='fleet://'+r['id'],name=self.label(r),ssh=r['node']) for r in matching_rows(fleet.rows.values(),sort=sort)]
+        super().__init__(servers,by='IBIGS Admin',intro=intro,prefs=prefs,updater=None,
                          rcon_factory=lambda *args, **kwargs: FleetRcon(fleet, *args, **kwargs),
                          hint='Ctrl+F server search · Ctrl+G find player across all nodes · F7 sort · F8 state filter · RESET shows all current servers. Native chat/kill streaming is not connected in fleet mode.')
 
@@ -221,6 +234,11 @@ class FleetApp(OniApp):
                 yield Static(id='fleet-target')
                 yield Button('RESET',id='fleet-reset',compact=True)
 
+    def sidebar_room(self):
+        # The fleet toolbar takes four rows; hiding + ADD SERVER returns three.
+        room, need, card = super().sidebar_room()
+        return room - 1, need, card
+
     def forge_connect(self):
         self.forge = ManagedForgeClient(self.fleet)
         self.fsetup.source = 'controller cache; no API key in terminal'
@@ -234,6 +252,16 @@ class FleetApp(OniApp):
         if not self.sup.last:
             self.sup.last = 'Native event feed not connected'
         super().tick_super()
+
+    def get_system_commands(self, screen):
+        for command in super().get_system_commands(screen):
+            if command.title in ('Add a server', 'Forge: Load API key'):
+                continue
+            if command.title.startswith('Health:'):
+                yield SystemCommand('Health: refresh fleet telemetry',
+                                    'cached node and container readings (F10)', self.action_refresh_fleet)
+            else:
+                yield command
 
     def paint_listing(self):
         super().paint_listing()
@@ -440,6 +468,8 @@ class FleetApp(OniApp):
     @work(exclusive=True,group='fleet-refresh')
     async def action_refresh_fleet(self):
         await self.refresh_inventory()
+        self.fleet_health_due = 0
+        self.health_tick()
 
     async def refresh_inventory(self):
         async with self.inventory_lock:
@@ -453,7 +483,7 @@ class FleetApp(OniApp):
             known={s.rcon.ident for s in self.stations if s.rcon}
             for ident,row in sorted(self.fleet.rows.items()):
                 if ident in known:continue
-                server=Server(url='fleet://'+ident,name=self.label(row))
+                server=Server(url='fleet://'+ident,name=self.label(row),ssh=row['node'])
                 station=Station(server,server.name,index=len(self.stations))
                 card=Card(classes='card');self.stations.append(station);self.cards.append(card)
                 item=ServerItem(station,card);self.server_items[ident]=item
@@ -571,6 +601,9 @@ def main():
     parser.add_argument('--node',default='all',type=str.casefold,help='filter to one node, e.g. node-c or node-d')
     parser.add_argument('--state',choices=[v for _,v in STATES],default='all',help='filter servers by state')
     parser.add_argument('--sort',choices=[v for _,v in SORTS],default='players',help='sort servers (default: most players first)')
+    parser.add_argument('--intro',choices=['full','quick','off'],help='upstream boot sequence; full animation needs TEXTUAL_ANIMATIONS=full')
+    parser.add_argument('--no-intro',action='store_true',help='skip the boot sequence')
+    parser.add_argument('-V','--version',action='version',version='oni-rcon '+__version__)
     args=parser.parse_args()
     fleet=Fleet();fleet.refresh()
     if args.node!='all' and args.node not in {r['node'] for r in fleet.rows.values()}:
@@ -600,7 +633,9 @@ def main():
         reply=asyncio.run(fleet.read(args.probe,'status'));print(json.dumps(reply));raise SystemExit(0 if reply.get('ok') else 1)
     else:
         if not fleet.rows:parser.exit(message='No registered servers in the fleet snapshot.\n')
-        FleetApp(fleet,search=args.search,node=args.node,state=args.state,sort=args.sort).run()
+        prefs=Prefs.load(Path(os.environ.get('IBIGS_ONI_PREFS','/tmp/oni-fleet-prefs.json')))
+        intro='off' if args.no_intro else args.intro or prefs.intro_mode()
+        FleetApp(fleet,search=args.search,node=args.node,state=args.state,sort=args.sort,intro=intro,prefs=prefs).run()
 
 
 if __name__=='__main__':main()

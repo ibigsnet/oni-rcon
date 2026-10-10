@@ -335,7 +335,7 @@ class Monitor:
 
     def _box(self, key: str, host: str, box: Box, now: float) -> list[Crash]:
         out, prev = [], self.boxes.get(key)
-        if box.oom_killed or box.exit_code == 137:
+        if box.oom_killed:
             out.append(Crash(box.finished or now, OOM, exit=box.exit_code))
         if prev and prev.started and box.started and box.started != prev.started and not out and not any(
                 e.cls == OOM and e.key == key and box.started - 300 <= e.ts <= box.started + 5 for e in self.events):
