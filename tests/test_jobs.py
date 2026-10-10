@@ -227,3 +227,26 @@ def test_native_websocket_boundaries_drive_only_the_selected_lobby(tmp_path):
                 task.cancel()
             await asyncio.gather(*worker.tasks.values(),return_exceptions=True)
     asyncio.run(go())
+
+
+def test_late_status_reply_cannot_replay_match_boundaries(tmp_path):
+    async def go():
+        worker = Worker(Store(tmp_path))
+        worker.observe('h3-01', {'phase': 'no_game'})
+        worker.observe('h3-01', {'phase': 'playing'})
+        seen = []
+        worker.jobs = [job(trigger='after_match')]
+        worker.queue = lambda *args: seen.append(args)
+
+        class LateStatus:
+            ws = True
+
+            async def call(self, *args, **kwargs):
+                worker.event('h3-01', {'event': 'phase', 'phase': 'finished', 'time': time.time()})
+                return {'ok': True, 'data': {'phase': 'playing'}}
+
+        await worker.poll('h3-01', LateStatus())
+        worker.observe('h3-01', {'phase': 'finished'})
+        assert len(seen) == 1
+        assert worker.trackers['h3-01'].phase == 'finished'
+    asyncio.run(go())

@@ -257,6 +257,7 @@ class Worker:
         self.clients = {}
         self.tasks = {}
         self.trackers = {}
+        self.generations = {}
         self.jobs = []
         self.pending = set()
         self.action_lock = asyncio.Lock()
@@ -273,12 +274,15 @@ class Worker:
 
     def connection(self, target, state):
         if state != 'online':
+            self.generations[target] = self.generations.get(target, 0) + 1
             self.trackers[target] = MatchEvents()
 
     def event(self, target, msg):
         if msg.get('event') == 'lagged' or msg.get('type') == 'lagged':
+            self.generations[target] = self.generations.get(target, 0) + 1
             self.trackers[target] = MatchEvents()
         elif msg.get('event') == 'phase':
+            self.generations[target] = self.generations.get(target, 0) + 1
             at = msg.get('time')
             if not isinstance(at, (float, int)) or not -1 <= time.time() - at <= 3:
                 self.trackers[target] = MatchEvents()
@@ -388,8 +392,11 @@ class Worker:
     async def poll(self, name, client):
         if not client.ws:
             return
+        generation = self.generations.get(name, 0)
         try:
             result = await client.call('status', timeout=3)
+            if generation != self.generations.get(name, 0):
+                return  # a native event or disconnect superseded this in-flight snapshot
             if result.get('ok') and isinstance(result.get('data'), dict):
                 self.observe(name, result['data'])
             else:
