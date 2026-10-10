@@ -35,8 +35,9 @@ from textual.widgets import (Button, Checkbox, Collapsible, DataTable, Footer, I
 from textual.widgets.option_list import Option
 from textual.worker import WorkerState
 
-from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, gauge, hbar,
-                  spark, split_bar)
+from .archive import FILES, TOTAL, frame as archive_frame
+from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, fit, gauge, hbar,
+                  pixels, spark, split_bar)
 from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
                     Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
@@ -45,10 +46,11 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .install import SSH_OPTS, InstallError, place, plan, size_words, target_for
 from .medals import Medals
+from .prefs import Prefs
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
 from .stats import Rounds
-from .superintendent import BIG, MINI, SMALL, Superintendent, card as sup_card
+from .superintendent import BELOW, BIG, HUGE, LARGE, MINI, SMALL, WORDS, XL, Superintendent, below, card as sup_card
 
 ONI = Theme(name="oni", primary=AMBER, secondary=CYAN, accent=CYAN, warning="#E8A33D", error=RED, success=GREEN,
             foreground=WHITE, background=INK, surface="#0B0F14", panel="#111821", dark=True)
@@ -748,6 +750,59 @@ class Help(Dialog):
         self.query_one("#help-body").focus()
 
 
+class Archive(Screen):
+    """The boot sequence's first act, the Halo ASCII Archive from the design project: the ONI emblem, Section Three,
+    Installation 04, 343 Guilty Spark and the Superintendent decrypt one file at a time (archive.frame draws each
+    moment). Then Boot plays the last act, the emblem returning for the clearance check. Any key skips both, and F1
+    to F6 go straight to their tab. Only with full animations: with them off there's nothing to watch."""
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="boot"):
+            with Center():
+                yield Static(id="boot-emblem")
+            yield Static(id="boot-title")
+            with Center():
+                yield Static(id="boot-log")
+
+    def on_mount(self) -> None:
+        self.t0 = time.monotonic()
+        self.query_one("#boot-log").styles.height = len(FILES) + 3  # the files, the prompt, a gap and the gauge
+        self.query_one("#boot-emblem").styles.content_align_vertical = "middle"
+        self.set_interval(0.07, self.tick)
+        self.tick()
+
+    def on_key(self, e: events.Key) -> None:
+        if e.key not in TABS:
+            e.stop()
+        self.action_skip()
+
+    def tick(self) -> None:
+        el = time.monotonic() - self.t0
+        if el >= TOTAL:
+            self.app.switch_screen(Boot())
+            return
+        f = archive_frame(el)
+        rows, cols = min(24, self.app.size.height - 9 - len(FILES) - 1), self.app.size.width - 4
+        self.query_one("#boot-emblem").styles.height = rows
+        art = (emblem(rows, cols, reveal=f.oni[0], scan=f.oni[1]) if f.oni else
+               pixels(fit(f.art, rows, cols)) if f.art else Text())
+        self.query_one("#boot-emblem", Static).update(art)
+        self.query_one("#boot-title", Static).update(Text.assemble(
+            ("\n" + f.title + "\n", f.color), (f.sub, DIM), (f.tag, f.tag_color)))
+        out = Text()
+        for label, done in f.files:
+            out += Boot.dotted(label, "DECRYPTED" if done else "DECRYPTING", GREEN if done else AMBER)
+        out += Text("\n" * (len(FILES) - len(f.files))) + Text("> ", WHITE) + Text(
+            "█" if int(el * 3) % 2 == 0 else " ", AMBER) + Text("\n\n")
+        out += gauge(f.progress, 56, AMBER) + Text(f" {round(f.progress * 100):>3}%", DIM)
+        self.query_one("#boot-log", Static).update(out)
+
+    def action_skip(self) -> None:
+        if self.app.screen is self:
+            self.app.pop_screen()
+            self.app.welcome()
+
+
 class Boot(Screen):
     """The splash: decrypts the title and materialises the emblem while the stations sign in. Any key skips it,
     and F1 to F6 go straight to their tab. With animations off (TEXTUAL_ANIMATIONS) it all appears at once."""
@@ -1048,10 +1103,12 @@ class OniApp(App):
         *[Binding(str(i), f"station({i - 1})", show=False) for i in range(1, 10)],
     ]
 
-    def __init__(self, servers: list[Server], by: str, intro: bool = True, updater: Callable[[], str] | None = None,
-                 hint: str = "", forge: ForgeSetup | None = None):
+    def __init__(self, servers: list[Server], by: str, intro: bool | str = True, updater: Callable[[], str] | None = None,
+                 hint: str = "", forge: ForgeSetup | None = None, prefs: Prefs | None = None):
         super().__init__()
-        self.by, self.intro, self.updater, self.hint = by, intro, updater, hint
+        # intro: "full" (the archive, then the clearance check), "quick" (the clearance check), "off"; True is quick
+        self.by, self.intro, self.updater, self.hint = by, {True: "quick", False: "off"}.get(intro, intro), updater, hint
+        self.prefs = prefs or Prefs()
         self.fsetup = forge or ForgeSetup()
         self.fstate = ForgeState(self.fsetup.state_dir / "forge-state.json" if self.fsetup.state_dir else None)
         self.rounds = Rounds(self.fsetup.state_dir / "rounds.jsonl" if self.fsetup.state_dir else None)
@@ -1232,7 +1289,11 @@ class OniApp(App):
         self.set_interval(self.fsetup.poll, self.forge_watch)
         self.set_timer(5, self.forge_watch)  # once soon after start, for what changed while the console was closed
         self.paint_all()
-        if self.intro:
+        if self.intro == "full" and self.animation_level == "full":
+            self.prefs.intro_seen = True
+            self.prefs.save()
+            self.push_screen(Archive())
+        elif self.intro != "off":
             self.push_screen(Boot())
         else:
             self.welcome()
@@ -1306,20 +1367,26 @@ class OniApp(App):
         card = 2 if self.fleet else 4
         return self.size.height - 10 - len(self.tunnels), card * len(self.stations), card
 
+    def sup_across(self) -> int:
+        return self.query_one("#sidebar").size.width - 2  # a cell of padding each side of the strip
+
     def sup_size(self) -> int:
-        """The Superintendent's face: the biggest that fits, across (its words need 14 cells beside it) and down with
-        every station card showing; failing that the list gives up rows (it scrolls) to two cards, then to one;
-        failing that the smallest face, which is what a very short terminal gets."""
+        """The Superintendent's face: the biggest that fits, across (beside it, its words need 14 cells; the larger
+        faces put them underneath instead) and down with every station card showing; failing that the list gives up
+        rows (it scrolls) to two cards, then to one; failing that the smallest face, which is what a very short
+        terminal gets."""
         room, need, card = self.sidebar_room()
-        across = self.query_one("#sidebar").size.width - 2  # a cell of padding each side of the strip
-        for n, spare in [(BIG, need), (SMALL, need), (MINI, need), (SMALL, 2 * card), (MINI, 2 * card), (MINI, card)]:
-            if across >= n + 1 + 14 and room - min(need, spare) >= n // 2 + 2:
+        across = self.sup_across()
+        for n, spare in [(HUGE, need), (XL, need), (LARGE, need), (BIG, need), (SMALL, need), (MINI, need),
+                         (SMALL, 2 * card), (MINI, 2 * card), (MINI, card)]:
+            if across >= (n if n >= LARGE else n + 1 + WORDS) and room - min(need, spare) >= self.sup_rows(n):
                 return n
         return MINI
 
-    def sup_rows(self) -> int:
-        """Rows its strip takes: the face, a line above it and the rule over that."""
-        return self.sup_size() // 2 + 2
+    def sup_rows(self, n: int | None = None) -> int:
+        """Rows its strip takes: the face, its words if they're under it, a line above and the rule over that."""
+        n = n or self.sup_size()
+        return n // 2 + 2 + BELOW * below(n, self.sup_across())
 
     def fit_sidebar(self) -> None:
         """The strip and the uplink stay on screen: the station list takes what they leave, and scrolls past it."""
@@ -2214,10 +2281,22 @@ class OniApp(App):
         for op, label, _ in BAN_OPS:
             yield SystemCommand(f"Blacklist: {label.split('  ')[0].title()}", op, lambda op=op: self.bl(op))
         yield SystemCommand("Toggle address redaction", "hide or show player IPs", self.action_redact)
+        yield SystemCommand("Boot sequence: " + ("quick after the first run" if self.prefs.full_intro
+                                                 else "full every time"),
+                            "now: full the first time, quick after" if not self.prefs.full_intro
+                            else "now: the full sequence plays every time", self.action_full_intro)
         yield SystemCommand("Help: field manual", "what everything does, in plain words  (?)", self.action_help)
         yield SystemCommand("Add a server", "open the setup screen", self.action_add_server)
         yield SystemCommand("Forge: Load API key", "your own ReclaimerForge key, for F6", lambda: self.action_forge("key"))
         yield SystemCommand("Forge: Refresh catalog", "fetch the catalog again", lambda: self.forge_load(fresh=True))
+
+    def action_full_intro(self) -> None:
+        """Switch between the full boot sequence every time and only the first time."""
+        self.prefs.full_intro = not self.prefs.full_intro
+        self.prefs.save()
+        self.notify("The full boot sequence plays every time you start." if self.prefs.full_intro else
+                    "The full boot sequence plays on the first run only; after that the boot is quick.",
+                    title="BOOT SEQUENCE")
 
     # --- actions with dialogs (workers, so they can await the dialog) -----------------------------------------
     @work(exclusive=True, group="dialog")

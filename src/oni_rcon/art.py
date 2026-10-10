@@ -53,6 +53,56 @@ def halfblocks(grid: list[str], tones: dict[str, str]) -> Text:
     return Text("\n").join(lines)
 
 
+def pixels(grid: list[list[str | None]]) -> Text:
+    """Rows of hex colours (None is empty) as text, two pixels per cell in half blocks. Like halfblocks, but each
+    pixel is its own colour, so it draws the archive's pictures; runs of one colour share a span."""
+    if len(grid) % 2:
+        grid = [*grid, [None] * len(grid[0])]
+    lines = []
+    for top, bot in zip(grid[::2], grid[1::2]):
+        line, run, style = Text(), "", None
+        for a, b in zip(top, bot):
+            cell = (" ", None) if a is None and b is None else (" ", f"on {a}") if a == b else (
+                ("▀", a) if b is None else ("▄", b) if a is None else ("▀", f"{a} on {b}"))
+            if cell[1] != style and run:
+                line.append(run, style)
+                run = ""
+            run, style = run + cell[0], cell[1]
+        line.append(run, style)
+        lines.append(line)
+    return Text("\n").join(lines)
+
+
+def fit(grid: list[list[str | None]], rows: int, cols: int) -> list[list[str | None]]:
+    """The grid as it was if it fits in rows x cols cells, else shrunk to fit: each new pixel is the average of the
+    old ones it covers, weighted by how much of each it covers (empty if under half of it is drawn)."""
+    h, w = len(grid), len(grid[0])
+    k = min(1.0, cols / w, rows * 2 / h)
+    if k >= 1:
+        return grid
+    nw, nh = max(1, int(w * k)), max(2, int(h * k) // 2 * 2)
+
+    def span(i: int, n: int, m: int) -> list[tuple[int, float]]:  # (old pixel, share of it) under new pixel i of n
+        lo, hi = i * m / n, (i + 1) * m / n
+        return [(j, min(hi, j + 1) - max(lo, j)) for j in range(int(lo), min(m, math.ceil(hi)))]
+    xs, out = [span(x, nw, w) for x in range(nw)], []
+    for y in range(nh):
+        row: list[str | None] = []
+        for sx in xs:
+            total = lit = 0.0
+            rgb = [0.0, 0.0, 0.0]
+            for j, wy in span(y, nh, h):
+                for i, wx in sx:
+                    total += wy * wx
+                    if (c := grid[j][i]) is not None:
+                        lit += wy * wx
+                        for q in range(3):
+                            rgb[q] += wy * wx * int(c[1 + 2 * q:3 + 2 * q], 16)
+            row.append(None if lit * 2 < total else "#" + "".join(f"{round(v / lit):02X}" for v in rgb))
+        out.append(row)
+    return out
+
+
 def emblem(rows: int, cols: int = 999, reveal: float = 1.0, scan: float | None = None) -> Text:
     """The largest emblem that fits in rows x cols cells, empty if none fits. For the boot sequence, `reveal`
     (0 to 1) materialises it from the centre out and `scan` (0 to 1) is how far a bright sweep has come down."""

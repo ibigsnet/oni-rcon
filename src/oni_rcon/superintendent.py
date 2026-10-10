@@ -1,6 +1,7 @@
 """The Superintendent: New Mombasa's municipal AI, a small green face that lives in the sidebar on every tab, watches
 what comes in from every station, and reacts to what an admin would care about. A port of the Halo ASCII Archive
-design's AdminWatch scene, drawn the way art.py draws everything: pixel grids in half blocks.
+design's AdminWatch scene: the face is the design's own 48 pixel picture (archive.superintendent), shrunk to the room
+there is by averaging, in half blocks.
 
 Everything here is plain functions and one small state machine, so it's testable without the TUI. The app feeds it
 events (`react`) and asks it, a few times a second, what face to wear (`look`).
@@ -11,23 +12,22 @@ import math
 import re
 import textwrap
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from functools import lru_cache
 
 from rich.text import Text
 
-from .art import AMBER, CYAN, DIM, GREEN, GREY, RED, WHITE, halfblocks, noise
+from .archive import superintendent as face_grid
+from .art import AMBER, CYAN, DIM, GREEN, GREY, RED, WHITE, fit, noise, pixels
 
-MINI, SMALL, BIG = 8, 12, 16  # pixels across the face, and so cells wide: 4, 6 or 8 rows, by the room there is
+MINI, SMALL, BIG, LARGE, XL, HUGE = 8, 12, 16, 24, 32, 40  # pixels across the face, and so cells wide: 4 to 20 rows
+WORDS = 14  # cells its name needs beside the face; the larger faces put the words under it when there's no such room
+BELOW = 4  # the lines of words under a face that has no room beside it: its name, its mood, and two on what it saw
 EASE = 0.28  # seconds an expression takes to settle after an event
 DEBOUNCE = 1.2  # seconds a reaction holds against another of the same weight: a busy fleet doesn't make it flicker
 BLINK_FOR = 0.22  # seconds a blink lasts
 BLINK_EVERY = 5.5  # seconds: one blink in each stretch this long, when in the stretch it varies
 CALL = re.compile(r"\b(admins?|mods?|hack\w*|cheat\w*|aimbot|wallhack)\b", re.I)  # a call for an admin, as app.ALERT
-
-# The design's tones: rim bright, rim, rim shade, and two alternating scanline greens for the face.
-GREENS = {"a": "#7FD18F", "b": "#A8E8B2", "c": "#4E8F5E", "d": "#24482D", "e": "#2D5A38"}
-REDS = {"a": "#E5484D", "b": "#F5999C", "c": "#9A3035", "d": "#4A1A1C", "e": "#5C2326"}  # the face in alarm
-EYE = "#EEFFF2"
 
 
 @dataclass(frozen=True)
@@ -94,37 +94,14 @@ def ease_pop(p: float) -> float:
 
 
 def face(e: Expr, n: int = SMALL) -> Text:
-    """The face as half-block text, n cells wide and n/2 rows tall: a green disc, scanlined, with two white eyes."""
-    s, cx, cy = n / 48, n / 2, n / 2
-    big = 0.469 * n  # the disc's radius: 22.5 of 48
-    tones = (REDS if e.alarm > 0.5 else GREENS) | {"w": EYE}  # a clean flip: halfway blends only go muddy
-    rows = []
-    for y in range(n):
-        row = ""
-        for x in range(n):
-            px, py, d = x + 0.5, y + 0.5, math.hypot(x + 0.5 - cx, y + 0.5 - cy)
-            if d > big:
-                row += "0"
-                continue
-            tone = None
-            for side in (-1, 1):
-                r = 6.4 * s * e.size
-                dx, dy = (px - (cx + side * 8.6 * s + e.ex * s)) / r, (py - (cy + e.ey * s)) / r
-                open_ = e.openL if side < 0 else e.openR
-                if e.happy:  # a smiling arc, thick enough to stay an arc when the eye is a few pixels across
-                    dd = math.hypot(dx, dy * 1.1)
-                    hit = 0.4 <= dd <= 1.08 and dy <= 0.2
-                else:
-                    lid = -1 + 2 * e.lid + e.tilt * -side * dx
-                    hit = math.hypot(dx, dy / max(open_, 0.1)) <= 1 and dy >= lid
-                if hit:
-                    tone = "w"
-            if tone is None:
-                rim = 1.3 * s * 2.2  # the bright edge, thin enough to stay one pixel at this size
-                tone = ("b" if d > big - rim else "c" if d > big - 2.2 * rim else "d" if y % 2 else "e")
-            row += tone
-        rows.append(row)
-    return halfblocks(rows, tones)
+    """The face as half-block text, n cells wide and n/2 rows tall: the design's 48 pixel picture, a green disc,
+    scanlined, with two white eyes, averaged down to n pixels (1:1 at 48)."""
+    return _face(replace(e, **{k: round(v, 2) for k, v in vars(e).items() if isinstance(v, float)}), n)
+
+
+@lru_cache(maxsize=512)
+def _face(e: Expr, n: int) -> Text:  # a blink or a glance takes a few dozen distinct pictures: each is drawn once
+    return pixels(fit(face_grid(e), n // 2, n))
 
 
 @dataclass
@@ -200,23 +177,38 @@ class Superintendent:
         return face(e, n), cur.mood, cur.color, self.last, key
 
 
+def below(n: int, width: int) -> bool:
+    """Whether the words go under a face n cells across: the larger faces do when they've no room beside it."""
+    return n >= LARGE and width < n + 1 + WORDS
+
+
+def said(last: str, room: int, lines: int) -> list[Text]:
+    """What it last reacted to, wrapped to room cells and cut with an ellipsis if it runs past `lines` lines."""
+    out = textwrap.wrap(last or "all quiet", max(room, 1), break_long_words=True)
+    if len(out) > lines:
+        out = out[:lines]
+        out[-1] = out[-1][:room - 1].rstrip() + "…"
+    return [Text(line, WHITE if last else DIM) for line in out]
+
+
 def card(sup: Superintendent, width: int, n: int = SMALL) -> tuple[Text, tuple]:
     """What the sidebar shows: the face on the left and, beside it, the name, the mood and what it last reacted to.
     `width` is the room in cells. The key changes when the picture does, so an unchanged one needn't be repainted."""
     art, mood, color, last, key = sup.look(n)
+    if below(n, width):  # the face centred, its words centred under it: the same height whatever it says
+        words = [Text("SUPERINTENDENT", DIM), Text(mood, color)] + said(last, width, BELOW - 2)
+        words += [Text()] * (BELOW - len(words))
+        out = Text("\n").join([Text(" " * ((width - n) // 2)) + row for row in art.split("\n")]
+                              + [Text(" " * max(0, (width - len(w.plain)) // 2)) + w for w in words])
+        return out, key + (n, width)
     room, rows = max(8, width - n - 1), n // 2
     side = [Text("SUPERINTENDENT", DIM), Text(mood, color)] + ([Text("")] if rows >= 6 else [])
     for line in side:
         line.truncate(room)  # never wrap: a wrapped line would make the strip taller than its room
-    free = rows - len(side)
-    said = textwrap.wrap(last or "all quiet", room, break_long_words=True)  # what it reacted to, in the lines left
-    if len(said) > free:
-        said = said[:free]
-        said[-1] = said[-1][:room - 1].rstrip() + "…"
-    side += [Text(line, WHITE if last else DIM) for line in said]
+    side += said(last, room, rows - len(side))
     lines = art.split("\n")
     out = Text("\n").join(Text.assemble(row, " ", side[i] if i < len(side) else Text("")) for i, row in enumerate(lines))
     return out, key + (n, room)
 
 
-__all__ = ["BIG", "MINI", "SMALL", "Expr", "Reaction", "REACTIONS", "Superintendent", "card", "classify", "face"]
+__all__ = ["BELOW", "BIG", "HUGE", "LARGE", "MINI", "SMALL", "XL", "below", "Expr", "Reaction", "REACTIONS", "Superintendent", "card", "classify", "face"]
