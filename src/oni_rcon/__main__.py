@@ -18,6 +18,9 @@ NEW_HINT = "You're in. Click a player for what you can do, or press ? for a guid
 
 
 def main() -> None:
+    if sys.argv[1:2] == ['--ibigs-jobs']:
+        from .jobs import main as jobs_main
+        raise SystemExit(jobs_main(sys.argv[2:]))
     ap = argparse.ArgumentParser(prog="oni-rcon", description="ONI-themed RCON console for Project Reclaimer servers.",
                                  epilog="With no targets, servers come from the config file (see oni-rcon.example.toml).")
     ap.add_argument("targets", nargs="*", help="PORT, HOST:PORT or ws(s)://URL of a server's RCON")

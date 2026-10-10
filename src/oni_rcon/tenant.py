@@ -83,7 +83,8 @@ class PowerPanel(Dialog):
 class TenantApp(OniApp):
     TITLE = 'IBIGS Server Console'
     BINDINGS = [*OniApp.BINDINGS, Binding('ctrl+f', 'goto', 'Find server', priority=True),
-                Binding('f7', 'power', 'Start/Stop', priority=True)]
+                Binding('f7', 'power', 'Start/Stop', priority=True),
+                Binding('f8', 'jobs', 'Jobs', priority=True), Binding('f9', 'updates', 'Updates', priority=True)]
 
     def welcome(self):
         super().welcome()
@@ -94,6 +95,33 @@ class TenantApp(OniApp):
     def compose_stations(self) -> ComposeResult:
         yield from super().compose_stations()
         yield Button('⏻ START / STOP SERVERS  F7', id='power-btn', compact=True, variant='warning')
+        yield Button('SCHEDULED JOBS  F8', id='jobs-btn', compact=True)
+        yield Button('UPDATES  F9', id='updates-btn', compact=True)
+
+    @on(Button.Pressed, '#jobs-btn')
+    def _jobs_button(self, e: Button.Pressed) -> None:
+        e.stop()
+        self.action_jobs()
+
+    @on(Button.Pressed, '#updates-btn')
+    def _updates_button(self, e: Button.Pressed) -> None:
+        e.stop()
+        self.action_updates()
+
+    @work(exclusive=True, group='dialog')
+    async def action_jobs(self) -> None:
+        from .jobs_ui import jobs_dialog
+        rc, out = await self.power_run('status', '--json')
+        try:
+            targets = [l['service'] for l in json.loads(out)] if rc == 0 else []
+        except (ValueError, KeyError):
+            targets = []
+        await jobs_dialog(self, targets)
+
+    @work(exclusive=True, group='dialog')
+    async def action_updates(self) -> None:
+        from .jobs_ui import updates_dialog
+        await updates_dialog(self)
 
     @on(Button.Pressed, '#power-btn')
     def _power_button(self, e: Button.Pressed) -> None:

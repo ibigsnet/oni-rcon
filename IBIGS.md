@@ -1,5 +1,28 @@
 # IBIGS Reclaimer terminal
 
+## Customer VPS controls (0.7.0+ibigs.3)
+
+Customers run `oni` in their VPS. F6 opens ReclaimerForge with their own API key; F7 starts and stops their lobbies;
+F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
+every lobby is stopped. Fleet mode keeps its existing controls and never enables the tenant scheduler.
+
+Jobs support five-field numeric cron with an explicit IANA timezone, UTC-aligned intervals in minutes, and observed
+match boundaries. Before-match broadcasts run when voting opens or loading begins; after-match broadcasts require
+the native `finished` phase. Round breaks and reconnects do not invent completed matches. Team shuffles can run at
+scheduled times or at match start, after a fresh check that the server is playing. No arbitrary shell jobs are accepted.
+
+The `ibigs-oni-jobs` service runs as `tenant` independently of the terminal. Configuration and the last 100 outcomes
+live under `/srv/ibigs/automation`, readable by `ibigs-admin`. No game password, Forge key or player roster is stored
+there. Jobs are claimed durably before execution; an uncertain reply is never retried. Missed occurrences are skipped,
+and repeated local times during a DST fold are not replayed. Stop, restart and game-update jobs use the existing
+occupancy checks without force. Automatic updates are opt-in. Console updates use the signed private IBIGS channel;
+game updates pin the official image digest and retain rollback support. `oni jobs list`, `history`, `add`, `pause`,
+`resume`, and `delete` provide the same schedules from the shell.
+
+Install `hosting/template/addons/oni-jobs` from the IBIGS provisioning kit once on each enrolled VPS. A bundle update
+alone does not install that system service. After a console release changes, the idle worker reopens itself on the new
+release. Existing jobs, Forge preferences and stopped lobbies remain intact.
+
 On fleet-console, run `oni-rcon` (alias: `reclaimer-console`). `oni-rcon --list` prints the inventory. The launcher is in `/srv/appdata/reclaimer/terminal/bin/oni-rcon`; Unraid's boot script restores the command links after reboot.
 
 The IBIGS palette keeps Oni's amber/cyan theme with brighter labels, team colours and status text. Selected rows use a dark blue background so names and values remain readable. Disabled controls retain legible grey labels; they remain disabled. The active tab and keyboard focus also use weight or underlining, so colour is not the only cue. Reopen the terminal after an update to load the new palette.
