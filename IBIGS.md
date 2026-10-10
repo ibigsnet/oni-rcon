@@ -11,7 +11,8 @@ match boundaries. Before-match broadcasts run when voting opens or loading begin
 the native `finished` phase. Round breaks and reconnects do not invent completed matches. Team shuffles can run at
 scheduled times or at match start, after a fresh check that the server is playing. No arbitrary shell jobs are accepted.
 
-The `ibigs-oni-jobs` service runs as `tenant` independently of the terminal. Configuration and the last 100 outcomes
+The `ibigs-oni-jobs` service runs independently of the terminal as a local system service. Its fixed maintenance
+actions run as root so an expired interactive login cannot prevent scheduled updates. Configuration and the last 100 outcomes
 live under `/srv/ibigs/automation`, readable by `ibigs-admin`. No game password, Forge key or player roster is stored
 there. Jobs are claimed durably before execution; an uncertain reply is never retried. Missed occurrences are skipped,
 and repeated local times during a DST fold are not replayed. Stop, restart and game-update jobs use the existing
