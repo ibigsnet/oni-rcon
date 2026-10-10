@@ -534,7 +534,8 @@ def test_a_withdrawn_version_flags_only_the_install_it_was(fake, tmp_path):
             assert any("withdrawn that version" in n.message for n in app._notifications)
             vt.move_cursor(row=vt.ids.index(older))
             await pilot.press("i")
-            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            # the screen is pushed before its buttons are mounted: a slow runner got there first
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and len(app.screen.query("#no")) > 0)
             app.screen.query_one("#no").press()
 
             new = fake.publish(lid)
