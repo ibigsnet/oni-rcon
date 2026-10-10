@@ -24,6 +24,7 @@ class Server:
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
     # not a [[server]] key (older versions refuse unknown ones): set from the top-level ping_log by load_config
     ping_log: str = field(default="", init=False)
+    health_cmd: str = field(default="", init=False)  # likewise, from the top-level health_cmd; {since} is filled in per run
 
     def __post_init__(self):
         if not (self.url or self.port):
@@ -74,6 +75,10 @@ def load_config(path: Path) -> tuple[str, list[Server]]:
     if isinstance(tmpl, str):  # {port} = the server's RCON port; run on its ssh destination, or here without one
         for s in servers:
             s.ping_log = "" if s.url else tmpl.replace("{port}", str(s.port))
+    cmd = data.get("health_cmd")
+    if isinstance(cmd, str):  # same: {port} is this server's RCON port, and it runs where ping_log does
+        for s in servers:
+            s.health_cmd = "" if s.url else cmd.replace("{port}", str(s.port))
     return data.get("by", ""), servers
 
 
@@ -137,6 +142,17 @@ def forge_settings(path: Path | None) -> dict:
     except (OSError, TypeError, tomllib.TOMLDecodeError):
         return {}
     return {k: v for k, v in data.items() if k.startswith("forge_")}
+
+
+def health_settings(path: Path | None) -> dict:
+    """The config file's top-level health_* keys (health_min_free_mb, health_service). Top level only: an older
+    oni-rcon exits on a key it doesn't know inside [defaults] or [[server]], and ignores one out here."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if k.startswith("health_") and k != "health_cmd"}
 
 
 def write_atomic(path: Path, text: str, private: bool = False) -> None:

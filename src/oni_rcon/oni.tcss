@@ -3,6 +3,11 @@ Screen { background: $background; }
 
 #masthead { height: 1; padding: 0 1; background: $panel; color: $foreground; }
 #body { height: 1fr; }
+#banner { display: none; height: 1; padding: 0 1; }
+#banner.-on { display: block; background: $error; color: $background; }
+#banner.-on.-warn { background: $warning; }
+#banner.-on.-dim { background: $error 55%; }
+#banner.-on.-warn.-dim { background: $warning 55%; }
 
 #sidebar { width: 36; border-right: vkey $primary 40%; }
 #stations { height: 1fr; background: $background; }
@@ -35,7 +40,7 @@ Screen { background: $background; }
 .-wide #sidebar { width: 46; }
 #tabs TabPane.-from { offset-x: 4; }
 #tabs TabPane.-slide { transition: offset 220ms out_cubic; }
-DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box {
+DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box, #host-box, #workaround, #health-setup {
     border: round $primary 35%;
     border-title-color: $primary;
     background: $background;
@@ -80,6 +85,15 @@ Blacklist { height: 1fr; }
 .bar Button { margin-right: 1; min-width: 0; }
 
 #console-log { height: 1fr; padding: 0 1; }
+
+#health-setup { height: 1fr; padding: 1 2; }
+#crashes { height: 1fr; }
+#health-bottom { height: 1fr; min-height: 12; }
+#host-box { width: 3fr; height: 1fr; padding: 0 1; }
+#host { height: auto; }
+#containers { height: 1fr; scrollbar-size-horizontal: 0; }
+#workaround { width: 2fr; height: 1fr; padding: 0 1; }
+.-tight #health-bottom { layout: vertical; }
 
 ForgePane { height: 1fr; }
 #forge-bar { height: auto; }

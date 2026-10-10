@@ -38,12 +38,14 @@ from textual.worker import WorkerState
 from .archive import FILES, TOTAL, frame as archive_frame
 from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, fit, gauge, hbar,
                   pixels, spark, split_bar)
+from . import health as hc
 from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
                     Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
                     compatible, favourite_listings, history_since, id_list, is_withdrawn, kind_of, latest_of,
                     listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
+from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
 from .install import SSH_OPTS, InstallError, place, plan, size_words, target_for
 from .medals import Medals
 from .prefs import Prefs
@@ -69,13 +71,18 @@ CATS = {"chat": WHITE, "combat": RED, "traffic": CYAN, "moderation": AMBER, "ops
 KIND = {"chat": "chat", "kill": "combat", "join": "traffic", "leave": "traffic", "refused": "traffic",
         "kick": "moderation", "ban": "moderation", "unban": "moderation", "mute": "moderation",
         "unmute": "moderation", "cheat": "moderation"}
-GLYPH = {"chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□",
+GLYPH = {"health": "⚠", "chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□",
          "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡", "forge": "⬢"}
 STATE = {"online": ("◉", GREEN), "connecting": ("◌", AMBER), "offline": ("○", RED), "denied": ("⊘", RED)}
 SPIN = "◐◓◑◒"
 PANE_FOCUS = {"assets": "#players", "intercepts": "#feed", "operations": "#op-load", "blacklist": "#bans",
-              "console": "#cmd", "forge": "#listings"}
-TABS = ("f1", "f2", "f3", "f4", "f5", "f6")
+              "console": "#cmd", "forge": "#listings", "health": "#crashes"}
+TABS = ("f1", "f2", "f3", "f4", "f5", "f6", "f7")
+HEALTH_EVERY = 60  # seconds between a server's health reports
+HEALTH_GATE = 4  # reports being fetched at once
+BANNER_FOR = 30  # seconds a crash banner stays up unless it's clicked
+LEVEL = {"ok": GREEN, "warn": AMBER, "crit": RED, "": DIM}
+CRASH_COLOR = {SIGNATURE: RED, BARE: AMBER, OOM: RED, RESTART: CYAN}
 # the catalog's orders, what Forge is featuring, then what's on the selected server, from forge-state.json
 VIEWS = [*SORTS, "favourites", "installed"]
 VIEW_NAMES = {"installed": "INSTALLED HERE"}
@@ -159,7 +166,8 @@ TAB_TIPS = {"assets": "Players on the selected server: click one for their file 
             "operations": "Change the map or mode, end rounds, run votes, and server settings.",
             "blacklist": "Bans, and players allowed to join through a VPN.",
             "console": "Type server commands directly. For when a button doesn't cover it.",
-            "forge": "The ReclaimerForge catalog: community maps, gametypes and playlists for your servers."}
+            "forge": "The ReclaimerForge catalog: community maps, gametypes and playlists for your servers.",
+            "health": "Crashes read from each server's log, the host's memory, and whether the workaround service runs."}
 
 # A connection failure in words to act on: (what the error says, card text, the full explanation)
 EXPLAIN = [
@@ -242,11 +250,51 @@ def who(v, names: dict) -> str:
     return str(v) if v not in (None, "") else "?"
 
 
-def resolve(ev: dict, names: dict) -> dict:
+ID_KEY = re.compile(r"(^|_)(id|xuid|uid|guid|uuid)$", re.I)  # roster fields that carry an ID: engine_id, player_id...
+ID_LIKE = re.compile(r"\d{6,}|[0-9a-f]{16,}", re.I)  # what a player ID looks like, as against a callsign
+SLOT = 1 << 64
+
+
+def id_forms(v) -> set[str]:
+    """Every spelling an ID can take: as written, the same number in decimal and in hex, and for a long hex ID either
+    64-bit half of it. A kill names its players by one of a roster entry's IDs, in whichever base the server picks."""
+    if isinstance(v, bool) or not isinstance(v, (int, str)) or v == "":
+        return set()
+    s = str(v).strip().lower()
+    out = {s}
+    if re.fullmatch(r"-?\d+", s):
+        n = int(s) % SLOT
+        out |= {str(n), f"{n:x}"}
+    elif re.fullmatch(r"[0-9a-f]{5,}", s):
+        out.add(str(int(s, 16)))
+        if len(s) > 16:
+            for half in (s[:16], s[-16:]):
+                out |= {half, str(int(half, 16))}
+    return out
+
+
+def player_ids(p: dict) -> set[str]:
+    """Every ID a roster entry carries, in every spelling id_forms knows."""
+    out: set[str] = set()
+    for k, v in p.items():
+        if ID_KEY.search(k):
+            out |= id_forms(v)
+    return out
+
+
+def resolve(ev: dict, names: dict, ident: Callable | None = None) -> dict:
     """A copy of the event that names its players outright. An engine ID is a slot the engine hands to the next
-    player to join, so it has to be read against the roster when the event arrives, not when the feed redraws."""
-    return {k: who(v, names) if k in REFS and isinstance(v, (int, dict)) and not isinstance(v, bool) else v
-            for k, v in ev.items()}
+    player to join, so it has to be read against the roster when the event arrives, not when the feed redraws.
+    `ident` names a killer or victim the server gave by another ID than the engine's."""
+    out = {}
+    for k, v in ev.items():
+        if k in ("killer", "victim") and ident and (n := ident(v)) is not None:
+            out[k] = n
+        elif k in REFS and isinstance(v, (int, dict)) and not isinstance(v, bool):
+            out[k] = who(v, names)
+        else:
+            out[k] = v
+    return out
 
 
 def tally(players: list) -> list[tuple[str, int, int]]:
@@ -309,6 +357,18 @@ def clock(ts) -> str:
         with contextlib.suppress(OverflowError, ValueError, OSError):
             return datetime.fromtimestamp(ts / 1000 if ts > 1e11 else ts).strftime("%H:%M:%S")
     return time.strftime("%H:%M:%S")
+
+
+def when(ts) -> str:
+    """The time of day of an epoch time, with the date when it wasn't today."""
+    t = datetime.fromtimestamp(ts)
+    return t.strftime("%H:%M:%S" if t.date() == datetime.now().date() else "%m-%d %H:%M:%S")
+
+
+def age(seconds: float) -> str:
+    s = max(0, int(seconds))
+    d, h, m = s // 86400, s % 86400 // 3600, s % 3600 // 60
+    return f"{d}d {h}h" if d else f"{h}h {m:02d}m" if h else f"{m}m {s % 60:02d}s" if m else f"{s}s"
 
 
 def redact_addr(v, on: bool) -> str:
@@ -403,6 +463,8 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
         for medal in ev.get("_medals") or ():  # padded with blank braille, not spaces: wrap between pills only
             line.append("  ")
             line.append(f"\u2800{medal}\u2800".replace(" ", "\u2800"), f"{INK} on {GOLD}")
+    elif kind == "health":
+        line.append("HEALTH  " + str(ev.get("text", "")), RED if ev.get("level") == "crit" else AMBER)
     else:
         line.append(kind.upper(), CATS[cat])
         rest = {k: v for k, v in ev.items() if k not in ("type", "event", "time")}
@@ -483,6 +545,14 @@ class Station:
     drawn: tuple = ()  # what its card shows now: repainted only when this changes
     polled: float = 0.0  # when its players were last fetched by the slow poll
     pings: dict = field(default_factory=dict)  # player ID -> the ping they joined with, from the server's log
+    here: dict = field(default_factory=dict)  # every spelling of an ID on the roster now -> callsign
+    past: dict = field(default_factory=dict)  # the long ones from earlier rosters and joins: a kill by someone who just left
+    aliases: dict = field(default_factory=dict)  # an ID nobody here answers to -> PLAYER n, so it's never shown raw
+    unmatched: bool = False  # said once that kills name players by an ID the roster doesn't carry
+    check_at: float = 0.0  # when its next health report is due (monotonic)
+    checking: bool = False
+    health_ok: float = 0.0  # when the last report came in (epoch), 0 before the first
+    health_err: str = ""  # why the last report didn't, scrubbed; empty while they come
 
     @property
     def online(self) -> bool:
@@ -495,6 +565,25 @@ class Station:
     @property
     def names(self) -> dict:
         return {p.get("engine_id"): str(pick(p, "name", default="?")) for p in self.players if p.get("engine_id") is not None}
+
+    def learn(self, players: list) -> None:
+        """Read the roster for the IDs a kill might name its players by. Short ones (engine slots) are only good
+        while the player holds the slot; long ones are kept, so a kill by someone who just left still reads."""
+        self.here = {f: str(pick(p, "name", default="?")) for p in players for f in player_ids(p)}
+        self.past.update({f: n for f, n in self.here.items() if len(f) >= 8})
+        while len(self.past) > 4000:  # ponytail: oldest out
+            del self.past[next(iter(self.past))]
+
+    def ident(self, v) -> str | None:
+        """The callsign a killer or victim ID belongs to. An ID that belongs to nobody here becomes PLAYER n and
+        never shows raw. None for what who() reads itself: a name, a slot number, a dict."""
+        forms = id_forms(v)
+        for f in forms:
+            if (n := self.here.get(f) or self.past.get(f)) is not None:
+                return n
+        if isinstance(v, str) and ID_LIKE.fullmatch(v.strip()) or isinstance(v, int) and len(str(abs(v))) >= 6:
+            return self.aliases.setdefault(min(forms), f"PLAYER {len(self.aliases) + 1}")
+        return None
 
     def rate(self, buckets: int, span: float, whole: bool = False) -> list[int]:
         """Events in each of the last `buckets` stretches of `span` seconds, oldest first. `whole` leaves out the
@@ -656,7 +745,7 @@ GUIDE = [
         ("Servers", "Your servers are on the left. Click one, or press 1 to 9. A green ◉ is connected; a red ○ "
                     "says why it isn't, and retries by itself."),
         ("Go to", "g lists every server, the busiest first: type part of a name and press Enter."),
-        ("Tabs", "F1 to F6, or click the names along the top."),
+        ("Tabs", "F1 to F7, or click the names along the top."),
         ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
         ("Superintendent", "The small green face on the left, on every tab, watches every server's feed. It welcomes a "
                            "join, startles at a call for an admin, scowls at a cheat flag, approves a kick or ban, is "
@@ -712,6 +801,20 @@ GUIDE = [
         ("Your key", "Forge takes your own API key: k loads one. It's only ever sent to reclaimerforge.net, and it's "
                      "never shown on screen."),
         ("Thanks", CREDIT),
+    ]),
+    ("F7  HEALTH  ·  crashes and memory", [
+        ("Crashes", "Each server's last crashes, read from its log: SIGNATURE is the known crash (an exception with its "
+                    "code and RVA, the blue developer helmet under Wine), BARE is the engine probe failing with no "
+                    "exception, which is a different fault, OOM-KILL is a container killed for memory, and "
+                    "CONTAINER-RESTART is one that started again. PLAYERS is how many were on. DROPPED means this "
+                    "console's RCON connection fell at the same moment."),
+        ("Host", "Free memory (amber under twice health_min_free_mb, red under it), swap, the kernel's oom_kill "
+                 "counter, and each container's start time and OOMKilled flag."),
+        ("Workaround", "Whether the named systemd service is running, when it last moved a tag, and any warning that "
+                       "the build isn't the pinned one. Hidden without health_service."),
+        ("Alerts", "A new crash, or memory falling under the limit, flashes a banner over every tab (click it away), "
+                   "goes in the F2 feed and beeps. Crashes from before you opened this console aren't alerts."),
+        ("Turning it on", "Set health_cmd in the config: this tab says how when it's off. Ctrl+R reads everything now."),
     ]),
     ("SAFETY", [
         ("Addresses", "Player IPs are hidden. Press x to show them, and again to hide them before you stream."),
@@ -1096,6 +1199,7 @@ class OniApp(App):
         Binding("f1", "tab('assets')", "Assets"), Binding("f2", "tab('intercepts')", "Intercepts"),
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
         Binding("f5", "tab('console')", "Console"), Binding("f6", "tab('forge')", "Forge"),
+        Binding("f7", "tab('health')", "Health"),
         Binding("ctrl+b", "broadcast", "Broadcast"),
         Binding("ctrl+r", "refresh", "Refresh"), Binding("x", "redact", "Redact"),
         Binding("question_mark", "help", "Help"), Binding("slash", "focus_input", "Type", show=False),
@@ -1104,7 +1208,8 @@ class OniApp(App):
     ]
 
     def __init__(self, servers: list[Server], by: str, intro: bool | str = True, updater: Callable[[], str] | None = None,
-                 hint: str = "", forge: ForgeSetup | None = None, prefs: Prefs | None = None):
+                 hint: str = "", forge: ForgeSetup | None = None, prefs: Prefs | None = None,
+                 health: HealthSetup | None = None):
         super().__init__()
         # intro: "full" (the archive, then the clearance check), "quick" (the clearance check), "off"; True is quick
         self.by, self.intro, self.updater, self.hint = by, {True: "quick", False: "off"}.get(intro, intro), updater, hint
@@ -1139,6 +1244,12 @@ class OniApp(App):
         self.ban_rows: dict[str, str] = {}
         self.vpn_rows: dict[str, str] = {}
         self.alert_at = float("-inf")  # when the last alert came in; each station counts its own unseen ones
+        self.hsetup = health or HealthSetup()
+        self.mon = Monitor(self.hsetup.min_free_mb)
+        self.health_gate: asyncio.Semaphore | None = None  # made in the loop that uses it
+        self.service_at: dict[str, float] = {}  # ssh destination ("" = here) -> when its service check is next due
+        self.service_err: dict[str, str] = {}
+        self.banner_until = 0.0
 
     @property
     def cur(self) -> Station:
@@ -1152,6 +1263,7 @@ class OniApp(App):
 
     def compose(self) -> ComposeResult:
         yield Static(id="masthead")
+        yield Static(id="banner")  # a crash or a memory squeeze, on every tab until it's clicked away
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
                 yield Stations(*[ListItem(c) for c in self.cards], id="stations")
@@ -1228,6 +1340,14 @@ class OniApp(App):
                                 with Collapsible(title="RAW DATA", id="forge-raw-box"):
                                     yield Static(id="listing-raw")
                                 yield Static(id="forge-credit")
+                with TabPane("[dim]F7[/] HEALTH", id="health"):
+                    yield Static(id="health-setup")
+                    yield Roster(id="crashes", cursor_type="row", zebra_stripes=True)
+                    with Horizontal(id="health-bottom"):
+                        with Vertical(id="host-box"):
+                            yield Static(id="host")
+                            yield Roster(id="containers", cursor_type="none", zebra_stripes=True)
+                        yield Static(id="workaround")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -1237,14 +1357,17 @@ class OniApp(App):
                 "#rotation": ["#", "MAP", "MODE"], "#bans": ["TYPE", "TARGET", "NAME", "REASON", "EXPIRES", "BY"],
                 "#vpn": ["ALLOWED THROUGH VPN", "NOTE"],
                 "#listings": ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"],
-                "#versions": ["", "VERSION", "PUBLISHED", "NOTES"]}
+                "#versions": ["", "VERSION", "PUBLISHED", "NOTES"],
+                "#crashes": ["WHEN", "SERVER", "CLASS", "PLAYERS", "DETAIL", "RCON"],
+                "#containers": ["SERVER", "STARTED", "UP", "OOMKILLED", "EXIT", "RESTARTS"]}
         for sel, c in cols.items():
             if not (t := self.query_one(sel, DataTable)).columns:  # once, whatever mounts twice
                 t.add_columns(*c)
         for sel, title in {"#players": "ASSETS IN THEATRE", "#dossier-box": "DOSSIER", "#feed": "SIGINT FEED",
                            "#sitrep": "SITREP", "#theatre": "THEATRE", "#rotation": "ROTATION", "#bans": "BLACKLIST",
                            "#vpn": "VPN ALLOWANCES", "#console-log": "COMMAND LOG", "#listings": "FORGE CATALOG",
-                           "#listing-box": "FORGE FILE", "#versions": "VERSIONS"}.items():
+                           "#listing-box": "FORGE FILE", "#versions": "VERSIONS", "#host-box": "HOST",
+                           "#workaround": "WORKAROUND"}.items():
             self.query_one(sel).border_title = title
         for wid, tip in TIPS.items():  # escaped: "[Server]" in a tip is text, not a style
             self.query_one(f"#{wid}").tooltip = escape(tip)
@@ -1281,6 +1404,15 @@ class OniApp(App):
             if s.ping_log:
                 self.run_worker(self.follow_pings(st), group="pings", exit_on_error=False)
 
+        self.health_gate = asyncio.Semaphore(HEALTH_GATE)
+        now = time.monotonic()
+        for st in self.stations:  # the first reports spread out, so a fleet isn't a burst of ssh
+            st.check_at = now + min(st.index, 20) * 0.5
+        if self.hsetup.service:
+            for st in self.stations:
+                if self.hsetup.source or not st.server.url:
+                    self.service_at.setdefault(st.server.ssh, now + 1)
+        self.set_interval(2, self.health_tick)
         self.set_interval(1, self.tick)
         self.set_interval(3, self.poll_fast)
         self.set_interval(1, self.poll_slow)
@@ -1330,6 +1462,188 @@ class OniApp(App):
                     await proc.wait()
             await asyncio.sleep(delay)
             delay = min(delay * 2, 60)
+
+    # --- health: crashes from the logs, the host's memory (see health.py) -------------------------------------
+    def watched(self, st: Station) -> bool:
+        """Whether this server has a health report to read: a command for it, or a stand-in (--demo, tests)."""
+        return bool(self.hsetup.source or st.server.health_cmd)
+
+    def health_tick(self) -> None:
+        """Every couple of seconds: start the reports and service checks that are due."""
+        if not self.is_running:
+            return
+        now = time.monotonic()
+        for st in self.stations:
+            if self.watched(st) and not st.checking and now >= st.check_at:
+                st.checking = True
+                self.run_worker(self.health_check(st), group="health", exit_on_error=False)
+        for host, due in list(self.service_at.items()):
+            if now >= due:
+                self.service_at[host] = now + HEALTH_EVERY + 3600  # until the check says it's done
+                self.run_worker(self.health_service(host), group="health", exit_on_error=False)
+
+    async def health_check(self, st: Station) -> None:
+        """One server's report. It asks for the last day the first time, then for what's come since the last one
+        (with room for a gap): the same crash seen again is dropped by the monitor."""
+        notes: list[Notice] = []
+        try:
+            first = str(st.index) not in self.mon.seen
+            since = "86400s" if first else f"{min(86400, max(900, int((time.time() - st.health_ok) * 2) + 300))}s"
+            async with self.health_gate:
+                if src := self.hsetup.source:
+                    text = await src.report(st.server.port, since)
+                else:
+                    text = await hc.run(st.server.health_cmd.replace("{since}", since), st.server.ssh)
+            notes = self.mon.ingest(str(st.index), st.server.ssh, text)
+            st.health_ok, st.health_err = time.time(), ""
+        except Exception as e:  # ssh down, a script that fails, a stand-in that broke: say so, keep going
+            err = hc.scrub(str(e) if isinstance(e, hc.HealthError) else f"{type(e).__name__}: {e}")
+            if err != st.health_err:
+                self.log_event(st, {"event": "uplink", "text": f"HEALTH REPORT FAILED  {err}"})
+            st.health_err = err
+        finally:
+            st.checking = False
+            st.check_at = time.monotonic() + HEALTH_EVERY
+        if self.is_running:
+            for n in notes:
+                self.health_notice(n)
+            self.paint_health()
+
+    async def health_service(self, host: str) -> None:
+        unit = self.hsetup.service
+        try:
+            async with self.health_gate:
+                if src := self.hsetup.source:
+                    text = await src.service(unit)
+                else:
+                    text = await hc.run(hc.service_command(unit), host)
+            self.mon.services[host] = hc.parse_service(text, time.time())
+            self.service_err.pop(host, None)
+        except Exception as e:
+            self.service_err[host] = hc.scrub(str(e) if isinstance(e, hc.HealthError) else f"{type(e).__name__}: {e}")
+        finally:
+            self.service_at[host] = time.monotonic() + HEALTH_EVERY
+        if self.is_running:
+            self.paint_health()
+
+    def health_notice(self, n: Notice) -> None:
+        """A crash or a memory squeeze that came up while this console was open: into the feed, onto a banner, and
+        the alert (a beep, the card, the CONDITION)."""
+        st = self.stations[int(n.key)] if n.key else None
+        self.log_event(st, {"event": "health", "text": n.text, "level": n.level})
+        banner = self.query_one("#banner", Static)
+        banner.update(Text(f" ⚠ {st.label if st else 'HOST'}  {n.text}      click to dismiss"))
+        banner.set_class(n.level != "crit", "-warn")
+        banner.add_class("-on")
+        self.banner_until = time.monotonic() + BANNER_FOR
+        self.alert(st)
+
+    def hide_banner(self) -> None:
+        self.banner_until = 0.0
+        self.query_one("#banner").remove_class("-on", "-dim")
+
+    @on(events.Click, "#banner")
+    def _banner(self) -> None:
+        self.hide_banner()
+
+    def paint_health(self) -> None:
+        now = time.time()
+        on = any(self.watched(st) for st in self.stations)
+        setup, crashes, host_box = (self.query_one(i) for i in ("#health-setup", "#crashes", "#host-box"))
+        setup.display, crashes.display, host_box.display = not on, on, on
+        self.query_one("#workaround").display = bool(self.hsetup.service)
+        if not on:
+            setup.update(self.health_howto())
+        label = lambda key: self.stations[int(key)].label if key else "HOST"
+        rows = [(f"{e.key}:{e.cls}:{int(e.ts)}",
+                 [Text(f"{when(e.ts)}  {age(now - e.ts)} ago"), Text(label(e.key), WHITE),
+                  Text(e.cls, CRASH_COLOR[e.cls]), Text(str(e.players) if e.players is not None else "—",
+                                                       AMBER if e.players else DIM),
+                  Text(e.detail, DIM), Text("DROPPED", CYAN) if e.rcon else Text("—", DIM)])
+                for e in self.mon.recent()]
+        t = self.query_one("#crashes", Roster)
+        t.fill(rows)
+        t.border_title = Text(f"CRASHES · LAST 24 H · {len(rows)}")
+        t.border_subtitle = Text("NONE IN THE LAST 24 H", GREEN) if not rows and self.mon.seen else ""
+        hosts = Table.grid(padding=(0, 2))
+        hosts.add_column(style=DIM, no_wrap=True)
+        hosts.add_column()
+        seen_hosts = {st.server.ssh for st in self.stations if self.watched(st)}
+        self.query_one("#host-box").border_title = Text("HOST" + ("" if len(seen_hosts) != 1 else " · " + redact_text(
+            next(iter(seen_hosts)) or "this machine", self.redact)))
+        for h in sorted(seen_hosts):
+            snap = self.mon.hosts.get(h)
+            if len(seen_hosts) > 1:
+                hosts.add_row(Text("HOST", AMBER), Text(redact_text(h or "this machine", self.redact), AMBER))
+            if not snap:
+                bad = next((st.health_err for st in self.stations if st.server.ssh == h and st.health_err), "")
+                hosts.add_row("", Text(bad and f"no report yet: {bad}" or "waiting for the first report", RED if bad else DIM))
+                continue
+            lvl = mem_level(snap.avail, self.mon.min_free)
+            hosts.add_row("MEMORY FREE", Text(f"{snap.avail} MB" if snap.avail is not None else "—", LEVEL[lvl])
+                          + Text(f"   under {self.mon.min_free} MB" if lvl == "crit" else "", RED))
+            lvl = swap_level(snap.swap_used, snap.swap_total)
+            hosts.add_row("SWAP USED", Text(f"{snap.swap_used} / {snap.swap_total} MB" if snap.swap_used is not None
+                                           else "—", LEVEL[lvl]))
+            since = (snap.oom or 0) - (snap.oom_first or 0)
+            hosts.add_row("OOM KILLS", Text(str(snap.oom) if snap.oom is not None else "—",
+                                            RED if since else AMBER if snap.oom else GREEN)
+                          + Text(f"   +{since} since you opened this" if since else "", RED))
+            hosts.add_row("REPORT", Text(f"{age(now - snap.at)} ago", DIM))
+        for st in self.stations:
+            if st.health_err and self.watched(st):
+                hosts.add_row(Text("FAILED", RED), Text(f"{st.label}: {st.health_err}", AMBER))
+        self.query_one("#host", Static).update(hosts)
+        boxes = [(str(i), [Text(st.label, WHITE), Text(when(b.started) if b.started else "—"),
+                           Text(age(now - b.started) if b.started else "—", DIM),
+                           Text("YES", RED) if b.oom_killed else Text("no", GREEN),
+                           Text(str(b.exit_code) if b.exit_code is not None else "—",
+                                RED if b.exit_code == 137 else DIM),
+                           Text(str(b.restarts) if b.restarts is not None else "—", DIM)])
+                 for i, st in enumerate(self.stations) if (b := self.mon.boxes.get(str(st.index)))]
+        self.query_one("#containers", Roster).fill(boxes)
+        if self.hsetup.service:
+            self.query_one("#workaround", Static).update(self.workaround_text(now))
+            self.query_one("#workaround").border_title = Text(f"WORKAROUND · {self.hsetup.service}")
+
+    def workaround_text(self, now: float) -> Table:
+        g = Table.grid(padding=(0, 2))
+        g.add_column(style=DIM, no_wrap=True)
+        g.add_column()
+        hosts = sorted({st.server.ssh for st in self.stations if self.hsetup.source or not st.server.url})
+        if not hosts:
+            g.add_row("", Text("No server here has an ssh destination or a box of its own to check.", DIM))
+        for h in hosts:
+            svc, err = self.mon.services.get(h), self.service_err.get(h)
+            if len(hosts) > 1:
+                g.add_row(Text("HOST", AMBER), Text(redact_text(h or "this machine", self.redact), AMBER))
+            if err:
+                g.add_row(Text("FAILED", RED), Text(err, AMBER))
+            if not svc:
+                g.add_row("", Text("waiting for the first check", DIM))
+                continue
+            up = svc.active == "active"
+            g.add_row("SERVICE", Text(f"{'●' if up else '○'} {svc.active.upper()}", GREEN if up else RED))
+            g.add_row("MOVED TAG", Text(f"{when(svc.moved)}  {age(now - svc.moved)} ago", WHITE) if svc.moved
+                      else Text("none in the last 24 h", DIM))
+            g.add_row("BUILD", Text(f"⚠ NOT THE PINNED BUILD  {when(svc.warn_at) if svc.warn_at else ''}\n{svc.warn}", RED)
+                      if svc.warn else Text("no warning in the last 24 h", GREEN))
+        return g
+
+    @staticmethod
+    def health_howto() -> Text:
+        return Text.assemble(
+            ("HEALTH WATCH IS OFF\n\n", AMBER),
+            ("Give oni-rcon a command that prints a small report, and this tab shows crashes read from each server's log, "
+             "the host's memory and whether a container was killed for it. Add it to the config file, above the first "
+             "[table]:\n\n", WHITE),
+            ("  health_cmd = ", CYAN), ("\"docker logs --timestamps --since {since} my-server-{port} 2>&1\"\n\n", WHITE),
+            ("{port} is the server's RCON port, {since} how far back to read. It runs on the server's ssh host, or here "
+             "without one, and only reads. Add a host line (memory) and a container line (docker inspect) for the "
+             "HOST panel: oni-rcon.example.toml has a whole docker example, and the README says what each line "
+             "means.\n\n", DIM),
+            ("health_min_free_mb", CYAN), (" (default 1024) is the free memory below which it alerts.  ", DIM),
+            ("health_service", CYAN), (" names a systemd service to watch.", DIM))
 
     def check_update(self) -> None:
         try:
@@ -1455,6 +1769,11 @@ class OniApp(App):
                         title=f"{st.label} · SIGN-IN REFUSED", severity="error", timeout=20)
         elif state == "offline" and st.prev == "online":
             self.log_event(st, {"event": "uplink", "text": f"LOST  {detail}"})
+            tun = self.tunnel_of(st)
+            if not (tun and tun.state == "down"):  # the server restarting, until its log says otherwise
+                self.mon.dropped(str(st.index))
+                if self.watched(st):
+                    st.check_at = min(st.check_at, time.monotonic() + 8)  # it comes back in 5 s: read the log then
         if state != "online":
             self.rounds.lost(st.server.where)  # how a round ends unseen isn't known: it isn't counted
         retry = re.search(r"retry in (\d+)s", detail) if state == "offline" else None
@@ -1530,10 +1849,15 @@ class OniApp(App):
             if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
                 if w == "status" and r["data"].get("phase") != st.data.get("status", {}).get("phase"):
                     st.medals.new_game()
+                if w == "players":
+                    st.learn(r["data"].get("players") or [])
                 if w == "status":  # rounds played, kept locally: see stats.py
                     where = st.server.where
                     self.rounds.observe(where, r["data"], lambda m, g, where=where: self.fstate.playing(where, m, g))
                 st.data[w] = r["data"]
+                if w in ("status", "players") and self.watched(st):  # the crowd, for a crash's player count
+                    self.mon.sample(str(st.index), num(r["data"].get("players")) if w == "status"
+                                    else len(r["data"].get("players") or []))
         self.paint(st, what)
 
     def poll_fast(self) -> None:
@@ -1641,9 +1965,16 @@ class OniApp(App):
         if self.raw_events:
             self.log_cmd(Text(f"{st.label} ◂ ", CYAN) + Text(json.dumps(redact_data(ev, self.redact)), DIM))
         names = st.names
-        ev = resolve(ev, names)
+        if ev.get("event") == "join":  # a join names the player by ID: kills that follow may use it
+            st.past.update({f: str(pick(ev, "name", "player", default="?")) for f in id_forms(pick(ev, "id", "player_id"))
+                            if len(f) >= 8})
+        raw_ids = [ev.get(k) for k in ("killer", "victim")]
+        ev = resolve(ev, names, st.ident)
         kind, text = ev.get("event"), str(ev.get("text", ""))
         if kind == "kill":
+            if any(i in st.aliases.values() for i in (ev.get("killer"), ev.get("victim"))):
+                self.fetch(st, "players")  # someone the roster hasn't caught up with: ask again
+                self.unmatched(st, raw_ids)
             killer = pick(ev, "killer")
             ev["_medals"] = st.medals.kill(None if killer is None else who(killer, names),
                                            who(pick(ev, "victim"), names), time.monotonic())
@@ -1667,14 +1998,25 @@ class OniApp(App):
         if kind == "control":
             self.fetch(st, "nextmap")
 
-    def alert(self, st: Station) -> None:
+    def unmatched(self, st: Station, ids: list) -> None:
+        """Once per station: kills name players by an ID the roster has no field for. Field names only, never values:
+        this is what's needed to teach id_forms the server's spelling."""
+        if st.unmatched or not any(isinstance(i, (int, str)) and ID_LIKE.fullmatch(str(i)) for i in ids):
+            return
+        st.unmatched = True
+        keys = sorted({k for p in st.players for k, v in p.items() if isinstance(v, (int, str))})
+        self.log_cmd(Text(f"{st.label}: kills name players by an ID no roster field matches, so they read PLAYER n. "
+                          f"The roster has: {', '.join(keys) or 'nothing yet'}", AMBER))
+
+    def alert(self, st: Station | None) -> None:
         """Beep, pulse the station's card, and raise the condition. It counts as unseen, on the card and in the
-        masthead, unless the operator is looking at that station or at the feed."""
+        masthead, unless the operator is looking at that station or at the feed. No station: the host's."""
         self.bell()
-        st.flash = self.alert_at = time.monotonic()
-        st.flash += 3
-        if st is not self.cur and self.query_one(TabbedContent).active != "intercepts":
-            st.alerts += 1
+        self.alert_at = time.monotonic()
+        if st:
+            st.flash = self.alert_at + 3
+            if st is not self.cur and self.query_one(TabbedContent).active != "intercepts":
+                st.alerts += 1
         self.paint_masthead()
 
     @property
@@ -1682,11 +2024,11 @@ class OniApp(App):
         return sum(st.alerts for st in self.stations)
 
     def condition(self) -> tuple[str, str]:
-        """RED while an alert is unseen and for a moment after any; AMBER while a station is down or something
-        installed from Forge has been withdrawn and nobody has acknowledged it; else GREEN."""
+        """RED while an alert is unseen and for a moment after any; AMBER while a station is down, the host is short
+        of memory, or something installed from Forge has been withdrawn and nobody has acknowledged it; else GREEN."""
         if self.unseen or time.monotonic() - self.alert_at < 15:
             return "RED", RED
-        if not all(st.online for st in self.stations) or self.fstate.alarms():
+        if not all(st.online for st in self.stations) or self.fstate.alarms() or self.mon.short():
             return "AMBER", AMBER
         return "GREEN", GREEN
 
@@ -1699,7 +2041,8 @@ class OniApp(App):
         return KIND.get(ev.get("event"), "ops") in self.filters and not (self.local_only and st not in (None, self.cur))
 
     def feed_line(self, st: Station | None, ev: dict) -> Text:
-        return render_event(st.label if st else "LINK", ev, {}, self.redact, self.label_width)  # resolved on arrival
+        return render_event(st.label if st else "HOST" if ev.get("event") == "health" else "LINK", ev, {}, self.redact,
+                            self.label_width)  # resolved on arrival
 
     # --- painting --------------------------------------------------------------------------------------------
     def paint(self, st: Station, what: tuple) -> None:
@@ -1743,6 +2086,13 @@ class OniApp(App):
         feed = self.query_one("#feed")
         if feed.border_title != title:
             feed.border_title = title
+        if self.banner_until:
+            if time.monotonic() > self.banner_until:
+                self.hide_banner()
+            else:
+                self.query_one("#banner").set_class(time.time() % 2 < 1, "-dim")  # flashes
+        if self.query_one(TabbedContent).active == "health" and int(time.monotonic()) % 5 == 0:
+            self.paint_health()  # the ages move
 
     def paint_masthead(self) -> None:
         cond, color = self.condition()
@@ -2114,6 +2464,9 @@ class OniApp(App):
         if e.pane.id == "forge" and not self.forge_opened:  # fetched when first wanted, not at every start
             self.forge_opened = True
             self.forge_load()
+        if e.pane.id == "health":  # looked at now: the banner has done its job
+            self.hide_banner()
+            self.paint_health()
         if e.pane.id == "intercepts" and self.unseen:  # every station's alerts are in the feed: seen now
             for st in self.stations:
                 st.alerts = 0
@@ -2201,7 +2554,7 @@ class OniApp(App):
     def action_tab(self, tab: str) -> None:
         self.query_one(TabbedContent).active = tab
         w = self.query_one(PANE_FOCUS[tab])
-        if w.disabled:  # a greyed-out button can't take focus: the pane's first one that can, else the server list
+        if w.disabled or not w.display:  # a greyed-out button can't take focus: the pane's first one that can, else the server list
             w = next(iter(self.query_one(f"#{tab}").query("Button:enabled")), self.query_one("#stations"))
         w.focus()  # else focus left in the old pane pulls the tabs back to it
 
@@ -2251,6 +2604,10 @@ class OniApp(App):
         self.query_one("#say" if tabs.active == "intercepts" else "#cmd").focus()
 
     def action_refresh(self) -> None:
+        if self.query_one(TabbedContent).active == "health":  # every report and service check, now
+            for st in self.stations:
+                st.check_at = 0.0
+            self.service_at = {h: 0.0 for h in self.service_at}
         if self.query_one(TabbedContent).active == "forge":
             self.details.clear()
             self.detail_want = None
@@ -2285,6 +2642,9 @@ class OniApp(App):
                                                  else "full every time"),
                             "now: full the first time, quick after" if not self.prefs.full_intro
                             else "now: the full sequence plays every time", self.action_full_intro)
+        yield SystemCommand("Health: read the reports now", "crashes, memory and the workaround service  (F7, Ctrl+R)",
+                            lambda: (setattr(self, "service_at", {h: 0.0 for h in self.service_at}),
+                                     [setattr(st, "check_at", 0.0) for st in self.stations]))
         yield SystemCommand("Help: field manual", "what everything does, in plain words  (?)", self.action_help)
         yield SystemCommand("Add a server", "open the setup screen", self.action_add_server)
         yield SystemCommand("Forge: Load API key", "your own ReclaimerForge key, for F6", lambda: self.action_forge("key"))

@@ -19,6 +19,30 @@ forge_poll = 600              # seconds between checks for updates to what you'v
 # `ssh` set the command runs on that host, otherwise on this machine. Above the first [table], like the rest.
 # ping_log = "docker logs -f --since 12h reclaimer-server-$(({port}-49175))-1 2>&1"
 
+# Health (F7): crashes read from each server's log, the host's memory, and whether a container was killed for it.
+# health_cmd prints a small report for ONE server; it runs on the `ssh` host like ping_log (here without one), once a
+# minute, and only reads. {port} is the server's RCON port; {since} is how far back to read the log (a day the first
+# time, minutes after). Its output is plain lines:
+#   host now=<epoch> clock=<HH:MM:SS> mem_available_mb=N swap_used_mb=N swap_total_mb=N oom_kill=N
+#   container started=<time> finished=<time> oom_killed=<true|false> exit_code=N restarts=N
+#   ...and anything else is a line of the server's log, with docker's own timestamps if you ask for them.
+# `host` and `container` can also be JSON lines: {"kind": "host", "mem_available_mb": 812}. Player IDs and IP
+# addresses in the log are stripped on arrival, and never shown, stored or logged.
+# oni-rcon alerts (a banner, the feed) when memory available falls under health_min_free_mb, and on a new crash or
+# OOM kill. Memory shows amber under twice that. health_service names a systemd unit to watch (active or not, when it
+# last "moved tag", any "NOT the pinned build"); leave it out and that panel stays hidden. Three top-level keys, above
+# the first [table]: an older oni-rcon ignores them here, but exits on a key it doesn't know inside a table.
+# --- health example (a docker host; edit the container name) ---
+# health_cmd = '''
+# c=reclaimer-server-$(({port}-49175))-1
+# echo "host now=$(date +%s) clock=$(date -u +%T) mem_available_mb=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo) swap_total_mb=$(awk '/^SwapTotal:/ {print int($2/1024)}' /proc/meminfo) swap_used_mb=$(awk '/^SwapTotal:/ {t=$2} /^SwapFree:/ {f=$2} END {print int((t-f)/1024)}' /proc/meminfo) oom_kill=$(awk '/^oom_kill / {print $2}' /sys/fs/cgroup/memory.events)"
+# docker inspect -f 'container started={{.State.StartedAt}} finished={{.State.FinishedAt}} oom_killed={{.State.OOMKilled}} exit_code={{.State.ExitCode}} restarts={{.RestartCount}}' "$c"
+# docker logs --timestamps --since {since} "$c" 2>&1
+# '''
+# health_min_free_mb = 1024
+# health_service = "halo-blueflame"
+# --- end health example ---
+
 [defaults]                    # applies to every [[server]] unless it sets the key itself
 ssh = "admin@game-box"        # tunnel through this SSH destination (key auth; leave out for direct)
 host = "127.0.0.1"            # RCON address as seen from the ssh destination (the server's default bind)

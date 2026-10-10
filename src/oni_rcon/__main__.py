@@ -8,8 +8,10 @@ import tempfile
 from pathlib import Path
 
 from . import __version__, update
-from .config import Server, default_config, forge_settings, load_config, parse_target, resolve_passwords, user_config
+from .config import (Server, default_config, forge_settings, health_settings, load_config, parse_target,
+                     resolve_passwords, user_config)
 from .forge import ForgeSetup, Secret, cache_root, load_key
+from .health import HealthSetup
 from .prefs import Prefs
 
 DEMO_HINT = ("Three pretend servers to look around, and a pretend ReclaimerForge on F6. Click a player, try the "
@@ -57,12 +59,13 @@ def main() -> None:
                 typed.update({s.where: s.password for s in got})
                 a.by = a.by or by
         if demo:
-            from .demo import start_in_thread
+            from .demo import FakeHost, start_in_thread
             from .forgefake import start_demo
             scratch = Path(tempfile.mkdtemp(prefix="oni-rcon-demo-"))
             folders = [scratch / f"content-{i + 1}" for i in range(3)]  # each pretend server loads from its own
+            box = FakeHost()  # a pretend game box too: crashes and a memory squeeze for F7
             servers = [Server(port=p, password="demo", content_dir=str(d))
-                       for p, d in zip(start_in_thread(content_dirs=folders), folders)]
+                       for p, d in zip(start_in_thread(content_dirs=folders, host=box), folders)]
             hint = hint or DEMO_HINT
             url, key = start_demo()  # a pretend Forge too, with a pretend key: the real one is never touched
             forge = ForgeSetup(Secret(key), "the demo", url=url, poll=30, state_dir=scratch, cache_dir=scratch)
@@ -76,13 +79,15 @@ def main() -> None:
             for s in servers:
                 s.password = s.password or typed.get(s.where, "")
         resolve_passwords(servers)
-        if not demo:
-            forge = forge_setup(path)
+        if demo:
+            health = HealthSetup(service="blueflame-demo", source=box)
+        else:
+            forge, health = forge_setup(path), health_setup(path)
 
         from .app import OniApp
         prefs = Prefs.load(user_config().with_name("prefs.json"))
         result = OniApp(servers, by=a.by or cfg_by or login(), updater=updater, hint=hint, forge=forge, prefs=prefs,
-                        intro="off" if a.no_intro else a.intro or prefs.intro_mode()).run()
+                        intro="off" if a.no_intro else a.intro or prefs.intro_mode(), health=health).run()
         if result != "setup":
             return
         setup, updater = True, None  # + ADD SERVER: back to the setup screen, then round again; updates checked once
@@ -98,6 +103,14 @@ def forge_setup(path: Path | None) -> ForgeSetup:
         poll = 600.0
     return ForgeSetup(found.key, found.source, found.error, poll=poll, state_dir=user_config().parent,
                       cache_dir=cache_root(), config=path)
+
+
+def health_setup(path: Path | None) -> HealthSetup:
+    """The config's top-level health_* keys. A bad one stops the start with a message, rather than running without."""
+    try:
+        return HealthSetup.from_settings(health_settings(path))
+    except ValueError as e:
+        raise SystemExit(f"{path}: {e}") from None
 
 
 def login() -> str:

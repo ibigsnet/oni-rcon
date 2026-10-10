@@ -23,6 +23,7 @@ servers first.
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
 | **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked (trending and rising over the last 24 hours, 7 days or 30 days), or see the collections ReclaimerForge is featuring now, and search it. Each listing shows its type, authors, thumbs up and down, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. `i` install on this server · `l` load it now · `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID |
+| **F7 Health** | Whether the servers are crashing and the box is coping. CRASHES lists each server's latest crashes read from its log (time, server, class, how many players were on, whether the RCON connection dropped with it); HOST shows free memory, swap, the kernel's `oom_kill` counter and each container's start time and OOMKilled flag; WORKAROUND shows whether an optional systemd service is running. A new crash, an OOM kill or memory falling under your limit flashes a banner over every tab, goes in the feed and beeps. Needs `health_cmd` in the config: [see below](#health-watch) |
 
 Also:
 
@@ -40,8 +41,9 @@ Also:
   listing each one, and the console stays light enough for a web terminal: a card is redrawn only when what it shows
   changes, status polls are spread over 15 seconds instead of fired together, and servers sign in 8 at a time with
   jittered reconnects.
-- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down or something you installed
-  from Forge has been withdrawn; RED when a call for an admin or an anti-cheat hit comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
+- **An alert condition.** The masthead reads CONDITION GREEN; AMBER while a station is down, the host is short of memory
+  or something you installed from Forge has been withdrawn; RED when a call for an admin, an anti-cheat hit, a crash or
+  an OOM kill comes in. A server you aren't looking at pulses red and keeps a ⚑ count until you open it
   or the Intercepts tab.
 - **The Superintendent.** A small green face at the bottom of the sidebar, on every tab, that watches the feed of every
   server and reacts as an admin would: it welcomes a join, startles at a call for an admin, scowls at a cheat flag,
@@ -71,6 +73,8 @@ Also:
   oni-rcon won't trip it. RECONNECT on F3 asks for the password again before it tries.
 - **Medals count what the console has seen.** They're worked out from the kill feed, so a spree that started before
   oni-rcon connected isn't known, and a reconnect starts everyone's spree over.
+
+![Health tab: crashes read from the logs, the host's memory and the workaround service](docs/health.png)
 
 <p>
   <img src="docs/intercepts.png" alt="Intercepts tab: one feed of chat, kills, medals and joins from every server" width="49%">
@@ -189,6 +193,64 @@ ping_log = "docker logs -f --since 12h my-server-{port}"   # {port} = that serve
 It runs on the `ssh` host (or locally when there's none), is restarted if the connection drops, and stops with
 oni-rcon. Without it the column shows a dash. The dossier shows the same number as JOIN PING.
 
+### Health watch
+
+F7 reads each server's log and the box's memory, so a crash or a memory squeeze shows up where you're already looking.
+It needs one thing from you: `health_cmd`, a command that prints a small report for **one** server. Like `ping_log` it
+is a top-level key above the first `[table]`, `{port}` is the server's RCON port, and it runs on the server's `ssh`
+host (or on this machine without one). It runs once a minute (and soon after a server's RCON connection drops), and it
+only reads: nothing in oni-rcon restarts, kills or changes a server. `{since}` is how far back to read the log: a day
+the first time, a few minutes after.
+
+```toml
+health_cmd = '''
+c=my-server-{port}
+echo "host now=$(date +%s) clock=$(date -u +%T) mem_available_mb=$(awk '/^MemAvailable:/ {print int($2/1024)}' /proc/meminfo) oom_kill=$(awk '/^oom_kill / {print $2}' /sys/fs/cgroup/memory.events)"
+docker inspect -f 'container started={{.State.StartedAt}} finished={{.State.FinishedAt}} oom_killed={{.State.OOMKilled}} exit_code={{.State.ExitCode}} restarts={{.RestartCount}}' "$c"
+docker logs --timestamps --since {since} "$c" 2>&1
+'''
+health_min_free_mb = 1024            # alert when memory available falls under this (default 1024)
+health_service = "halo-blueflame"    # optional: a systemd service to watch; leave it out and its panel is hidden
+```
+
+[`oni-rcon.example.toml`](oni-rcon.example.toml) has a fuller docker example (with swap). The report is plain lines:
+
+| Line | Fields |
+|---|---|
+| `host ...` | `mem_available_mb`, `swap_used_mb`, `swap_total_mb`, `oom_kill` (the cgroup's `memory.events` counter), and `now` (epoch) with `clock` (`HH:MM:SS`, only needed to date a log line that has just a clock time) |
+| `container ...` | `started`, `finished`, `oom_killed`, `exit_code`, `restarts`, as `docker inspect` gives them |
+| anything else | a line of the server's log. With `docker logs --timestamps` every line carries its time |
+
+`host` and `container` can also be JSON lines: `{"kind": "host", "mem_available_mb": 812}`. Only the keys above are read.
+
+**What counts as a crash.** Three log lines make one, and the class says which fault it was:
+
+- **SIGNATURE** has the exception line with its code and RVA (`Experimental startup exception 0xC0000005 in halo3.dll at
+  RVA 0x14C73E`). That is the known crash of image 0.9.11 under Wine, caused by a player with the blue developer helmet.
+- **BARE** has only `Engine probe worker failed: exit code: 1`, no exception line before it. A different fault, listed
+  separately.
+- **OOM-KILL** is a container the kernel killed for memory: `OOMKilled` true or exit code 137. A rise in the host's
+  `oom_kill` counter shows as an OOM-KILL on HOST until a container's own flag says which server it was.
+- **CONTAINER-RESTART** is a container whose start time changed with no OOM kill to explain it. The game process
+  restarting after a crash is *not* a container restart: the container stays up.
+
+A line the log repeats counts once, and so does a crash that two reports both contain. PLAYERS is the count this
+console last saw before the crash. A dropped RCON connection means the server restarted, so a crash within 90 seconds
+of one is marked DROPPED and counted from just before the drop. Crashes from before you opened oni-rcon fill the table
+but don't alert.
+
+**Memory.** Red under `health_min_free_mb` (that's the alert, and it turns the masthead's CONDITION amber), amber under
+twice that. Swap is amber from a quarter used and red from half. `oom_kill` shows how far it has risen since you opened
+oni-rcon.
+
+**WORKAROUND** runs `systemctl is-active` and `journalctl` for the named unit (read-only) and shows whether it's active,
+the time of its last `moved tag` line and any `NOT the pinned build` line. It needs the ssh user to be allowed to read that
+journal; without `health_service` the panel is hidden.
+
+**Player IDs and IPv4 addresses are stripped from every log line the moment it arrives**, and only a time, an exception
+code, a module, an RVA and an exit code are kept. Nothing is written to disk. Without `health_cmd` the tab says how
+to turn it on.
+
 ## ReclaimerForge
 
 [ReclaimerForge](https://www.reclaimerforge.net) is the community catalog of forged maps, gametypes and playlists for
@@ -306,6 +368,9 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
   open the RCON port to the internet.
 - **Keep passwords out of files you commit.** Use `password_env` or `password_command`, and never `password`, in a
   config that lives in a repo. `oni-rcon.toml` is in `.gitignore`.
+- **F7 only reads.** `health_cmd` is your command, run as you on your host: keep it to `docker logs`, `docker inspect`
+  and the like. oni-rcon adds only `systemctl is-active` and `journalctl` for `health_service`. Player IDs and addresses
+  in logs are stripped before anything is shown or kept.
 - **Mind the tool limit.** A server admits 4 RCON tools at once, and oni-rcon uses one connection per server.
 - **Kicks and bans name you.** They go into the server's admin log under your `--by` name.
 - **Your Forge key goes to reclaimerforge.net and nowhere else.** It travels in the `Authorization` header over HTTPS:
@@ -318,11 +383,11 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 
 | Key | Action |
 |---|---|
-| `F1`–`F6` | Assets · Intercepts · Operations · Blacklist · Console · Forge |
+| `F1`–`F7` | Assets · Intercepts · Operations · Blacklist · Console · Forge · Health |
 | `1`–`9` | select server |
 | `g` | go to any server: the list puts the busiest first and filters as you type |
 | `Ctrl+B` | broadcast |
-| `Ctrl+R` | refresh now |
+| `Ctrl+R` | refresh now (on F7, read every health report now) |
 | `Ctrl+P` | command palette |
 | `?` | the field manual: what everything does, in plain words |
 | `x` | show or hide player addresses |
@@ -331,7 +396,7 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
 | `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (including FAVOURITES and INSTALLED HERE), time window, next page, API key, copy listing ID |
-| any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good, `--intro full` plays all of it once) |
+| any key | skip the boot sequence; `F1`–`F7` also open that tab (`--no-intro` skips it for good, `--intro full` plays all of it once) |
 | `Ctrl+Q` | quit |
 
 ## Field names
@@ -349,6 +414,9 @@ uv run oni-rcon --demo
 ```
 
 The demo servers (`oni_rcon/demo.py`) speak the same protocol as a real server and are what the tests run against.
+`FakeHost` beside them is a pretend game box for F7: it prints the report a `health_cmd` would, and on a timeline gives
+the first server a SIGNATURE crash, the second a BARE one and then the host a memory squeeze, really dropping their RCON
+connections. `oni-rcon --demo` starts it about 7, 13 and 19 seconds in.
 `oni_rcon/forgefake.py` is a pretend ReclaimerForge, serving the API as `oni_rcon/forge.py` reads it, so neither the
 tests nor `--demo` ever reach the real site. Where the developer docs leave a field name or a page shape open, the
 assumption is written down at the top of `forge.py`.

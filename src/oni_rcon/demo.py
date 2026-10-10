@@ -264,23 +264,108 @@ class Fake:
                                                               + (f" {target['name']}" if subject == "kick" else ""))
 
 
-async def serve_fakes(password: str = "demo", tick: bool = True, specs=SERVERS,
-                      content_dirs: list | None = None) -> tuple[list[int], list]:
-    """Start the fake servers in the running loop; returns (ports, handles to keep alive)."""
-    ports, keep = [], []
+def iso(t: float) -> str:
+    """A time as docker --timestamps writes it."""
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 1e9):09d}Z"
+
+
+class FakeHost:
+    """A pretend game box for --demo and the tests: the report a health_cmd would print for each fake server (the
+    host's memory, the container, the server's log), and a timeline that makes the HEALTH tab worth looking at: a
+    SIGNATURE crash on the first server, a BARE one on the second, then the host running short of memory. A crash
+    really drops the server's RCON connections, and its players come back after the 5 s the real one takes."""
+
+    def __init__(self, signature_at: float = 7.0, bare_at: float = 13.0, squeeze_at: float = 19.0, rejoin: float = 5.0,
+                 autorun: bool = True):
+        self.at, self.rejoin, self.autorun = (signature_at, bare_at, squeeze_at), rejoin, autorun
+        self.fakes: dict[int, Fake] = {}
+        self.logs: dict[int, list[str]] = {}
+        self.started: dict[int, float] = {}
+        self.avail, self.swap_used, self.swap_total, self.oom = 3400, 120, 2048, 0
+        self.crashed: list[tuple[str, int]] = []  # (class, port), as they happened
+
+    def attach(self, ports: list[int], fakes: list[Fake]) -> None:
+        now = time.time()
+        for port, fake, age in zip(ports, fakes, (5 * 3600, 3 * 3600 + 1200, 11 * 3600)):
+            self.fakes[port], self.logs[port], self.started[port] = fake, [], now - age
+
+    async def run(self) -> None:
+        """The timeline. The first two ports are the ones that crash; the third just carries on."""
+        ports = list(self.fakes)
+        t0 = time.monotonic()
+        for when, what in zip(self.at, ("signature", "bare", "squeeze")):
+            await asyncio.sleep(max(0.0, when - (time.monotonic() - t0)))
+            if what == "squeeze":
+                self.avail, self.swap_used = 640, 1300
+            else:
+                await self.crash(ports[0 if what == "signature" else 1], what == "signature")
+
+    async def crash(self, port: int, signature: bool) -> None:
+        """What 0.9.11 under Wine does when a player with the blue developer helmet joins: the game process dies and
+        restarts, the container doesn't, and every player is dropped."""
+        fake, t = self.fakes[port], int(time.time())
+        name, clock = fake.status["name"], time.strftime("%H:%M:%S", time.gmtime(t))
+        if signature:  # docker's own timestamps on every line
+            lines = [f"{iso(t)} Experimental startup exception 0xC0000005 in halo3.dll at RVA 0x14C73E",
+                     f"{iso(t)} Error: Engine probe worker failed: exit code: 1",
+                     f"{iso(t)} {clock} [{name}] stopped (exit code: 1); restarting in 5 s."]
+        else:  # the other fault, with no exception line, and a log with no timestamps but the one on the stop line
+            lines = ["Error: Engine probe worker failed: exit code: 1",
+                     f"{clock} [{name}] stopped (exit code: 1); restarting in 5 s."]
+        self.logs[port] += lines
+        self.crashed.append(("SIGNATURE" if signature else "BARE", port))
+        crowd = len(fake.players)
+        for ws in list(fake.clients):
+            await ws.close()
+        fake.players = []
+        fake._renumber()
+        await asyncio.sleep(self.rejoin)
+        fake.players = [fake._player(n) for n in random.sample(CALLSIGNS, crowd)]
+        fake._renumber()
+
+    async def report(self, port: int, since: str = "") -> str:
+        n = int(time.time())
+        fake = self.fakes[port]
+        lines = [f"host now={n} clock={time.strftime('%H:%M:%S', time.gmtime(n))} mem_available_mb={self.avail} "
+                 f"swap_used_mb={self.swap_used} swap_total_mb={self.swap_total} oom_kill={self.oom}",
+                 f"container started={iso(self.started[port])} finished=0001-01-01T00:00:00Z oom_killed=false "
+                 f"exit_code=0 restarts=0",
+                 # a join, as the server logs it: the console must read around the ID and the address
+                 f"{iso(n - 3600)} [{fake.status['name']}] Bob connected from 203.0.113.9 "
+                 f"(player ID {'ab12' * 16}, ping 77 ms)."]
+        return "\n".join(lines + self.logs[port])
+
+    async def service(self, unit: str) -> str:
+        """What systemctl and journalctl say about the workaround service."""
+        t = time.time()
+        stamp = lambda ago: time.strftime("%Y-%m-%dT%H:%M:%S+0000", time.gmtime(t - ago))
+        return (f"active\n{stamp(7200)} demo-box {unit}[412]: moved tag halo-latest to 0.9.11\n"
+                f"{stamp(1800)} demo-box {unit}[412]: running 0.9.12-rc1, NOT the pinned build 0.9.11")
+
+
+async def serve_fakes(password: str = "demo", tick: bool = True, specs=SERVERS, content_dirs: list | None = None,
+                      host: FakeHost | None = None) -> tuple[list[int], list]:
+    """Start the fake servers in the running loop; returns (ports, handles to keep alive). A `host` gets them
+    attached, and its timeline started (unless it says it'll be started by hand)."""
+    ports, keep, fakes = [], [], []
     for i, (name, max_players, crowd) in enumerate(specs):
         fake = Fake(name, password, max_players, crowd, str(content_dirs[i]) if content_dirs else "")
         server = await serve(fake.handler, "127.0.0.1", 0)
         ports.append(server.sockets[0].getsockname()[1])
+        fakes.append(fake)
         keep += [fake, server] + ([asyncio.create_task(fake.tick())] if tick else [])
+    if host:
+        host.attach(ports, fakes)
+        if host.autorun:  # else whoever holds it starts the timeline, with run()
+            keep.append(asyncio.create_task(host.run()))
     return ports, keep
 
 
-def start_in_thread(password: str = "demo", content_dirs: list | None = None) -> list[int]:
+def start_in_thread(password: str = "demo", content_dirs: list | None = None, host: FakeHost | None = None) -> list[int]:
     ports, ready = [], threading.Event()
 
     async def main():
-        p, _keep = await serve_fakes(password, content_dirs=content_dirs)
+        p, _keep = await serve_fakes(password, content_dirs=content_dirs, host=host)
         ports.extend(p)
         ready.set()
         await asyncio.Future()
