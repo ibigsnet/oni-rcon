@@ -17,7 +17,7 @@ from functools import lru_cache
 
 from rich.text import Text
 
-from .archive import superintendent as face_grid
+from .archive import superintendent as face_grid, superintendent_at
 from .art import AMBER, CYAN, DIM, GREEN, GREY, RED, WHITE, fit, noise, pixels
 
 MINI, SMALL, BIG, LARGE, XL, HUGE = 8, 12, 16, 24, 32, 40  # pixels across the face, and so cells wide: 4 to 20 rows
@@ -95,13 +95,14 @@ def ease_pop(p: float) -> float:
 
 def face(e: Expr, n: int = SMALL) -> Text:
     """The face as half-block text, n cells wide and n/2 rows tall: the design's 48 pixel picture, a green disc,
-    scanlined, with two white eyes, averaged down to n pixels (1:1 at 48)."""
+    scanlined, with two white eyes: the design's own 48 pixel picture at 48, and under that drawn pixel by pixel from
+    the same shapes (archive.superintendent_at), so every pixel is one of its tones and the edges stay crisp."""
     return _face(replace(e, **{k: round(v, 2) for k, v in vars(e).items() if isinstance(v, float)}), n)
 
 
 @lru_cache(maxsize=512)
 def _face(e: Expr, n: int) -> Text:  # a blink or a glance takes a few dozen distinct pictures: each is drawn once
-    return pixels(fit(face_grid(e), n // 2, n))
+    return pixels(superintendent_at(e, n) if n < 48 else fit(face_grid(e), n // 2, n))
 
 
 @dataclass
