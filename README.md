@@ -49,9 +49,16 @@ Also:
   The word under it says how it feels, and the words beside it say what it reacted to, with addresses redacted like
   everywhere else. It blinks now and then. It takes a moment to settle into each mood and then relaxes, a busy fleet
   doesn't make it flicker, and an alert pulses it red until it's over. It is drawn the way the emblem is, from the
-  Halo ASCII archive piece, and it never goes away: it grows to 16 pixels across when the terminal is tall enough,
-  shrinks to 12 and then 8 as it gets short, and the station list scrolls to make room before the Superintendent or
+  Halo ASCII archive piece, and it never goes away: it grows up to 40 pixels across when the terminal is tall enough (the words go
+  under the larger faces), shrinks to 16, 12 and then 8 as it gets short, and the station list scrolls to make room before the Superintendent or
   the operator line does. With `TEXTUAL_ANIMATIONS=none` it changes expression at once and never blinks.
+- **The Halo ASCII Archive.** The first time you start it the boot plays the whole archive from the design project:
+  the ONI emblem, Section Three's lattice, Installation 04 turning, 343 Guilty Spark and the Superintendent decrypt one
+  file at a time (about 30 seconds, any key skips it), then the emblem returns for the clearance check. After that
+  every start is the quick boot, the emblem and the clearance check, so you're in at once. **Ctrl+P, "Boot sequence"**
+  switches to playing the full archive every time (handy if you leave the screen up); `--intro full|quick|off` decides
+  it for one run. It's kept in `prefs.json` next to the config file, and with `TEXTUAL_ANIMATIONS=none` the archive
+  never plays.
 - **Broadcast to one server or all.** `Ctrl+B`. `@all` messages and commands go out 4 servers at a time, each reply
   goes in the command log on one line, and a tally closes it ("79 stations · 77 ok · 2 no reply yet"). A command that
   gets no reply in 10 seconds is never resent, and if its reply comes later the log shows it.
@@ -324,7 +331,7 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
 | `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
 | `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (including FAVOURITES and INSTALLED HERE), time window, next page, API key, copy listing ID |
-| any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good) |
+| any key | skip the boot sequence; `F1`–`F6` also open that tab (`--no-intro` skips it for good, `--intro full` plays all of it once) |
 | `Ctrl+Q` | quit |
 
 ## Field names

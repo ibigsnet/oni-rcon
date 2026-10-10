@@ -10,6 +10,7 @@ from pathlib import Path
 from . import __version__, update
 from .config import Server, default_config, forge_settings, load_config, parse_target, resolve_passwords, user_config
 from .forge import ForgeSetup, Secret, cache_root, load_key
+from .prefs import Prefs
 
 DEMO_HINT = ("Three pretend servers to look around, and a pretend ReclaimerForge on F6. Click a player, try the "
              "buttons, and press ? for a guide. When you're ready, + ADD SERVER (left) connects your own.")
@@ -25,7 +26,10 @@ def main() -> None:
     ap.add_argument("--by", help="your name in the server's admin log (default: config `by`, then your login)")
     ap.add_argument("--demo", action="store_true", help="run against three simulated servers, no setup needed")
     ap.add_argument("--setup", action="store_true", help="add servers with the setup screen")
-    ap.add_argument("--no-intro", action="store_true", help="skip the boot sequence")
+    ap.add_argument("--intro", choices=["full", "quick", "off"],
+                    help="the boot sequence this time: full (the Halo archive, then clearance), quick, or off "
+                         "(default: full the first time, quick after; Ctrl+P changes that)")
+    ap.add_argument("--no-intro", action="store_true", help="skip the boot sequence (--intro off)")
     ap.add_argument("-V", "--version", action="version", version=f"oni-rcon {__version__}")
     a = ap.parse_args()
 
@@ -76,8 +80,9 @@ def main() -> None:
             forge = forge_setup(path)
 
         from .app import OniApp
-        result = OniApp(servers, by=a.by or cfg_by or login(), intro=not a.no_intro, updater=updater,
-                        hint=hint, forge=forge).run()
+        prefs = Prefs.load(user_config().with_name("prefs.json"))
+        result = OniApp(servers, by=a.by or cfg_by or login(), updater=updater, hint=hint, forge=forge, prefs=prefs,
+                        intro="off" if a.no_intro else a.intro or prefs.intro_mode()).run()
         if result != "setup":
             return
         setup, updater = True, None  # + ADD SERVER: back to the setup screen, then round again; updates checked once

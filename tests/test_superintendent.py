@@ -3,8 +3,9 @@ import io
 
 import pytest
 
+from oni_rcon import archive
 from oni_rcon import superintendent as sp
-from oni_rcon.superintendent import BIG, MINI, SMALL, Expr, Superintendent, card, classify, face
+from oni_rcon.superintendent import BELOW, BIG, HUGE, LARGE, MINI, SMALL, XL, Expr, Superintendent, card, classify, face
 
 CHEAT = {"event": "cheat", "name": "Lark", "text": "speed out of range"}
 JOIN = {"event": "join", "name": "Kestrel"}
@@ -40,15 +41,24 @@ def test_what_earns_a_reaction(ev, key):
 
 
 def test_the_face_is_drawn_the_way_the_design_draws_it():
-    for n in (SMALL, BIG):
+    for n in (SMALL, BIG, LARGE):
         lines = face(Expr(), n).plain.split("\n")
         assert len(lines) == n // 2 and all(len(r) == n for r in lines)  # n cells wide, half as many rows
     looks = (face(e) for e in (Expr(), Expr(openL=0, openR=0), Expr(happy=True), Expr(size=1.28)))
     assert len({(t.plain, tuple((s.start, s.end, str(s.style)) for s in t.spans)) for t in looks}) == 4  # all differ
-    assert sp.EYE in colours(face(Expr())) and sp.EYE not in colours(face(Expr(openL=0, openR=0)))  # a blink has none
-    green, red = colours(face(Expr(alarm=0.2))), colours(face(Expr(alarm=0.9)))
-    assert sp.GREENS["b"] in green and sp.REDS["b"] not in green  # a clean flip between two palettes,
-    assert sp.REDS["b"] in red and sp.GREENS["b"] not in red  # never a muddy halfway
+    assert archive.FACE_EYE in colours(face(Expr(), BIG))  # open eyes are white all the way through,
+    assert archive.FACE_EYE not in colours(face(Expr(openL=0, openR=0), BIG))  # and a blink leaves only a slit
+
+    def redness(text) -> int:  # the most red over green any colour in the face has
+        return max(int(c[1:3], 16) - int(c[3:5], 16) for c in colours(text) if c.startswith("#"))
+    assert redness(face(Expr(alarm=0.9), BIG)) > 0 > redness(face(Expr(alarm=0), BIG))  # the rim flushes red in alarm
+
+
+def test_the_face_is_the_designs_at_48_and_smoothed_below():
+    """1:1 at the design's 48 pixels; smaller sizes average it down, so an edge is a blend and not a stair."""
+    full = face(Expr(), 48)
+    assert len(full.plain.split("\n")) == 24 and archive.FACE_EYE in colours(full)
+    assert len(colours(face(Expr(), BIG))) > len(colours(face(Expr(), 48))) // 2  # blends: more than the five tones
 
 
 def test_a_reaction_eases_in_holds_and_relaxes():
@@ -139,6 +149,20 @@ def test_the_card_fits_its_room(n, width):
     assert card(sup, width, n)[1] != key
 
 
+@pytest.mark.parametrize("n,width", [(LARGE, 28), (XL, 33), (HUGE, 43)])
+def test_a_large_face_puts_its_words_underneath(n, width):
+    sup, t = clock()
+    sup.react(CHEAT, "Lark: speed out of range at the red base ramp again, third time this round " * 2)
+    t[0] += 1
+    out, key = card(sup, width, n)
+    lines = out.plain.split("\n")
+    below = lines[n // 2:]
+    assert len(lines) == n // 2 + BELOW and all(len(line) <= width for line in lines)  # one steady height
+    assert below[0].strip() == "SUPERINTENDENT" and below[1].strip() == "HOSTILE" and below[3].strip().endswith("…")
+    assert abs(below[0].index("S") - (width - 14) / 2) <= 1  # centred under the face
+    assert card(sup, width, n)[1] == key
+
+
 def test_quiet_says_so():
     sup, _ = clock()
     out, _ = card(sup, 27, SMALL)
@@ -189,8 +213,9 @@ def test_the_superintendent_is_always_there():
                 for tab in ("f1", "f2", "f3", "f4", "f5", "f6"):
                     await pilot.press(tab)
                     await pilot.pause(0.1)
-                    check_there(app, f"{size} on {tab}", app.sup_size() // 2)
-                assert app.sup_size() == {20: MINI, 24: MINI, 30: SMALL, 36: SMALL, 50: BIG, 60: BIG}[size[1]], size
+                    check_there(app, f"{size} on {tab}", app.sup_rows() - 2)
+                assert app.sup_size() == {(100, 20): MINI, (100, 24): MINI, (120, 30): SMALL, (120, 36): SMALL, (170, 50): XL,
+                                          (210, 60): HUGE}[size], size  # the biggest faces need height; the largest, width
     asyncio.run(go())
 
 
@@ -207,7 +232,7 @@ def test_it_stays_even_in_a_fleet():
             async with app.run_test(size=size) as pilot:
                 assert await until(pilot, lambda: sum(st.online for st in app.stations) >= 12)
                 await pilot.pause(0.3)
-                check_there(app, f"fleet {size}", app.sup_size() // 2)
+                check_there(app, f"fleet {size}", app.sup_rows() - 2)
     asyncio.run(go())
 
 
