@@ -194,41 +194,82 @@ def spark(yaw: float, bob: float, glow: float) -> Grid:
     return out
 
 
-def superintendent(e) -> Grid:
-    """The Superintendent: a green disc, scanlined face, two white eyes that blink, glance, smile and widen. `e` is
-    a superintendent.Expr (size, ex, ey, lid, tilt, happy, openL, openR, alarm)."""
-    N, cx, cy, R, al = 48, 24, 24, 22.5, e.alarm
+def face_tones(e) -> dict[str, str]:
+    """The face's five tones; in alarm the rim flushes toward red."""
+    al = e.alarm
 
     def rim(c: str) -> str:
         return blend(c, RED if al > 0.5 else c, 1 - al * 0.6) if al > 0 else c
-    tone = {"a": rim("#7FD18F"), "b": rim("#A8E8B2"), "c": rim("#4E8F5E"), "d": rim("#24482D"), "e": rim("#2D5A38")}
-    out: Grid = []
-    for y in range(N):
+    return {"a": rim("#7FD18F"), "b": rim("#A8E8B2"), "c": rim("#4E8F5E"), "d": rim("#24482D"), "e": rim("#2D5A38"),
+            "w": FACE_EYE}
+
+
+def face_class(e, px: float, py: float, apart: float = 0.0) -> str | None:
+    """What the design's face is at a point in its 48 pixel space: None outside the disc, "w" an eye, "a" "b" "c"
+    the rim from the edge in, "d" or "e" the scanlines (by the pixel row the point is in). `apart` is a gap, in design
+    pixels, kept clear between the eyes: wide eyes touch at small sizes, where the design's sliver between them
+    is under a pixel."""
+    R, d = 22.5, math.hypot(px - 24, py - 24)
+    if d > R:
+        return None
+    for side in (-1, 1):
+        if abs(px - 24 - e.ex) < apart:  # the gap between the eyes, which glance with them
+            break
+        r = 6.4 * e.size
+        dx, dy = (px - (24 + side * 8.6 + e.ex)) / r, (py - (24 + e.ey)) / r
+        if e.happy:
+            dd = math.hypot(dx, dy * 1.1)
+            if dd <= 1 and dd >= 0.52 and dy <= 0.08:
+                return "w"
+        elif (math.hypot(dx, dy / max(e.openL if side < 0 else e.openR, 0.1)) <= 1
+              and dy >= -1 + 2 * e.lid + e.tilt * -side * dx):
+            return "w"
+    return "a" if d > R - 1.3 else "b" if d > R - 2.8 else "c" if d > R - 4.4 else "d" if int(py) % 2 else "e"
+
+
+def superintendent(e) -> Grid:
+    """The Superintendent: a green disc, scanlined face, two white eyes that blink, glance, smile and widen. `e` is
+    a superintendent.Expr (size, ex, ey, lid, tilt, happy, openL, openR, alarm)."""
+    tone = face_tones(e)
+    return [[None if (c := face_class(e, x + 0.5, y + 0.5)) is None else tone[c] for x in range(48)] for y in range(48)]
+
+
+def superintendent_at(e, n: int, s: int = 4) -> Grid:
+    """The same face at n pixels across, drawn pixel by pixel from the design's own shapes. Averaging its 48 pixels
+    down would smear the eyes and rim into mush, so each pixel looks at s x s points of the design instead: it's
+    the disc where over half is face, and an eye where half is eye (a third for a smile's thin arc), so the edge and
+    the eyes stay crisp, with nothing of the eyes mixed into what's around them. The rest is the rim and the
+    scanline: under 24 pixels the rim's two bright tones are too thin to tell apart, so each pixel is whichever of
+    the rim, its inner ring and the scanline most of it is; from 24 up the tones blend smoothly."""
+    tone, k = face_tones(e), 45 / n  # the design's disc is 45 of its 48: here it fills the n exactly
+    gap = max(2.2, k) if e.size > 1.15 else 2.2  # normal eyes' own gap; wide ones, a whole pixel
+    eye = 3 if e.happy else 2
+    rows: Grid = []
+    for j in range(n):
         row: list[str | None] = []
-        for x in range(N):
-            px, py = x + 0.5, y + 0.5
-            d = math.hypot(px - cx, py - cy)
-            if d > R:
+        for i in range(n):
+            votes: dict[str | None, int] = {}
+            for b in range(s):
+                for a in range(s):
+                    c = face_class(e, 24 + (i + (a + 0.5) / s - n / 2) * k, 24 + (j + (b + 0.5) / s - n / 2) * k, gap)
+                    c = "in" if c in ("d", "e") else c
+                    votes[c] = votes.get(c, 0) + 1
+            if votes.get(None, 0) * 2 > s * s:
                 row.append(None)
-                continue
-            hit = False
-            for side in (-1, 1):
-                r = 6.4 * e.size
-                dx, dy = (px - (cx + side * 8.6 + e.ex)) / r, (py - (cy + e.ey)) / r
-                if e.happy:
-                    dd = math.hypot(dx, dy * 1.1)
-                    hit = hit or (dd <= 1 and dd >= 0.52 and dy <= 0.08)
-                else:
-                    open_ = e.openL if side < 0 else e.openR
-                    if math.hypot(dx, dy / max(open_, 0.1)) <= 1:
-                        hit = hit or dy >= -1 + 2 * e.lid + e.tilt * -side * dx
-            if hit:
+            elif votes.get("w", 0) * eye >= s * s:
                 row.append(FACE_EYE)
-            else:
-                row.append(tone["a"] if d > R - 1.3 else tone["b"] if d > R - 2.8 else tone["c"] if d > R - 4.4
-                           else tone["d"] if y % 2 else tone["e"])
-        out.append(row)
-    return out
+            elif n < 24:
+                got = {"r": votes.get("a", 0) + votes.get("b", 0), "c": votes.get("c", 0), "in": votes.get("in", 0)}
+                best = max(got, key=got.get)  # a tie goes to the outer one: dicts keep their order
+                row.append(tone["b"] if best == "r" else tone["c"] if best == "c" else tone["d" if j % 2 else "e"])
+            else:  # the face around the eyes, averaged: the scanline by this pixel's own row
+                mix = [(tone["d" if j % 2 else "e"] if c == "in" else tone[c], v) for c, v in votes.items()
+                       if c not in (None, "w")]
+                total = sum(v for _, v in mix)
+                rgb = [sum(int(c[1 + 2 * q:3 + 2 * q], 16) * v for c, v in mix) / total for q in range(3)]
+                row.append("#" + "".join(f"{round(v):02X}" for v in rgb))
+        rows.append(row)
+    return rows
 
 
 def super_mood(lt: float) -> tuple[str, str]:

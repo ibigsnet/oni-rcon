@@ -54,11 +54,32 @@ def test_the_face_is_drawn_the_way_the_design_draws_it():
     assert redness(face(Expr(alarm=0.9), BIG)) > 0 > redness(face(Expr(alarm=0), BIG))  # the rim flushes red in alarm
 
 
-def test_the_face_is_the_designs_at_48_and_smoothed_below():
-    """1:1 at the design's 48 pixels; smaller sizes average it down, so an edge is a blend and not a stair."""
+def test_the_face_is_the_designs_at_48_and_crisp_below():
+    """1:1 at the design's 48 pixels. Smaller faces are drawn from the same shapes: under 24 pixels with only its
+    tones, above that with the rim blended but the eyes and edge still hard, never averaged into a halo."""
     full = face(Expr(), 48)
     assert len(full.plain.split("\n")) == 24 and archive.FACE_EYE in colours(full)
-    assert len(colours(face(Expr(), BIG))) > len(colours(face(Expr(), 48))) // 2  # blends: more than the five tones
+    tones = set(archive.face_tones(Expr()).values())
+    for n in (MINI, SMALL, BIG):
+        used = {c for c in colours(face(Expr(), n)) if len(c) == 7 and c.startswith("#")}
+        assert used <= tones and archive.FACE_EYE in used, n
+    for n in (LARGE, XL, HUGE):
+        grid = archive.superintendent_at(Expr(), n)
+        eyes = {c for row in grid for c in row if c is not None and sum(int(c[i:i + 2], 16) for i in (1, 3, 5)) > 650}
+        assert eyes == {archive.FACE_EYE}, n  # the only near-white is the eye itself: no halo of blends round it
+
+
+@pytest.mark.parametrize("n", [MINI, SMALL, BIG, LARGE, XL, HUGE])
+def test_small_eyes_stay_apart_and_a_smile_stays_a_smile(n):
+    def eyes(e):  # the columns that have an eye pixel in them
+        g = archive.superintendent_at(e, n)
+        return sorted({x for row in g for x, c in enumerate(row) if c == archive.FACE_EYE})
+    wide, smile = eyes(Expr(size=1.28, ey=-1.5, ex=0)), eyes(Expr(happy=True))
+    assert any(b - a > 1 for a, b in zip(wide, wide[1:])) and wide[0] < n // 2 - 1 and wide[-1] > n // 2  # two eyes
+    assert smile and (n >= XL or not eyes(Expr(openL=0, openR=0)))  # a smile still shows; a blink has none (a slit, big)
+    rows = archive.superintendent_at(Expr(), n)
+    assert rows[0][n // 2] is not None or rows[1][n // 2] is not None  # the disc reaches the top
+    assert rows[0][0] is None and rows[0][-1] is None and rows[-1][0] is None  # and is round, not square
 
 
 def test_a_reaction_eases_in_holds_and_relaxes():
