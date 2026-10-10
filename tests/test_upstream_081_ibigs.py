@@ -7,6 +7,7 @@ from oni_rcon.tenant import TenantApp
 
 
 @pytest.mark.parametrize('tenant,flags,mode', [(True, [], 'full'), (True, ['--intro', 'quick'], 'quick'),
+                                             (True, ['--intro=off'], 'off'),
                                              (True, ['--intro', 'full', '--no-intro'], 'off'),
                                              (False, ['--no-intro'], 'off')])
 def test_cli_keeps_tenant_controls_and_intro_precedence(monkeypatch, tmp_path, tenant, flags, mode):

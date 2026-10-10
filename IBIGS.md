@@ -56,7 +56,7 @@ Fleet mode does **not yet stream native chat or kill events**. The Intercepts pa
 
 The container is built locally as `ibigs/reclaimer-terminal`, uses an immutable image tag, runs unprivileged with a read-only filesystem and resource limits, exposes no ports, and removes itself when the terminal closes. Existing sessions keep their original image when the launcher is updated.
 
-The 0.8.1 integration includes the upstream Halo archive and larger Superintendent. Reduced motion remains the IBIGS default. Run `TEXTUAL_ANIMATIONS=full oni --intro full` to enable the archive; `--intro quick` and `--no-intro` select shorter startup. Boot preferences persist separately from the customer Forge key.
+The 0.8.1 integration includes the upstream Halo archive and larger Superintendent. Reduced motion remains the IBIGS default. Run `TEXTUAL_ANIMATIONS=full oni --intro full` to enable the archive; `--intro quick` and `--no-intro` select shorter startup. The customer wrapper keeps automatic lobby discovery when `--intro` is supplied. Boot preferences persist separately from the customer Forge key.
 
 ## Source and maintenance
 
