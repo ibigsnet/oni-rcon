@@ -25,6 +25,7 @@ class Server:
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
     # not a [[server]] key (older versions refuse unknown ones): set from the top-level ping_log by load_config
     ping_log: list[str] = field(default_factory=list, init=False)
+    health_cmd: list[str] = field(default_factory=list, init=False)
 
     def __post_init__(self):
         if not (self.url or self.port):
@@ -79,6 +80,13 @@ def load_config(path: Path) -> tuple[str, list[Server]]:
                 s.ping_log = [] if s.url else ping_command(tmpl, s.port)
         except ValueError as exc:
             raise SystemExit(f"{path}: {exc}") from None
+    cmd = data.get("health_cmd")
+    if cmd not in (None, "", []):
+        try:
+            for s in servers:
+                s.health_cmd = [] if s.url else health_command(cmd, s.port)
+        except ValueError as exc:
+            raise SystemExit(f"{path}: {exc}") from None
     return data.get("by", ""), servers
 
 
@@ -88,6 +96,14 @@ def ping_command(value, port: int) -> list[str]:
             or not all(isinstance(arg, str) and arg and len(arg) <= 4096 and '\x00' not in arg for arg in value)):
         raise ValueError('ping_log must be an explicit argument list; shell commands are disabled')
     return [arg.replace('{port}', str(port)) for arg in value]
+
+
+def health_command(value, port: int) -> list[str]:
+    """Health reports use the same explicit argument boundary as join logs."""
+    try:
+        return ping_command(value, port)
+    except ValueError:
+        raise ValueError('health_cmd must be an explicit argument list; shell commands are disabled') from None
 
 
 def resolve_passwords(servers: list[Server]) -> None:
@@ -151,6 +167,17 @@ def forge_settings(path: Path | None) -> dict:
     except (OSError, TypeError, tomllib.TOMLDecodeError):
         return {}
     return {k: v for k, v in data.items() if k.startswith("forge_")}
+
+
+def health_settings(path: Path | None) -> dict:
+    """The config file's top-level health_* keys (health_min_free_mb, health_service). Top level only: an older
+    oni-rcon exits on a key it doesn't know inside [defaults] or [[server]], and ignores one out here."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if k.startswith("health_") and k != "health_cmd"}
 
 
 def write_atomic(path: Path, text: str, private: bool = False) -> None:
