@@ -1,6 +1,6 @@
 # IBIGS Reclaimer terminal
 
-## Customer VPS controls (0.7.0+ibigs.3)
+## Customer VPS controls (0.8.1+ibigs.1)
 
 Customers run `oni` in their VPS. F6 opens ReclaimerForge with their own API key; F7 starts and stops their lobbies;
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
@@ -56,9 +56,11 @@ Fleet mode does **not yet stream native chat or kill events**. The Intercepts pa
 
 The container is built locally as `ibigs/reclaimer-terminal`, uses an immutable image tag, runs unprivileged with a read-only filesystem and resource limits, exposes no ports, and removes itself when the terminal closes. Existing sessions keep their original image when the launcher is updated.
 
+The 0.8.1 integration includes the upstream Halo archive and larger Superintendent. Reduced motion remains the IBIGS default. Run `TEXTUAL_ANIMATIONS=full oni --intro full` to enable the archive; `--intro quick` and `--no-intro` select shorter startup. Boot preferences persist separately from the customer Forge key.
+
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.7.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.7.0), upstream commit `dfd7a6124f510139f00377c3aff5fadc05802918`. This source version is `0.7.0+ibigs.2`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.8.1](https://github.com/viik2k/oni-rcon/releases/tag/v0.8.1), upstream commit `ee5cbe60e0a55cd45b303f2d365144f373525fd3`. This source version is `0.8.1+ibigs.1`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.

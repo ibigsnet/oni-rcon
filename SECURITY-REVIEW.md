@@ -1,3 +1,7 @@
+# Source review — 2026-10-10, upstream 0.8.1
+
+Reviewed upstream range `dfd7a6124f510139f00377c3aff5fadc05802918` (0.7.0) through `ee5cbe60e0a55cd45b303f2d365144f373525fd3` (0.8.1). The changes add generated Halo archive artwork, boot preferences and sidebar sizing/rendering. They add no dependencies, network destinations, subprocess paths or runtime privileges. Boot preferences use the existing owner-only atomic writer. IBIGS retains reduced motion by default, pre-layout sidebar sizing, tenant/fleet selection, the injected RCON adapter and disabled upstream binary updates. Customer schedules and fixed maintenance actions remain local to their VPS. This is source review, not a formal audit or verification of upstream executables.
+
 # Source review — 2026-10-09, upstream 0.7.0
 
 The 0.7.0+ibigs.2 performance pass keeps all network/authentication and write-confirmation boundaries. It bounds the pre-layout terminal log queue as well as rendered history, releases unselected fleet detail caches, and coalesces overview work by snapshot generation. Native player polling stays at three seconds. Selected controls repaint immediately on disconnect; hidden views refresh before use. The pre-F7 performance suite passed 149 tests, including unchanged command targets, redaction after hidden-panel transitions, bounded hidden logs, preserved scrollback, and process cleanup. No runtime dependencies changed.
