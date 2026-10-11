@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import time
+import shlex
 import unicodedata
 
 from rich.text import Text
@@ -13,19 +14,48 @@ from textual.widgets import Button, DataTable, Input, Static
 from .app import Dialog
 
 
+def normalized(value):
+    return unicodedata.normalize('NFKC', str(value or '')).casefold()
+
+
+def player_tag(player):
+    return player.get('service_tag') or player.get('tag') or ''
+
+
+def filter_terms(query):
+    try:
+        return shlex.split(normalized(query))
+    except ValueError:
+        # Keep filtering while a quoted phrase is still being typed.
+        return normalized(query).replace('"', '').replace("'", '').split()
+
+
 def matching_players(directory, query='', now=None):
+    """AND every token against one player; quoted phrases stay together."""
     now = time.time() if now is None else now
-    query = unicodedata.normalize('NFKC', query.strip()).casefold()
+    terms = filter_terms(query)
     matches = []
     for player in directory.get('players', []):
         server = player.get('server', {})
         if server.get('state') != 'ready' or not 0 <= now - (server.get('observed_at') or 0) <= 30:
             continue
-        name = unicodedata.normalize('NFKC', player['name']).casefold()
-        if not query or query in name or query in player['id'].casefold():
+        fields = {key: normalized(value) for key, value in {
+            'name': player.get('name'), 'tag': player_tag(player),
+            'clan': player.get('clan_tag'), 'team': player.get('team'),
+            'id': player.get('id'), 'server': server.get('name'),
+            'node': server.get('node'), 'port': server.get('port'),
+        }.items()}
+        def matches_term(term):
+            field, sep, value = term.partition(':')
+            if sep and field in fields:
+                return bool(value) and value in fields[field]
+            if term.startswith('@'):
+                return bool(term[1:]) and term[1:] == fields['tag']
+            return any(term in value for value in fields.values())
+        if all(matches_term(term) for term in terms):
             matches.append(player)
-    return sorted(matches, key=lambda p: (p['name'].casefold(), p['server']['node'],
-                                         p['server']['port'], p['id']))
+    return sorted(matches, key=lambda p: (normalized(p['name']), normalized(player_tag(p)),
+                                         p['server']['node'], p['server']['port'], p['id']))
 
 
 def coverage_text(directory, matches, now=None):
@@ -38,6 +68,8 @@ def coverage_text(directory, matches, now=None):
     suffix = f' · {missing+stale} unavailable/stale' if missing or stale else ''
     if coverage.get('discovery_errors'):
         suffix += ' · discovery incomplete'
+    if 'details_total' in coverage:
+        suffix += f' · tags {coverage.get("details_checked", 0)}/{coverage["details_total"]} occupied rosters current'
     return (f'{matches} matching players · {coverage.get("checked",0)}/{coverage.get("total",0)} servers checked'
             f' · {coverage.get("nodes",0)} nodes · refreshed {age}s ago{suffix}')
 
@@ -61,11 +93,11 @@ class PlayerSearch(Dialog):
 
     def compose(self):
         with Vertical(classes='dialog'):
-            yield Static(Text('FIND A PLAYER · ALL NODES'), classes='dialog-title')
-            yield Input(placeholder='Player name or ID · partial, case-insensitive match', id='player-search', max_length=128)
+            yield Static(Text('FILTER PLAYERS · ALL NODES'), classes='dialog-title')
+            yield Input(placeholder='Name + tag, e.g. Player Z74 · tag:Z74 · node:node-b · quotes for phrases', id='player-search', max_length=128)
             yield Static(Text('Reading player locations…'), id='player-coverage')
             yield DataTable(id='player-results', cursor_type='row', zebra_stripes=True)
-            yield Static(Text('Search includes every current server, regardless of the main filters. Enter opens the selected server; it does not move or message the player.'), id='player-search-note')
+            yield Static(Text('All terms must match the same player. Filters: name:, tag:, clan:, team:, id:, server:, node:, port:. @Z74 matches an exact service tag. Native details refresh at most every 20s; — means unavailable. Enter opens the server.'), id='player-search-note')
             with Horizontal(classes='dialog-buttons'):
                 yield Button('CLOSE', id='player-close')
                 yield Button('REFRESH', id='player-refresh')
@@ -74,7 +106,7 @@ class PlayerSearch(Dialog):
 
     def on_mount(self):
         super().on_mount()
-        self.query_one('#player-results', DataTable).add_columns('Player', 'Server', 'Node', 'Port', 'Player ID', 'Seen')
+        self.query_one('#player-results', DataTable).add_columns('Player', 'TAG', 'Clan', 'Team', 'Server', 'Node', 'Port', 'Player ID', 'Seen')
         self.query_one('#player-search', Input).focus()
         self.action_refresh_players()
         self.set_interval(10, self.action_refresh_players)
@@ -114,7 +146,9 @@ class PlayerSearch(Dialog):
         cells = {}
         for key, player in self.results.items():
             server = player['server']
-            cells[key] = [Text(player['name']), Text(server['name']), Text(server['node'].upper()),
+            cells[key] = [Text(player['name']), Text(player_tag(player) or '—'),
+                          Text(player.get('clan_tag') or '—'), Text(player.get('team') or '—'),
+                          Text(server['name']), Text(server['node'].upper()),
                           str(server['port']), player['id'][:8]+'…', f'{int(now-server["observed_at"])}s ago']
         if list(cells) != list(self.rendered):
             table.clear()

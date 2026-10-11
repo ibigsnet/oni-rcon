@@ -17,7 +17,7 @@ from textual.widgets import Button, Input, ListView, Select, Static, TabbedConte
 from rich.text import Text
 from .app import OniApp, Station, Card, Confirm, Form, Roster, target_of
 from .art import DIM
-from .player_search import PlayerSearch, matching_players, coverage_text
+from .player_search import PlayerSearch, matching_players, coverage_text, player_tag
 from .browser import (SORTS, STATES, ServerItem, ServerList, ServerSearch, live_count, matching_rows,
                       server_tags, tagged_message)
 from .config import Server
@@ -596,7 +596,7 @@ def main():
     parser.add_argument('--list',action='store_true',help='list registered lobbies without opening the TUI')
     parser.add_argument('--probe',metavar='LOBBY_ID',help='read native status for one registered lobby')
     parser.add_argument('--tags',action='store_true',help='list broadcast/search tags and running-server counts')
-    parser.add_argument('--find-player',metavar='NAME',help='find a player name or ID across every current server')
+    parser.add_argument('--find-player',metavar='FILTER',help='filter all players by name, tag, clan, team, ID or server; all terms must match')
     parser.add_argument('--search',default='',help='filter by name, node, map, mode or port; quotes group phrases')
     parser.add_argument('--node',default='all',type=str.casefold,help='filter to one node, e.g. node-c or node-d')
     parser.add_argument('--state',choices=[v for _,v in STATES],default='all',help='filter servers by state')
@@ -613,7 +613,7 @@ def main():
         matches=matching_players(directory,args.find_player)
         for player in matches:
             server=player['server'];address=f"{server.get('public_ip') or server['node']}:{server['port']}"
-            print(f"{player['name']} · {server['name']} · {server['node'].upper()} · {address} · ID {player['id'][:8]}…")
+            print(f"{player['name']} · TAG {player_tag(player) or '—'} · Clan {player.get('clan_tag') or '—'} · Team {player.get('team') or '—'} · {server['name']} · {server['node'].upper()} · {address} · ID {player['id'][:8]}…")
         print(coverage_text(directory,len(matches)))
         if not matches:print('No matching players in available fresh rosters.')
     elif args.tags:
