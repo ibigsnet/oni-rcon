@@ -3,6 +3,7 @@ import time
 
 from rich.text import Text
 from textual import on
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, RichLog, Static
 
@@ -11,22 +12,25 @@ from .art import AMBER, CYAN, DIM, WHITE
 
 
 class FindingsView(Dialog):
+    BINDINGS = [Binding('escape', 'dismiss(None)', show=False)]
     DEFAULT_CSS = '''
-    FindingsView .dialog { width: 94%; max-width: 140; height: 85%; }
-    FindingsView #findings-coverage { height: auto; max-height: 5; color: $text-muted; }
-    FindingsView #findings-history { height: 1fr; min-height: 3; }
+    FindingsView .dialog { width: 94%; max-width: 140; height: 92%; padding: 1; }
+    FindingsView .dialog-title { margin-bottom: 0; }
+    FindingsView #findings-coverage { height: auto; max-height: 4; color: $text-muted; }
+    FindingsView #findings-history { height: 1fr; min-height: 5; overflow-x: hidden; }
+    FindingsView .dialog-buttons, FindingsView .dialog-keys { margin-top: 0; }
     '''
 
     def compose(self):
         with Vertical(classes='dialog'):
             yield Static(Text('SUPERINTENDENT · RECENT FINDINGS'), classes='dialog-title')
             yield Static(id='findings-coverage')
-            yield RichLog(id='findings-history', wrap=True, markup=False)
-            yield Static(Text('Review flags are observations, not cheat verdicts. No automatic kicks or bans. Last hour; up to 200 reports.'))
+            yield RichLog(id='findings-history', wrap=True, markup=False, min_width=1, auto_scroll=False)
+            yield Static(Text('Review only; no automatic moderation. Last hour · up to 200 reports.'))
             with Horizontal(classes='dialog-buttons'):
                 yield Button('CLEAR ALL ALERTS', id='findings-ack')
                 yield Button('CLOSE', id='findings-close', variant='primary')
-            yield self.keys('Esc close', 'Clear acknowledges alerts; report history stays')
+            yield self.keys('Esc close', 'Clear keeps report history')
 
     def on_mount(self):
         super().on_mount()

@@ -95,7 +95,7 @@ The Superintendent and connection status are docked at the bottom of the sidebar
 The fleet-console display label is `IBIGS Admin`. Direct/customer RCON defaults to `Administrator`, preserving explicit `--by` or private configuration overrides. fleet-console sends actions through the authenticated management API and node-local Source RCON; it does not send the terminal label with moderation commands. The controller retains its authenticated actor in private audit records.
 
 
-### Superintendent findings and alert acknowledgement (0.9.0+ibigs.6)
+### Superintendent findings and alert acknowledgement (0.9.0+ibigs.7)
 
 F11 or clicking the Superintendent opens the last hour of observations (up to 200).
 The shared alert row includes CLEAR ALL ALERTS; Ctrl+L works even in a text input.

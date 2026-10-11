@@ -94,8 +94,10 @@ def test_clear_every_station_even_when_filtered_and_keep_evidence():
             assert app.findings.acknowledged_at >= f.at
             await pilot.press('f11')
             assert isinstance(app.screen, FindingsView)
+            assert app.screen.query_one('#findings-history').content_size.height >= 3
             await pilot.click('#findings-ack')
             await pilot.press('escape')
+            assert not isinstance(app.screen, FindingsView)
             app.alert(None)
             assert app.condition()[0] == 'RED'
             await pilot.press('ctrl+l')
