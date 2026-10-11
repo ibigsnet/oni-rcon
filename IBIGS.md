@@ -1,6 +1,6 @@
 # IBIGS Reclaimer terminal
 
-## Customer VPS controls (0.9.0+ibigs.7)
+## Customer VPS controls (0.9.0+ibigs.8)
 
 Customers run `oni` in their VPS. F6 opens ReclaimerForge with provisioned access or their personal API-key override; F7 starts and stops their lobbies;
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
@@ -60,7 +60,7 @@ The 0.8.1 integration includes the upstream Halo archive and larger Superintende
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. The deployed runtime is `0.9.0+ibigs.7` at `79a1c44`, also packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Later repository documentation/CI changes do not replace the immutable signed deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.8` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
@@ -122,3 +122,32 @@ names, including adjacent transpositions. Exact/substring matches rank first;
 approximate names are labeled in the results. Tag, ID, node and other structured
 filters remain strict, all terms apply to one player, and stale rosters are
 excluded. Server selection still revalidates the exact player ID.
+
+
+### Match controls and actionable findings (0.9.0+ibigs.8)
+
+F1 shows End round and End match above the roster. F3 retains map, mode, queue,
+team and vote controls. Confirmations name the target server, map, mode and player
+count. The command target remains the confirmed server if selection changes.
+
+Notifications have an Open server / player link. F11 supports clicking a report,
+Enter to open it, and separate server, subject and reporter links in the evidence.
+Opening a report refreshes the roster and matches the full public player ID.
+Unresolved names, duplicate names, disconnected servers and departed players leave
+no player selected. Server filters are reset when needed to reveal the target.
+Only navigation/read requests occur; moderation always remains a separate action.
+Legacy clients still receive the original report schema; link metadata is additive
+at the private response level. Stored metadata excludes addresses and fingerprints.
+
+Kill-count heuristics are disabled for Infection, Fat Kid and SWAT, including SWAT
+lobbies whose engine mode is Slayer. Mode/map changes clear partial kill windows.
+Other modes retain highlights with a five-minute per-player and one-minute per-server
+cooldown. Explicit native medals, native anti-cheat flags and vote-pattern reports
+are unaffected by the mode filter. A native flag or player accusation is not proof.
+
+Chat uses conservative English request/allegation rules instead of keyword matching.
+Examples: “need an admin”, “looking for help”, “please kick Player”, “Player is cheating”.
+Ordinary game-mod talk, command tutorials and negated accusations are excluded.
+Repeated topics across speakers wait two minutes; each speaker/category waits one
+minute. Phase changes and reconnects reset evidence windows but keep cooldowns.
+Evidence retains the original request for review. No external language service is used.

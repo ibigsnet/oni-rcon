@@ -268,11 +268,9 @@ class FleetApp(FleetHealthMixin, OniApp):
                 'Empty lobbies connect when occupied. Perfection requires an explicit native medal event.'+
                 (f' Unavailable nodes: {missing}.' if missing else ''))
 
-    def report_finding(self, finding, st):
-        super().report_finding(finding, st)
-        if finding.level == 'review' and finding.kind in ('native_flag', 'player_report'):
-            self.notify(finding.title, title=f'REVIEW NEEDED · {st.label}', severity='warning', timeout=10)
-            self.alert(st)
+    def finding_context(self, st):
+        row = self.fleet.rows.get(st.rcon.ident, {}) if st.rcon else {}
+        return {**super().finding_context(st), 'tags': list(server_tags(row))}
 
     @work(exclusive=True, group='fleet-findings')
     async def refresh_findings(self):
@@ -285,7 +283,7 @@ class FleetApp(FleetHealthMixin, OniApp):
             stations = {s.rcon.ident: s for s in self.stations if s.rcon}
             for raw in reversed(data['findings'][:200]):
                 try:
-                    row = Finding(**raw)
+                    row = Finding(**{**raw, **data.get('links', {}).get(raw.get('id'), {})})
                     st = stations.get(row.server)
                     if st is None:
                         continue

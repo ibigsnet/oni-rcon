@@ -62,6 +62,9 @@ DataTable > .datatable--header { background: $panel; color: $primary; text-style
 DataTable > .datatable--cursor { background: $block-cursor-background; color: $foreground; text-style: bold; }
 
 Assets { height: 1fr; }
+#finding-context { display: none; height: auto; max-height: 3; color: $warning; }
+#match-actions { height: 1; margin-bottom: 1; }
+#match-actions Button { min-width: 0; width: auto; margin-right: 1; }
 #players { width: 3fr; height: 1fr; }
 #dossier-box { width: 2fr; min-width: 44; height: 1fr; padding: 0 1; }
 #player-actions { height: auto; grid-size: 4; grid-gutter: 1 1; margin: 1 0; }
@@ -158,6 +161,10 @@ ModalScreen { align: center middle; background: $background 75%; }
 .dialog Label { color: $secondary; margin-top: 1; }
 .dialog-buttons { height: auto; align-horizontal: right; margin-top: 1; }
 .dialog-buttons Button { margin-left: 1; }
+FindingsView .dialog { width: 94%; max-width: 140; height: 92%; padding: 0 1; }
+FindingsView .dialog-title { margin-bottom: 0; }
+FindingsView .dialog-buttons, FindingsView .dialog-keys { margin-top: 0; }
+FindingsView .dialog-buttons Button { min-width: 0; width: 1fr; margin: 0; }
 .pick { height: auto; }
 #pick-list { height: auto; max-height: 20; border: round $primary 35%; background: $background; text-wrap: nowrap;
              text-overflow: ellipsis; }

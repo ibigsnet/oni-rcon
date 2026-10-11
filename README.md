@@ -1,10 +1,23 @@
-## IBIGS 0.9.0+ibigs.7 (11 October 2026)
+## IBIGS 0.9.0+ibigs.8 (11 October 2026)
 
 This private fork incorporates upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 and
-the IBIGS customer and fleet controls. Runtime commit `79a1c44` is deployed on fleet-console and enrolled Halo 3 VPSs.
-`main` and `ibigs/fleet` carry the maintained source; customer updates use the separately signed private channel.
-Source changes after that deployment fix optional SSH log-reader cleanup with Ubuntu's `/bin/sh` and make
-CI wait for completed UI selection and process exit. They are not part of the immutable `.7` deployment artifact.
+the IBIGS customer and fleet controls. `main` and `ibigs/fleet` carry the maintained source;
+customer updates use the separately signed private channel.
+
+**END ROUND / END MATCH** are available directly above the player roster, with more controls under **F3**.
+Confirmation names the target server, map, mode and player count. End match keeps the server process running.
+
+**Clickable findings and notifications** open the relevant server and recheck the reported player's full ID
+against a fresh roster. The reporter and subject are separate links. Missing or ambiguous identities leave
+no player selected; opening a report never performs moderation.
+
+**Quieter Superintendent:** Infection, Fat Kid and SWAT suppress kill-count highlights and suspicion flags.
+Other modes limit highlights to one per player per five minutes and one per server per minute. Explicit
+help requests, requests to kick/ban/mute, and player allegations produce review alerts with the original chat.
+Game-mod discussion, command tutorials and denials are excluded. Repeat chat topics are suppressed for two
+minutes across speakers, with a one-minute per-speaker/category limit that survives round changes. This is
+English-language triage, not a guarantee that every request is detected. Native anti-cheat reports and
+repeated kick votes remain eligible in every mode.
 
 **Ctrl+G** opens fleet player search. Exact and substring matches rank first; small name typos and adjacent
 transpositions are supported and labelled. Structured filters remain non-fuzzy, stale rosters are excluded,

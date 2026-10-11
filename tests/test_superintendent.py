@@ -312,7 +312,7 @@ def test_turning_redaction_on_clears_what_it_last_said():
             assert await until(pilot, lambda: all(st.online for st in app.stations))
             app.redact = False  # addresses visible: it may have shown one
             app.on_rcon_event(app.stations[0].rcon, {"event": "chat", "channel": "all", "name": "Drift",
-                                                    "text": "admin 203.0.113.9"})
+                                                    "text": "need an admin 203.0.113.9"})
             assert "203.0.113.9" in app.findings.recent()[0].evidence
             app.sup.last = "admin 203.0.113.9"
             app.action_redact()

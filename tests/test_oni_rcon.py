@@ -137,7 +137,7 @@ def test_app_against_fakes():
             await pilot.press("escape")
             await pilot.pause()
 
-            app.on_rcon_event(app.stations[1].rcon, {"type": "event", "event": "chat", "text": "admin [b]help"})
+            app.on_rcon_event(app.stations[1].rcon, {"type": "event", "event": "chat", "text": "need an admin [b]help"})
             assert app.stations[1].alerts == 1  # counted on the station not being looked at
             await pilot.press("2")
             await pilot.pause()

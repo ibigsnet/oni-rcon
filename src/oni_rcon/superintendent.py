@@ -19,6 +19,7 @@ from rich.text import Text
 
 from .archive import superintendent as face_grid, superintendent_at
 from .art import AMBER, CYAN, DIM, GREEN, GREY, RED, WHITE, fit, noise, pixels
+from .findings import chat_request
 
 MINI, SMALL, BIG, LARGE, XL, HUGE = 8, 12, 16, 24, 32, 40  # pixels across the face, and so cells wide: 4 to 20 rows
 WORDS = 14  # cells its name needs beside the face; the larger faces put the words under it when there's no such room
@@ -27,7 +28,6 @@ EASE = 0.28  # seconds an expression takes to settle after an event
 DEBOUNCE = 1.2  # seconds a reaction holds against another of the same weight: a busy fleet doesn't make it flicker
 BLINK_FOR = 0.22  # seconds a blink lasts
 BLINK_EVERY = 5.5  # seconds: one blink in each stretch this long, when in the stretch it varies
-CALL = re.compile(r"\b(admins?|mods?|hack\w*|cheat\w*|aimbot|wallhack)\b", re.I)  # a call for an admin, as app.ALERT
 
 
 @dataclass(frozen=True)
@@ -76,9 +76,11 @@ def classify(ev: dict) -> str | None:
     if kind == "chat":
         if ev.get("channel") == "server":
             return "cheer"
-        return "call" if CALL.search(str(ev.get("text", ""))) else None
+        if "_review_alert" in ev:
+            return "review" if ev["_review_alert"] else None
+        return "call" if chat_request(ev.get("text")) else None
     if kind == "kill":
-        return "medal" if ev.get("_medals") else None
+        return "medal" if ev.get("_medals") and not ev.get("_quiet_kills") else None
     return {"join": "welcome", "cheat": "cheat", "kick": "satisfied", "ban": "satisfied",
             "mute": "unimpressed"}.get(kind)
 

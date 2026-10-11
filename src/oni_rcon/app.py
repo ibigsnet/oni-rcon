@@ -50,7 +50,7 @@ from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice,
 from .install import InstallError, place, plan, size_words, target_for
 from .pings import JOIN_PING, follow_join_pings
 from .medals import Medals
-from .findings import Findings
+from .findings import Findings, public_roster, quiet_kill_mode
 from .prefs import Prefs
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
@@ -103,7 +103,6 @@ VIEW_NAMES = {"installed": "INSTALLED HERE"}
 OVERLAP = 300  # seconds the changes feed is read back over each time: a change written late isn't missed
 RECONCILE = 6 * 3600  # seconds between fetching every installed listing whole, for whatever the feed missed
 KIND_COLOR = {"map": CYAN, "gametype": AMBER, "playlist": GOLD}
-ALERT = re.compile(r"\b(admins?|mods?|hack\w*|cheat\w*|aimbot|wallhack)\b", re.I)
 ADDRESS_KEYS = {"address", "ip", "ip_address", "addr"}
 IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 REFS = ("killer", "victim", "name", "player", "from", "sender")  # event fields that can name a player by engine ID
@@ -120,7 +119,7 @@ SEPARATORS = (" · ", " | ", " - ", " — ", ": ")  # between a community's tag 
 FREE_TEXT = {"say": 0, "tell": 1, "kick": 1, "servername": 0}  # console commands whose last argument is the rest
 
 OPS = [("load", "LOAD MAP+MODE", "primary"), ("map", "CHANGE MAP", "default"), ("mode", "CHANGE MODE", "default"),
-       ("nextmap", "QUEUE NEXT", "default"), ("endround", "END ROUND", "warning"), ("endgame", "END GAME", "error"),
+       ("nextmap", "QUEUE NEXT", "default"), ("endround", "END ROUND", "warning"), ("endgame", "END MATCH", "error"),
        ("shuffle", "SHUFFLE TEAMS", "default"), ("teamcount", "TEAM COUNT", "default"),
        ("startvote", "CALL VOTE", "default"), ("passvote", "PASS VOTE", "success"),
        ("cancelvote", "CANCEL VOTE", "default"), ("broadcast", "BROADCAST", "primary"),
@@ -141,7 +140,7 @@ TIPS = {
     "op-mode": "Switch to another mode, keeping the current map. Ends the current game.",
     "op-nextmap": "Choose what plays after this game, without interrupting it.",
     "op-endround": "End this round as if its time ran out.",
-    "op-endgame": "End the whole game now, with the scores as they stand.",
+    "op-endgame": "End the whole match now, with the scores as they stand. Keeps the server running.",
     "op-shuffle": "Mix the players up across the teams.",
     "op-teamcount": "Spread the players over 2 to 8 teams.",
     "op-startvote": "Ask the players to vote: end the round, shuffle, kick someone, and more.",
@@ -1130,7 +1129,17 @@ class Roster(DataTable):
 
     @property
     def selected(self) -> str | None:
-        return self.ids[self.cursor_row] if 0 <= self.cursor_row < len(self.ids) else None
+        return self.ids[self.cursor_row] if self.show_cursor and 0 <= self.cursor_row < len(self.ids) else None
+
+    def on_click(self, event: events.Click) -> None:
+        if self.id == "players" and not self.show_cursor:
+            self.show_cursor = True
+            self.app.paint_dossier()
+
+    def on_key(self, event: events.Key) -> None:
+        if self.id == "players" and not self.show_cursor and event.key in ("up", "down", "home", "end", "pageup", "pagedown"):
+            self.show_cursor = True
+            self.app.paint_dossier()
 
     def fill(self, rows: list[tuple[str, list]]) -> None:
         """rows: (id, cells) in display order."""
@@ -1326,6 +1335,11 @@ class OniApp(App):
                     yield Static(id="uplink")
             with TabbedContent(id="tabs", initial="assets"):
                 with TabPane("F1 ASSETS", id="assets"):
+                    yield Static(id="finding-context", markup=False)
+                    with Horizontal(id="match-actions"):
+                        yield Button("END ROUND", id="match-endround", compact=True, variant="warning")
+                        yield Button("END MATCH", id="match-endgame", compact=True, variant="error")
+                        yield Button("MORE · F3", id="match-more", compact=True)
                     with Assets():
                         yield Roster(id="players", cursor_type="row", zebra_stripes=True)
                         with VerticalScroll(id="dossier-box"):
@@ -1614,9 +1628,84 @@ class OniApp(App):
 
     def report_finding(self, finding, st) -> None:
         self.sup.report(redact_text(f"{st.label}: {finding.title}", self.redact), finding.level)
-        if finding.level == "review" and finding.kind not in ("native_flag", "player_report"):
-            self.notify(finding.title, title=f"REVIEW NEEDED · {st.label}", severity="warning", timeout=10)
+        if finding.level == "review":
+            # Only the locally validated finding ID enters an action; player text is literal.
+            if re.fullmatch(r"[0-9a-f]{24}", finding.id):
+                message = escape(scrub(redact_text(finding.title, self.redact)))
+                label = escape(scrub(redact_text(st.label, self.redact)))
+                message += f"\n[@click=app.open_finding('{finding.id}', 'server')]SERVER: {label}[/]"
+                if finding.subjects:
+                    label = escape(scrub(redact_text(str(finding.subjects[0].get('name') or 'Unknown'), self.redact)))
+                    message += f"\n[@click=app.open_finding('{finding.id}')]VIEW PLAYER: {label}[/]"
+                message += " · F11 evidence"
+                App.notify(self, message, markup=True, title=scrub(f"REVIEW NEEDED · {st.label}"),
+                           severity="warning", timeout=12)
+            else:
+                self.notify(finding.title+" · F11 for evidence", title=f"REVIEW NEEDED · {st.label}", severity="warning")
             self.alert(st)
+
+    def finding_context(self, st) -> dict:
+        status = st.data.get("status", {})
+        return {**status, "name": " ".join(str(v or "") for v in (status.get("name"), st.server.name, st.label))}
+
+    @work(exclusive=True, group="finding-navigation")
+    async def action_open_finding(self, ident: str, role: str = "subject", index: int = 0) -> None:
+        """Read-only navigation. A report never becomes a kick/ban action or a guessed identity."""
+        from .finding_view import FindingsView
+        row = next((r for r in self.findings.recent() if r.id == ident), None)
+        if not row:
+            self.notify("This finding has expired. Open F11 for current reports.", severity="warning")
+            return
+        if isinstance(self.screen, FindingsView):
+            self.screen.dismiss(None)
+        elif isinstance(self.screen, ModalScreen):
+            self.notify("Close the current dialog before opening a finding.", severity="warning")
+            return
+        st = next((s for s in self.stations if str(s.index) == row.server), None)
+        if not st:
+            self.notify("This server is no longer in the inventory.", severity="warning")
+            return
+        target = row.reporter if role == "reporter" else (
+            row.subjects[index] if role == "subject" and 0 <= index < len(row.subjects) else {})
+        target = target if isinstance(target, dict) else {}
+        self.action_station(st.index)
+        ready = asyncio.Event()
+        self.call_after_refresh(ready.set)
+        await asyncio.wait_for(ready.wait(), 3)
+        if self.cur is not st:
+            return
+        self.action_tab("assets")
+        notice = "Server opened."
+        player_id = str(target.get("id") or "")
+        verified = None
+        try:
+            reply = await st.rcon.call("players") if st.online else {}
+            if not reply.get("ok") or not isinstance(reply.get("data", {}).get("players"), list):
+                raise ValueError("Current roster unavailable; no player selected.")
+            st.data["players"] = reply["data"]
+            st.learn(st.players)
+            matches = [p for p in st.players if player_id and str(pick(p, "player_id", "id", default="")).casefold() == player_id.casefold()]
+            if len(matches) == 1:
+                verified = target_of(matches[0])
+                notice = "Selected the reported player by their verified ID."
+            elif target:
+                notice = ("Player has left or their identity is ambiguous; no player selected." if player_id else
+                          "The report did not identify a unique player; no player selected.")
+        except Exception:
+            notice = "Current roster unavailable; no player selected."
+        if self.cur is not st:  # The operator switched servers while the roster read was in flight.
+            return
+        self.finding_station = st.index
+        self.query_one("#finding-context", Static).update(Text(redact_text(
+            f"{row.title} · {notice}\n{row.evidence}  (F11 for the full report)", self.redact)))
+        self.paint_match_actions()
+        self.paint_players()
+        roster = self.query_one("#players", Roster)
+        roster.show_cursor = verified in roster.ids if verified is not None else False
+        if roster.show_cursor:
+            roster.move_cursor(row=roster.ids.index(verified))
+        self.paint_dossier()
+        roster.focus()
 
     @on(events.Click, "#banner")
     def _banner(self) -> None:
@@ -2057,7 +2146,9 @@ class OniApp(App):
         if self.raw_events:
             self.log_cmd(Text(f"{st.label} ◂ ", CYAN) + Text(json.dumps(redact_data(ev, self.redact)), DIM))
         names = st.names
-        for finding in self.findings.ingest(str(st.index), ev, names):
+        context = self.finding_context(st)
+        findings = self.findings.ingest(str(st.index), ev, names, context, public_roster(st.players))
+        for finding in findings:
             self.report_finding(finding, st)
         if ev.get("event") == "join":  # a join names the player by ID: kills that follow may use it
             st.past.update({f: str(pick(ev, "name", "player", default="?")) for f in id_forms(pick(ev, "id", "player_id"))
@@ -2067,6 +2158,8 @@ class OniApp(App):
         raw_ids = [ev.get(k) for k in ("killer", "victim")]
         ev = resolve(ev, names, st.ident)
         kind, text = ev.get("event"), str(ev.get("text", ""))
+        if kind == "chat":
+            ev["_review_alert"] = any(f.level == "review" for f in findings)
         if kind == "kill":
             if any(i in st.aliases.values() for i in (ev.get("killer"), ev.get("victim"))):
                 self.fetch(st, "players")  # someone the roster hasn't caught up with: ask again
@@ -2074,17 +2167,10 @@ class OniApp(App):
             killer = pick(ev, "killer")
             ev["_medals"] = st.medals.kill(None if killer is None else who(killer, names),
                                            who(pick(ev, "victim"), names), time.monotonic())
+            ev["_quiet_kills"] = quiet_kill_mode(context)
         st.activity.append(time.monotonic())
         self.log_event(st, ev)
         self.sup.react(ev, reaction_words(ev, names, self.redact) if self.sup.wants(ev) else "")
-        if kind == "chat" and ev.get("channel") != "server" and ALERT.search(text):
-            self.notify(redact_text(f"{who(pick(ev, 'name', 'player'), names)}: {text}", self.redact),
-                        title=f"CALL FOR ADMIN · {st.label}", severity="warning", timeout=12)
-            self.alert(st)
-        elif kind == "cheat":
-            self.notify(describe(ev, names, self.redact).plain, title=f"ANTI-CHEAT · {st.label}", severity="error",
-                        timeout=12)
-            self.alert(st)
         if kind in ("join", "leave", "refused", "kick", "ban", "mute", "unmute", "control"):
             self.fetch(st, "players", "status")
         if kind in ("ban", "unban"):
@@ -2158,6 +2244,7 @@ class OniApp(App):
         self.paint_card(st)
         if st is not self.cur:
             return
+        self.paint_match_actions()
         pane = self.query_one(TabbedContent).active
         if pane == "assets" and "players" in what:
             self.paint_players()
@@ -2363,8 +2450,12 @@ class OniApp(App):
     def paint_dossier(self) -> None:
         box, p = self.query_one("#dossier", Static), self.cur_player()
         self.query_one("#player-actions").display = self.query_one("#raw-box").display = bool(p)
+        for button in self.query_one("#player-actions").query(Button):
+            button.disabled = not p or not self.cur.online
         if not p:
-            if self.cur.online:
+            if self.cur.online and self.cur.players:
+                msg = Text("NO PLAYER SELECTED\n\nChoose a player from the current roster to view their details.", DIM)
+            elif self.cur.online:
                 msg = Text.assemble(("NO ASSETS IN THEATRE\n\n", DIM),
                                     ("Nobody is playing on this server right now.\nPlayers appear here as they join.", DIM))
             else:
@@ -2420,6 +2511,7 @@ class OniApp(App):
 
     def paint_ops(self) -> None:
         st = self.cur
+        self.paint_match_actions()
         s, vote = st.data.get("status", {}), st.data.get("vote", {})
         info = st.rcon.info if st.rcon else {}
         yes_no = lambda v, on="ON", off="OFF": Text(on, GREEN) if v else Text(off, DIM) if v is not None else Text("—", DIM)
@@ -2462,6 +2554,22 @@ class OniApp(App):
             flag = lambda v: Text(v, style) + (Text("  ⚠ WITHDRAWN", RED) if norm(v) in pulled else Text())
             rows.append((str(i), [Text("▶" if now else str(i), style), flag(mp), flag(md)]))
         self.query_one("#rotation", Roster).fill(rows)
+
+    def paint_match_actions(self) -> None:
+        self.query_one("#finding-context").display = getattr(self, "finding_station", None) == self.cur.index
+        for name in ("endround", "endgame"):
+            button = self.query_one(f"#match-{name}", Button)
+            button.disabled = not self.cur.online
+            button.tooltip = f"{self.cur.label}: {TIPS['op-'+name]} Confirmation required."
+
+    @on(Button.Pressed, "#match-actions Button")
+    def _match_action(self, event: Button.Pressed) -> None:
+        event.stop()
+        name = event.button.id.removeprefix("match-")
+        if name == "more":
+            self.action_tab("operations")
+        else:
+            self.op(name)
 
     @staticmethod
     def credit(e: dict) -> Text:
@@ -2557,6 +2665,7 @@ class OniApp(App):
         index = self.station_index(e.item) if e.item is not None else None
         if index is not None and index != self.sel:
             self.sel = index
+            self.query_one("#players", Roster).show_cursor = True
             self.cur.alerts = 0  # looked at now
             for t in self.query(Roster):
                 if t.row_count:
@@ -2578,6 +2687,7 @@ class OniApp(App):
             self.forge_opened = True
             self.forge_load()
         if e.pane.id == "assets":
+            self.paint_match_actions()
             self.paint_players()
         elif e.pane.id == "operations":
             self.paint_ops()
@@ -2882,9 +2992,12 @@ class OniApp(App):
             self.send(st, name, *args, then=("status", "nextmap"))
         elif name in ("endround", "endgame", "shuffle"):
             body = {"endround": "Ends the round as if its time ran out.",
-                    "endgame": "Ends the game with the scores as they stand.",
+                    "endgame": "Ends the whole match with the scores as they stand. The server keeps running.",
                     "shuffle": "Shuffles players across the teams that have players."}[name]
-            if await self.push_screen_wait(Confirm(name.upper(), body, danger=name != "shuffle")):
+            label = {"endround": "END ROUND", "endgame": "END MATCH", "shuffle": "SHUFFLE TEAMS"}[name]
+            detail = f"Server: {st.label}\nMap: {s.get('map') or 'Unknown'} · Mode: {s.get('mode') or 'Unknown'}\n" \
+                     f"Players: {s.get('players', '?')}\n\n{body}"
+            if await self.push_screen_wait(Confirm(label, detail, danger=name != "shuffle")):
                 self.send(st, name, then=("status", "players"))
         elif name == "teamcount":
             n = await self.push_screen_wait(Pick("SPREAD PLAYERS OVER", [(f"{i} teams", str(i)) for i in range(2, 9)]))
