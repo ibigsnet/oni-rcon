@@ -38,11 +38,15 @@ def test_fleet_scroll_filter_sort_and_growth_leave_footer_anchored(size):
             before = footer(app)
             listing = app.query_one('#stations', ListView)
             listing.focus()
+            selected = listing.children[-1].station
             listing.index = len(listing.children) - 1
+            # Wait for the requested selection before testing that sorting preserves it.
+            async with asyncio.timeout(10):
+                while app.cur is not selected:
+                    await pilot.pause(.05)
             await pilot.pause(.2)
             assert listing.scroll_y > 0
             assert footer(app) == before
-            selected = app.cur
             app.query_one('#fleet-sort', Select).value = 'name'
             await pilot.pause(.1)
             app.query_one('#fleet-search', Input).value = 'Unique test lobby'

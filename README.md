@@ -3,6 +3,8 @@
 This private fork incorporates upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 and
 the IBIGS customer and fleet controls. Runtime commit `79a1c44` is deployed on fleet-console and enrolled Halo 3 VPSs.
 `main` and `ibigs/fleet` carry the maintained source; customer updates use the separately signed private channel.
+Source changes after that deployment fix optional SSH log-reader cleanup with Ubuntu's `/bin/sh` and make
+CI wait for completed UI selection and process exit. They are not part of the immutable `.7` deployment artifact.
 
 **Ctrl+G** opens fleet player search. Exact and substring matches rank first; small name typos and adjacent
 transpositions are supported and labelled. Structured filters remain non-fuzzy, stale rosters are excluded,

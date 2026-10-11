@@ -51,7 +51,7 @@ def process_running(pid):
     try:
         # A killed child may briefly await init's reaper; a zombie is no longer a running log follower.
         return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[0] != 'Z'
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
 
 
@@ -102,11 +102,12 @@ def test_local_log_follower_cancellation_cleans_its_children_and_never_uses_shel
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'), reason='POSIX SSH supervisor with setsid')
-def test_remote_supervisor_quotes_arguments_and_cleans_children_when_ssh_stdin_closes(tmp_path):
+@pytest.mark.parametrize('shell', ['/bin/sh', '/bin/bash'])
+def test_remote_supervisor_quotes_arguments_and_cleans_children_when_ssh_stdin_closes(tmp_path, shell):
     async def check():
         argv, metadata, marker, literal = log_helper(tmp_path)
         process = await asyncio.create_subprocess_exec(
-            '/bin/sh', '-c', remote_command(argv), stdin=asyncio.subprocess.PIPE,
+            shell, '-c', remote_command(argv), stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
         record = None
         try:
@@ -126,10 +127,11 @@ def test_remote_supervisor_quotes_arguments_and_cleans_children_when_ssh_stdin_c
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'), reason='POSIX SSH supervisor with setsid')
-def test_remote_supervisor_finishes_when_log_source_exits_with_stdin_open():
+@pytest.mark.parametrize('shell', ['/bin/sh', '/bin/bash'])
+def test_remote_supervisor_finishes_when_log_source_exits_with_stdin_open(shell):
     async def check():
         process = await asyncio.create_subprocess_exec(
-            '/bin/sh', '-c', remote_command([sys.executable, '-c', 'print("finished")']),
+            shell, '-c', remote_command([sys.executable, '-c', 'print("finished")']),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, start_new_session=True)
         try:
             assert await asyncio.wait_for(process.stdout.readline(), 4) == b'finished\n'

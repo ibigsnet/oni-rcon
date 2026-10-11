@@ -27,8 +27,8 @@ def remote_command(argv: list[str]) -> str:
     including children such as a log helper. The local SSH process has its own process group as well.
     """
     return ("supervisor=$$; reader=; exec 3<&0; setsid " + shlex.join(argv) + " </dev/null & follower=$!; "
-            "trap 'kill -TERM -- -\"$follower\" 2>/dev/null || true; "
-            "kill -KILL -- -\"$follower\" 2>/dev/null || true; "
+            "trap 'kill -TERM -\"$follower\" 2>/dev/null || true; "
+            "kill -KILL -\"$follower\" 2>/dev/null || true; "
             "if [ -n \"$reader\" ]; then kill -TERM \"$reader\" 2>/dev/null || true; fi' EXIT; "
             "trap 'exit 0' HUP INT TERM; "
             "(while IFS= read -r line <&3; do :; done; kill -TERM \"$supervisor\" 2>/dev/null || true) "
