@@ -271,9 +271,9 @@ def test_it_reacts_to_what_the_servers_send():
             for ev, mood, words in [
                 ({"event": "join", "name": "Kestrel", "player_id": "f9d36cae", "address": "203.0.113.9:1"}, "WELCOMING",
                  "Kestrel joined"),
-                ({"event": "cheat", "name": "Lark", "text": "speed out of range"}, "HOSTILE", "speed out of range"),
-                ({"event": "chat", "channel": "all", "name": "Drift", "text": "admins?? red is hacking"}, "ALARMED",
-                 "Drift: admins"),
+                ({"event": "cheat", "name": "Lark", "text": "speed out of range"}, "REVIEW NEEDED", "Server anti-cheat flag: Lark"),
+                ({"event": "chat", "channel": "all", "name": "Drift", "text": "admins?? red is hacking"}, "REVIEW NEEDED",
+                 "Player asked for review: Drift"),
                 ({"event": "kick", "player": "Lark", "reason": "speed hack"}, "SATISFIED", "kick Lark: speed hack"),
                 ({"event": "mute", "player": "Viper", "reason": "spam"}, "UNIMPRESSED", "mute Viper: spam"),
                 ({"event": "chat", "channel": "server", "text": "gg all"}, "CHEERFUL", "gg all"),
@@ -282,7 +282,8 @@ def test_it_reacts_to_what_the_servers_send():
                 app.on_rcon_event(st.rcon, dict(ev))
                 t[0] += 0.4
                 assert await until(pilot, lambda: mood in plain(box)), mood
-                assert words in app.sup.look()[3], (words, app.sup.look()[3])  # what it says it reacted to
+                expected = app.findings.recent()[0].title if app.findings.recent() else words
+                assert expected in app.sup.look()[3], (expected, app.sup.look()[3])
             # an ordinary line and a plain death leave the face as it was
             t[0] += 30
             app.on_rcon_event(st.rcon, {"event": "chat", "channel": "all", "name": "Rook", "text": "nice shot"})
@@ -312,7 +313,8 @@ def test_turning_redaction_on_clears_what_it_last_said():
             app.redact = False  # addresses visible: it may have shown one
             app.on_rcon_event(app.stations[0].rcon, {"event": "chat", "channel": "all", "name": "Drift",
                                                     "text": "admin 203.0.113.9"})
-            assert "203.0.113.9" in app.sup.last
+            assert "203.0.113.9" in app.findings.recent()[0].evidence
+            app.sup.last = "admin 203.0.113.9"
             app.action_redact()
             assert app.redact and app.sup.last == ""
     asyncio.run(go())

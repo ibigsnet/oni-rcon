@@ -153,6 +153,6 @@ def test_fleet_f9_favourites_and_superintendent_keep_lifecycle_and_target_safe()
                        ('#fg-install', '#fg-load', '#fg-key', '#fg-ack'))
             assert app.query_one('#sidebar').region.contains_region(app.query_one('#super').region)
             assert app.query_one('#uplink').region.bottom <= app.query_one('#sidebar').region.bottom
-            assert app.sup.last == 'Native event feed not connected'
+            assert app.sup.last == 'F11: Observer feed unavailable'
             fleet.submit.assert_not_called()
     asyncio.run(run())

@@ -93,3 +93,32 @@ Customers use `oni`, with F10 for the local upstream crash-log reader; F7 power,
 The Superintendent and connection status are docked at the bottom of the sidebar. The server list has its own bounded scroll area; filtering, sorting, adding dynamic lobbies and moving between tabs cannot push the footer off screen. Customer F7/F8/F9 controls are included in the space budget. This changes layout only, without additional polling.
 
 The fleet-console display label is `IBIGS Admin`. Direct/customer RCON defaults to `Administrator`, preserving explicit `--by` or private configuration overrides. fleet-console sends actions through the authenticated management API and node-local Source RCON; it does not send the terminal label with moderation commands. The controller retains its authenticated actor in private audit records.
+
+
+### Superintendent findings and alert acknowledgement (0.9.0+ibigs.6)
+
+F11 or clicking the Superintendent opens the last hour of observations (up to 200).
+The shared alert row includes CLEAR ALL ALERTS; Ctrl+L works even in a text input.
+Acknowledgement clears all unread counts, pulses, banners and toasts, including
+filtered stations. It preserves report history and current health conditions.
+New observations can alert again. Acknowledgement is local to the open console.
+
+Reports include three kick-vote starts against one target within five minutes,
+two vote starts in each direction for a vote fight, five kills against at least
+three opponents within ten seconds, native anti-cheat flags, and player requests
+for review. Twelve timestamped kills against six opponents in three seconds is
+a review flag with alternative explanations, never a cheat verdict. No detector
+issues moderation commands. Perfection requires an explicit native medal event;
+partial-match kills/deaths are insufficient. Windows reset on disconnects, feed
+gaps and phase changes. Replayed or stale timestamped events do not count.
+
+Customer observations run while the console is open. fleet-console uses independent,
+read-only node observers and the authenticated /api/findings operator route.
+Coverage distinguishes connected occupied lobbies from unavailable observers.
+The observers keep only bounded findings, not player addresses or fingerprints.
+
+Fleet player search supports one name edit for 4–7 characters and two for longer
+names, including adjacent transpositions. Exact/substring matches rank first;
+approximate names are labeled in the results. Tag, ID, node and other structured
+filters remain strict, all terms apply to one player, and stale rosters are
+excluded. Server selection still revalidates the exact player ID.

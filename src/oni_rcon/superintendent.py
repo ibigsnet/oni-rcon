@@ -57,6 +57,7 @@ class Reaction:
 
 
 REACTIONS = {
+    "review": Reaction("review", "REVIEW NEEDED", AMBER, {"size": 1.18, "ex": 0.0}, 8.0, 3),
     "welcome": Reaction("welcome", "WELCOMING", GREEN, {"happy": True}, 4.0, 1),
     "call": Reaction("call", "ALARMED", RED, {"size": 1.28, "ey": -1.5, "ex": 0.0}, 6.0, 3, alert=True),
     "cheat": Reaction("cheat", "HOSTILE", RED, {"tilt": 0.6, "lid": 0.1}, 6.0, 3, alert=True),
@@ -140,6 +141,15 @@ class Superintendent:
 
     def held(self, t: float) -> bool:
         return t - self.since < self.current.hold
+
+    def clear(self) -> None:
+        self.current = self.before = IDLE
+        self.since, self.last = float("-inf"), ""
+
+    def report(self, subject: str, level: str) -> None:
+        self.before = self.look_at(self.now())[0]
+        self.current = REACTIONS["review" if level == "review" else "medal"]
+        self.since, self.last, self.seen = self.now(), subject, self.seen + 1
 
     def blinking(self, t: float) -> float:
         """0 to 1: how closed the eyes are, a quick triangular dip once in each stretch of BLINK_EVERY seconds, at a

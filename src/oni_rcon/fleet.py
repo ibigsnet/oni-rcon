@@ -9,6 +9,7 @@ import shlex
 import time
 import urllib.error
 import urllib.request
+from dataclasses import replace
 from textual import on, work
 from textual.app import SystemCommand
 from textual.binding import Binding
@@ -26,6 +27,7 @@ from .safety import clean
 from .prefs import Prefs
 from .fleet_health import FleetHealthMixin, read_snapshot
 from . import __version__
+from .findings import Finding
 
 READS = frozenset('help status players maps modes nextmap vote bans vpn'.split())
 DISRUPTIVE = frozenset('map mode load endgame endround shuffle teamcount servername'.split())
@@ -63,12 +65,13 @@ class Fleet:
         self.opener=urllib.request.build_opener(NoRedirect(),urllib.request.ProxyHandler({}))
         self.view, self.rows, self.updated, self.locks = {}, {}, 0, {}
         self.health_enabled = True
+        self.findings_enabled = True
 
     def health_snapshot(self):
         return read_snapshot(self.opener)
 
     def request(self, path, body=None, timeout=25):
-        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players','/api/forge'):
+        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players','/api/forge','/api/findings'):
             raise ValueError('unsupported management route')
         headers = {'Authorization':'Bearer '+self.token,'Accept':'application/json'}
         if body is not None:
@@ -206,6 +209,7 @@ class FleetApp(FleetHealthMixin, OniApp):
 
     def __init__(self, fleet, *, search='', node='all', state='all', sort='players', intro=False, prefs=None):
         self.fleet=fleet
+        self.findings_snapshot, self.findings_error, self.findings_loaded = {}, '', False
         self.fleet_health, self.fleet_health_error = {}, ''
         self.fleet_health_due, self.fleet_health_busy = 0, False
         self.inventory_lock=asyncio.Lock()
@@ -220,7 +224,7 @@ class FleetApp(FleetHealthMixin, OniApp):
         servers=[Server(url='fleet://'+r['id'],name=self.label(r),ssh=r['node']) for r in matching_rows(fleet.rows.values(),sort=sort)]
         super().__init__(servers,by='IBIGS Admin',intro=intro,prefs=prefs,updater=None,
                          rcon_factory=lambda *args, **kwargs: FleetRcon(fleet, *args, **kwargs),
-                         hint='Ctrl+F server search · Ctrl+G find player across all nodes · F7 sort · F8 state filter · RESET shows all current servers. Native chat/kill streaming is not connected in fleet mode.')
+                         hint='Ctrl+F server search · Ctrl+G find player · F7 sort · F8 state filter · F11 Superintendent findings · Ctrl+L clear all alerts. F2 is the console event log; fleet gameplay reports are in F11.')
 
     def compose_toolbar(self):
         with Vertical(id='fleet-browser'):
@@ -248,10 +252,51 @@ class FleetApp(FleetHealthMixin, OniApp):
         pass
 
     def tick_super(self):
-        # Cached fleet counts are not a native event stream. Do not imply "all quiet" from missing events.
-        if not self.sup.last:
-            self.sup.last = 'Native event feed not connected'
+        fresh = self.findings_snapshot and 0 <= time.time()-self.findings_snapshot.get('at', 0) <= 45
+        self.sup.last = 'F11: '+('Watching occupied lobbies' if fresh else 'Observer feed unavailable')
         super().tick_super()
+
+    def finding_coverage(self):
+        data = self.findings_snapshot
+        if not data or not 0 <= time.time()-data.get('at', 0) <= 45:
+            return 'Fleet observer feed unavailable or stale. Cached reports are historical; missing events do not mean all is quiet.'
+        nodes = data.get('nodes', [])
+        watching = sum(n.get('watching') or 0 for n in nodes)
+        occupied = sum(n.get('occupied_lobbies') or 0 for n in nodes)
+        missing = ', '.join(n.get('node', '?') for n in nodes if not n.get('ok'))
+        return (f'Independent observers: {watching}/{occupied} occupied lobbies on {sum(bool(n.get("ok")) for n in nodes)}/{len(nodes)} nodes. '
+                'Empty lobbies connect when occupied. Perfection requires an explicit native medal event.'+
+                (f' Unavailable nodes: {missing}.' if missing else ''))
+
+    def report_finding(self, finding, st):
+        super().report_finding(finding, st)
+        if finding.level == 'review' and finding.kind in ('native_flag', 'player_report'):
+            self.notify(finding.title, title=f'REVIEW NEEDED · {st.label}', severity='warning', timeout=10)
+            self.alert(st)
+
+    @work(exclusive=True, group='fleet-findings')
+    async def refresh_findings(self):
+        try:
+            data = await asyncio.to_thread(self.fleet.request, '/api/findings', None, 20)
+            if not isinstance(data.get('findings'), list) or not isinstance(data.get('nodes'), list):
+                raise ValueError('invalid observer response')
+            if not self.is_running:
+                return
+            stations = {s.rcon.ident: s for s in self.stations if s.rcon}
+            for raw in reversed(data['findings'][:200]):
+                try:
+                    row = Finding(**raw)
+                    st = stations.get(row.server)
+                    if st is None:
+                        continue
+                    row = replace(row, server=str(st.index))
+                    if self.findings.add(row) and self.findings_loaded and row.at > self.findings.acknowledged_at and time.time()-row.at < 30:
+                        self.report_finding(row, st)
+                except (TypeError, ValueError):
+                    continue
+            self.findings_snapshot, self.findings_error, self.findings_loaded = data, '', True
+        except Exception:
+            self.findings_snapshot, self.findings_error = {}, 'Fleet observers unavailable'
 
     def get_system_commands(self, screen):
         for command in super().get_system_commands(screen):
@@ -434,6 +479,9 @@ class FleetApp(FleetHealthMixin, OniApp):
         self.browser_ready=True
         self.apply_browser()
         self.set_interval(15,self.action_refresh_fleet)
+        if getattr(self.fleet, 'findings_enabled', False) is True:
+            self.refresh_findings()
+            self.set_interval(15, self.refresh_findings)
 
     def fetch(self, station, *what):
         # Only selected-lobby detail reads reach the game. Overview counts are

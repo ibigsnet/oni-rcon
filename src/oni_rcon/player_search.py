@@ -4,6 +4,8 @@ import asyncio
 import time
 import shlex
 import unicodedata
+import re
+from functools import lru_cache
 
 from rich.text import Text
 from textual import on, work
@@ -30,8 +32,32 @@ def filter_terms(query):
         return normalized(query).replace('"', '').replace("'", '').split()
 
 
-def matching_players(directory, query='', now=None):
-    """AND every token against one player; quoted phrases stay together."""
+@lru_cache(maxsize=4096)
+def name_distance(term, name):
+    """Small, bounded edit distance, including one adjacent transposition."""
+    if not 4 <= len(term) <= 64:
+        return None
+    limit = 1 if len(term) < 8 else 2
+    best = limit + 1
+    for candidate in {name, *re.findall(r'\w+', name)}:
+        if len(candidate) > 64 or abs(len(term)-len(candidate)) > limit:
+            continue
+        prevprev = None
+        prev = list(range(len(candidate)+1))
+        for i, left in enumerate(term, 1):
+            row = [i]
+            for j, right in enumerate(candidate, 1):
+                cost = min(row[-1]+1, prev[j]+1, prev[j-1]+(left != right))
+                if i > 1 and j > 1 and left == candidate[j-2] and term[i-2] == right:
+                    cost = min(cost, prevprev[j-2]+1)
+                row.append(cost)
+            prevprev, prev = prev, row
+        best = min(best, prev[-1])
+    return best if best <= limit else None
+
+
+def ranked_players(directory, query='', now=None):
+    """AND filters on one fresh player; typo tolerance applies only to names."""
     now = time.time() if now is None else now
     terms = filter_terms(query)
     matches = []
@@ -48,14 +74,24 @@ def matching_players(directory, query='', now=None):
         def matches_term(term):
             field, sep, value = term.partition(':')
             if sep and field in fields:
-                return bool(value) and value in fields[field]
+                if value and value in fields[field]:
+                    return 0
+                return name_distance(value, fields['name']) if field == 'name' else None
             if term.startswith('@'):
-                return bool(term[1:]) and term[1:] == fields['tag']
-            return any(term in value for value in fields.values())
-        if all(matches_term(term) for term in terms):
-            matches.append(player)
-    return sorted(matches, key=lambda p: (normalized(p['name']), normalized(player_tag(p)),
-                                         p['server']['node'], p['server']['port'], p['id']))
+                return 0 if term[1:] and term[1:] == fields['tag'] else None
+            if any(term in value for value in fields.values()):
+                return 0
+            return None if sep else name_distance(term, fields['name'])
+        scores = [matches_term(term) for term in terms]
+        if all(score is not None for score in scores):
+            matches.append((player, sum(scores)))
+    return sorted(matches, key=lambda pair: (pair[1], normalized(pair[0]['name']) != normalized(query),
+                  normalized(pair[0]['name']), normalized(player_tag(pair[0])),
+                  pair[0]['server']['node'], pair[0]['server']['port'], pair[0]['id']))
+
+
+def matching_players(directory, query='', now=None):
+    return [player for player, score in ranked_players(directory, query, now)]
 
 
 def coverage_text(directory, matches, now=None):
@@ -97,7 +133,7 @@ class PlayerSearch(Dialog):
             yield Input(placeholder='Name + tag, e.g. Player Z74 · tag:Z74 · node:node-b · quotes for phrases', id='player-search', max_length=128)
             yield Static(Text('Reading player locations…'), id='player-coverage')
             yield DataTable(id='player-results', cursor_type='row', zebra_stripes=True)
-            yield Static(Text('All terms must match the same player. Filters: name:, tag:, clan:, team:, id:, server:, node:, port:. @Z74 matches an exact service tag. Native details refresh at most every 20s; — means unavailable. Enter opens the server.'), id='player-search-note')
+            yield Static(Text('All terms match one player. Names tolerate small typos (4+ characters); approximate matches follow exact matches. Filters: name:, tag:, clan:, team:, id:, server:, node:, port:. Tags/IDs are never fuzzy. @Z74 is an exact tag. Enter opens the server.'), id='player-search-note')
             with Horizontal(classes='dialog-buttons'):
                 yield Button('CLOSE', id='player-close')
                 yield Button('REFRESH', id='player-refresh')
@@ -106,7 +142,7 @@ class PlayerSearch(Dialog):
 
     def on_mount(self):
         super().on_mount()
-        self.query_one('#player-results', DataTable).add_columns('Player', 'TAG', 'Clan', 'Team', 'Server', 'Node', 'Port', 'Player ID', 'Seen')
+        self.query_one('#player-results', DataTable).add_columns('Player', 'TAG', 'Clan', 'Team', 'Server', 'Node', 'Port', 'Player ID', 'Seen', 'Match')
         self.query_one('#player-search', Input).focus()
         self.action_refresh_players()
         self.set_interval(10, self.action_refresh_players)
@@ -140,7 +176,9 @@ class PlayerSearch(Dialog):
             return
         table = self.query_one('#player-results', DataTable)
         selected = table.coordinate_to_cell_key(table.cursor_coordinate).row_key.value if table.row_count else None
-        matches = matching_players(self.directory, self.query_one('#player-search', Input).value)
+        ranked = ranked_players(self.directory, self.query_one('#player-search', Input).value)
+        matches = [p for p, score in ranked]
+        scores = {p['server']['id']+':'+p['id']: score for p, score in ranked}
         self.results = {p['server']['id']+':'+p['id']: p for p in matches}
         now = time.time()
         cells = {}
@@ -149,7 +187,8 @@ class PlayerSearch(Dialog):
             cells[key] = [Text(player['name']), Text(player_tag(player) or '—'),
                           Text(player.get('clan_tag') or '—'), Text(player.get('team') or '—'),
                           Text(server['name']), Text(server['node'].upper()),
-                          str(server['port']), player['id'][:8]+'…', f'{int(now-server["observed_at"])}s ago']
+                          str(server['port']), player['id'][:8]+'…', f'{int(now-server["observed_at"])}s ago',
+                          'Approximate name' if scores[key] else 'Exact / substring']
         if list(cells) != list(self.rendered):
             table.clear()
             for key, values in cells.items():table.add_row(*values, key=key)
@@ -163,6 +202,8 @@ class PlayerSearch(Dialog):
             table.move_cursor(row=list(self.results).index(selected))
         self.query_one('#player-open', Button).disabled = not bool(matches)
         message = coverage_text(self.directory, len(matches), now)
+        if approximate := sum(score > 0 for score in scores.values()):
+            message += f' · {approximate} approximate name matches'
         if not matches:
             message += ' · No matching players in available fresh rosters.'
         self.query_one('#player-coverage', Static).update(Text(message))

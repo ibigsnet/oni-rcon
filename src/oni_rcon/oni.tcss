@@ -5,7 +5,11 @@ VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 
 #masthead { height: 1; padding: 0 1; background: $panel; color: $foreground; }
 #body { height: 1fr; }
-#banner { visibility: hidden; height: 1; padding: 0 1; }
+#alert-bar { height: 1; }
+#banner { visibility: hidden; height: 1; width: 1fr; padding: 0 1; }
+#alert-bar Button { height: 1; min-width: 0; border: none; padding: 0 1; margin: 0; }
+#findings-open { width: 14; }
+#clear-alerts { width: 18; }
 #banner.-on { visibility: visible; background: $error; color: $background; }
 #banner.-on.-warn { background: $warning; }
 #banner.-on.-dim { background: $error 55%; }

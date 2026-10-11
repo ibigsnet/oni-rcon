@@ -129,3 +129,22 @@ def test_search_failure_removes_previously_visible_locations():
             await pilot.press('escape')
             fleet.submit.assert_not_called()
     asyncio.run(check())
+def test_fuzzy_names_rank_exact_first_but_never_relax_tags_ids_or_node_filters():
+    from oni_rcon.player_search import ranked_players, name_distance
+    rows = [server(1), server(2, 'node-c')]
+    d = directory(rows)
+    d['players'][0].update(name='Knoxtane', service_tag='Z74')
+    d['players'][1].update(name='Knoxtnae', service_tag='Y99')
+    pairs = ranked_players(d, 'Knoxtnae')
+    assert [score for p, score in pairs] == [0, 1]
+    assert pairs[0][0]['name'] == 'Knoxtnae'
+    assert matching_players(d, 'name:Knoxtnae tag:Z74') == [d['players'][0]]
+    assert not matching_players(d, 'name:Knoxtnae tag:Z75')
+    assert not matching_players(d, 'name:Knoxtnae @Z7')
+    assert not matching_players(d, 'name:Knoxtnae node:pvf')
+    assert not matching_players(d, 'id:zzzzzzzz')
+    assert name_distance('cat', 'bat') is None
+    assert name_distance('completelydifferent', 'Knoxtane') is None
+    assert name_distance('knoxtnae', 'knoxtane') == 1
+    d['players'][0]['server']['observed_at'] = time.time()-31
+    assert not matching_players(d, 'Knoxtane tag:Z74')

@@ -50,6 +50,7 @@ from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice,
 from .install import InstallError, place, plan, size_words, target_for
 from .pings import JOIN_PING, follow_join_pings
 from .medals import Medals
+from .findings import Findings
 from .prefs import Prefs
 from .rcon import Rcon, Tunnel
 from .state import ForgeState, norm, refs_of
@@ -770,7 +771,8 @@ GUIDE = [
         ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
         ("Superintendent", "The small green face on the left, on every tab, watches every server's feed. It welcomes a "
                            "join, startles at a call for an admin, scowls at a cheat flag, approves a kick or ban, is "
-                           "impressed by a medal and unimpressed by a mute; the word under it says how it feels."),
+                           "impressed by a medal and unimpressed by a mute. Click the face or press F11 for recent "
+                           "findings with evidence: repeated kick votes, vote fights, highlights and review flags."),
     ]),
     ("F1  ASSETS  ·  the players", [
         ("Pick a player", "Click a row, or move with ↑ ↓. Their file opens on the right, with buttons to tell, kick, "
@@ -789,7 +791,8 @@ GUIDE = [
                       "go out a few at a time, and the command log tallies how it went."),
         ("Medals", "Kills carry their Halo 3 medals as they happen: double kill and up, sprees, killjoys."),
         ("Alerts", "Chat asking for an admin, or naming a cheat, pops up, beeps and turns the CONDITION at the top red. "
-                   "Servers you aren't looking at show a ⚑ count until you open them or this feed."),
+                   "CLEAR ALL ALERTS or Ctrl+L acknowledges alerts across every server, including hidden ones. "
+                   "History and current health problems remain visible; new events still alert."),
     ]),
     ("F3  OPERATIONS  ·  running the match", [
         ("Buttons", "Change map or mode, queue what plays next, end the round, shuffle teams, run votes, broadcast, "
@@ -1238,6 +1241,8 @@ class OniApp(App):
         Binding("f5", "tab('console')", "Console"), Binding("f6", "tab('forge')", "Forge"),
         Binding("f10", "tab('health')", "Health"),
         Binding("ctrl+b", "broadcast", "Broadcast"),
+        Binding("ctrl+l", "clear_alerts", "Clear alerts", show=False, priority=True),
+        Binding("f11", "findings", "Findings", show=False),
         Binding("ctrl+r", "refresh", "Refresh"), Binding("x", "redact", "Redact"),
         Binding("question_mark", "help", "Help"), Binding("slash", "focus_input", "Type", show=False),
         Binding("g", "goto", "Go to", show=False),
@@ -1265,6 +1270,7 @@ class OniApp(App):
         self.forge_note, self.forge_stale, self.forge_opened = "", 0, False
         self.featured: dict[str, str] = {}  # listing id -> the favourites collection it's in, while that view is up
         self.sup, self.sup_key, self.sup_fit = Superintendent(), None, None  # it, what it drew, the layout it fits
+        self.findings = Findings()
         self.versions_for = ""  # the listing whose versions the table shows: its cursor starts on the newest installable
         self.detail_want: str | None = None  # the listing whose versions are being fetched
         self.watching, self.watch_said = False, ""  # a look at the changes feed under way; the last fault told
@@ -1305,7 +1311,10 @@ class OniApp(App):
     def compose(self) -> ComposeResult:
         yield Static(id="masthead")
         yield from self.compose_toolbar()
-        yield Static(id="banner")
+        with Horizontal(id="alert-bar"):
+            yield Static(id="banner")
+            yield Button("F11 FINDINGS", id="findings-open", compact=True)
+            yield Button("CLEAR ALL ALERTS", id="clear-alerts", compact=True)
         with Horizontal(id="body"):
             with Vertical(id="sidebar"):
                 yield from self.compose_stations()
@@ -1573,6 +1582,42 @@ class OniApp(App):
         self.banner_until = 0.0
         self.query_one("#banner").remove_class("-on", "-dim")
 
+    @on(Button.Pressed, "#clear-alerts")
+    def action_clear_alerts(self) -> None:
+        """Acknowledge every station, including cards hidden by fleet filters."""
+        self.alert_at = float("-inf")
+        self.hide_banner()
+        self.clear_notifications()
+        self.findings.acknowledge()
+        self.sup.clear()
+        for st, card in zip(self.stations, self.cards):
+            st.alerts, st.flash, st.drawn = 0, 0, ()
+            if card.parent is not None and st.index in self.lit:
+                card.parent.styles.clear_rule("background")
+                card.notify_style_update()
+            self.paint_card(st)
+        self.lit.clear()
+        self.paint_masthead()
+        self.tick_super()
+
+    @on(Button.Pressed, "#findings-open")
+    @on(events.Click, "#super")
+    def action_findings(self) -> None:
+        from .finding_view import FindingsView
+        self.push_screen(FindingsView())
+
+    def finding_coverage(self) -> str:
+        online = sum(st.online for st in self.stations)
+        return (f"Live events: {online}/{len(self.stations)} servers connected. "
+                "Customer observations run while this console is open. "
+                "Perfection appears only if the server supplies an explicit medal event.")
+
+    def report_finding(self, finding, st) -> None:
+        self.sup.report(redact_text(f"{st.label}: {finding.title}", self.redact), finding.level)
+        if finding.level == "review" and finding.kind not in ("native_flag", "player_report"):
+            self.notify(finding.title, title=f"REVIEW NEEDED · {st.label}", severity="warning", timeout=10)
+            self.alert(st)
+
     @on(events.Click, "#banner")
     def _banner(self) -> None:
         self.hide_banner()
@@ -1741,6 +1786,13 @@ class OniApp(App):
         """Redraw the Superintendent when its face or words changed: a blink, an easing expression, a new reaction."""
         if not self.is_running:  # the timer can fire once more while quitting
             return
+        latest = next((r for r in self.findings.recent() if r.at > self.findings.acknowledged_at), None)
+        if latest and time.time() - latest.at <= 300:
+            station = next((st for st in self.stations if str(st.index) == latest.server), None)
+            label = station.label if station else latest.server
+            self.sup.last = redact_text(f"{label}: {latest.title} · F11", self.redact)
+        elif self.sup.last.endswith(" · F11"):
+            self.sup.last = ""
         self.sup.motion = self.animation_level != "none"
         box, n = self.query_one("#super", Static), self.sup_size()
         if (n, self.size) != self.sup_fit:  # the terminal or the sidebar changed: the list makes room again
@@ -1787,6 +1839,7 @@ class OniApp(App):
         if not self.is_running:  # a late reply or event while quitting: the widgets are already gone
             return
         st = self.by_rcon[rcon]
+        self.findings.reset(str(st.index))
         if state == "online":
             st.medals.new_game()  # what happened while we were away is unknown
             self.relabel()
@@ -2004,6 +2057,8 @@ class OniApp(App):
         if self.raw_events:
             self.log_cmd(Text(f"{st.label} ◂ ", CYAN) + Text(json.dumps(redact_data(ev, self.redact)), DIM))
         names = st.names
+        for finding in self.findings.ingest(str(st.index), ev, names):
+            self.report_finding(finding, st)
         if ev.get("event") == "join":  # a join names the player by ID: kills that follow may use it
             st.past.update({f: str(pick(ev, "name", "player", default="?")) for f in id_forms(pick(ev, "id", "player_id"))
                             if len(f) >= 8})
@@ -2681,6 +2736,8 @@ class OniApp(App):
 
     def get_system_commands(self, screen):
         yield from super().get_system_commands(screen)
+        yield SystemCommand("Clear all alerts", "acknowledge every server, including hidden cards (Ctrl+L)", self.action_clear_alerts)
+        yield SystemCommand("Superintendent findings", "recent observations and supporting evidence (F11)", self.action_findings)
         yield SystemCommand("Go to station", "every station, the busiest first  (g)", self.action_goto)
         for i, st in enumerate(self.stations):  # the palette reads titles as markup, and labels come from servers
             yield SystemCommand(escape(f"Station {i + 1}: {st.label}"), escape(st.server.where),
