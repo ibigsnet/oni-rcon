@@ -1,23 +1,31 @@
-## IBIGS 0.7 integration (9 October 2026)
+## IBIGS 0.9.0+ibigs.7 (11 October 2026)
 
-This fork includes upstream 0.7.0 plus the existing fleet search, sorting, tagged broadcasts and player directory.
-The sidebar redraws only visible cards while preserving command targets through sorting and dynamic discovery.
-Operations now fits 80-column terminals, bans show their moderator correctly, and customer/direct mode can opt in
-to join-time ping from server logs. The managed fleet has no log access, so missing ping remains unknown.
-Forge now shows thumbs-up/down votes, all authors, curated favourites, views, release notes, and individual release
-withdrawals. Multiple withdrawn releases remain flagged until every affected local lobby has moved on. The new
-Superintendent reacts to direct RCON events; in fleet mode it explicitly says the native event feed is not connected.
-On fleet-console, **F9** browses the controller's shared ReclaimerForge catalog; **F6** retains the guarded container controls.
-The provider catalog is read-only: validated content rollout remains the controller's job, using each lobby's empty
-queue. It does not show a per-lobby installed inventory and it needs no Forge API key in the terminal.
+This private fork incorporates upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 and
+the IBIGS customer and fleet controls. Runtime commit `79a1c44` is deployed on fleet-console and enrolled Halo 3 VPSs.
+`main` and `ibigs/fleet` carry the maintained source; customer updates use the separately signed private channel.
 
-Customer VMs launch `oni`, which discovers only their own local lobbies. **Ctrl+F** finds a local server and **F6**
-opens Forge. Each customer supplies their own catalog:read/assets:download key; persistent preferences are separate
-from the generated lobby list. Verified files go into Maps/Forge, Game Modes/Forge or Playlists/Forge with a content
-hash in their filename, preserving earlier versions. Installs do not restart or load a map automatically. Required
-mods, unknown compatibility, and author-reported player counts still need review before use. Native loading remains
-an explicit, confirmed action. Local round counts include only observed sessions and are disabled for cached fleet
-telemetry; they are not XP evidence.
+**Ctrl+G** opens fleet player search. Exact and substring matches rank first; small name typos and adjacent
+transpositions are supported and labelled. Structured filters remain non-fuzzy, stale rosters are excluded,
+duplicate names retain their identities, and opening a result checks the full player ID.
+
+**CLEAR ALL ALERTS / Ctrl+L** acknowledges every server in the open console, including filtered servers.
+Current health conditions and report history remain. **F11** or the Superintendent opens recent findings:
+repeated kick votes, reciprocal vote fights, kill bursts, explicit native medals and reports requiring review.
+Suspicion never triggers automatic moderation. Perfection requires an explicit native medal event.
+Customer findings observe the connected event feed while the console is open. fleet-console reads findings from
+independent private node observers; it does not stream the full native feed into F2.
+
+Customer VMs launch `oni`, which discovers only their own local lobbies. **F6** opens ReclaimerForge;
+provisioning supplies a private customer catalog/download credential, and personal overrides are preserved.
+**F7** controls lobbies, **F8** manages persistent schedules, and **F9** checks updates and manages automatic
+updates. New-client images enable Oni and guarded game updates by default; existing choices are preserved.
+Verified Forge downloads are staged with content hashes, without silently loading a map or restarting a game.
+On fleet-console, **F9** browses the controller's shared Forge catalog and **F6** retains guarded container operations.
+**F10** reports health. The fixed sidebar and bounded polling preserve the selected command target.
+
+The IBIGS deployment target is Linux: customer scheduling uses POSIX file locks and the VPS system service,
+and fleet-console runs the terminal in a Linux container. CI runs the complete suite on Linux with Python 3.11, 3.12
+and 3.13. Native Windows hosting helpers are not supported by this maintained fork.
 
 API mappings were checked against ReclaimerForge's real catalog, manifest and OpenAPI schema. Credentials stay on
 the API origin, asset fetches are restricted to Forge/its CDN, paths cannot escape the content root via a symlink,

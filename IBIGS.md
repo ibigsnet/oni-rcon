@@ -1,8 +1,8 @@
 # IBIGS Reclaimer terminal
 
-## Customer VPS controls (0.9.0+ibigs.2)
+## Customer VPS controls (0.9.0+ibigs.7)
 
-Customers run `oni` in their VPS. F6 opens ReclaimerForge with their own API key; F7 starts and stops their lobbies;
+Customers run `oni` in their VPS. F6 opens ReclaimerForge with provisioned access or their personal API-key override; F7 starts and stops their lobbies;
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
 every lobby is stopped. Fleet mode keeps its existing controls and never enables the tenant scheduler.
 
@@ -16,7 +16,7 @@ actions run as root so an expired interactive login cannot prevent scheduled upd
 live under `/srv/ibigs/automation`, readable by `ibigs-admin`. No game password, Forge key or player roster is stored
 there. Jobs are claimed durably before execution; an uncertain reply is never retried. Missed occurrences are skipped,
 and repeated local times during a DST fold are not replayed. Stop, restart and game-update jobs use the existing
-occupancy checks without force. Automatic updates are opt-in. Console updates use the signed private IBIGS channel;
+occupancy checks without force. New-client images enable automatic console and guarded game updates; existing preferences are preserved. Console updates use the signed private IBIGS channel;
 game updates pin the official image digest and retain rollback support. `oni jobs list`, `history`, `add`, `pause`,
 `resume`, and `delete` provide the same schedules from the shell.
 
@@ -38,9 +38,9 @@ The private fleet mode discovers NODE-A, NODE-C, NODE-B, NODE-E and NODE-D from 
 
 An empty running lobby remains online, including when native RCON reports `no_game`. `Standby spare — intentionally stopped` means optional dynamic capacity that the controller currently wants stopped. An operator hold, an unexpectedly stopped server, a retired registry entry, and stale or unavailable telemetry have separate messages. The 2026-10-09 inventory contains 82 running lobbies across five nodes; use the live inventory for current counts. Restart the terminal UI to pick up a new terminal image; game servers are unaffected.
 
-**ReclaimerForge:** F9 opens the authenticated, cached fleet catalog, including thumbs-up/down votes, coauthors, recent download history, release notes, and the timed collections under FAVOURITES. Missing collection support is reported explicitly; an empty current collection is not inferred from an unavailable feed. The fleet view shows the provider's reviewed catalog without exposing its API key or permitting downloads or live playlist changes from the terminal. The managed controller owns those operations. In customer VPS mode, run `oni` and use F6 for Forge: the customer supplies their own key in their private persistent Forge configuration. Releases and assets are pinned; downloads must pass size and SHA-256 checks. New content is staged without overwriting earlier versions. Shell commands for credentials and unrestricted download hosts are disabled. Customer mode supports local round recording; fleet recording remains disabled until native event delivery is available.
+**ReclaimerForge:** F9 opens the authenticated, cached fleet catalog, including thumbs-up/down votes, coauthors, recent download history, release notes, and the timed collections under FAVOURITES. Missing collection support is reported explicitly; an empty current collection is not inferred from an unavailable feed. The fleet view shows the provider's reviewed catalog without exposing its API key or permitting downloads or live playlist changes from the terminal. The managed controller owns those operations. In customer VPS mode, run `oni` and use F6 for Forge. Provisioning supplies a private customer key command; a customer may save a personal key override in their persistent Forge configuration. Releases and assets are pinned; downloads must pass size and SHA-256 checks. New content is staged without overwriting earlier versions. Shell-string credential commands and unrestricted download hosts are disabled; an approved argument array can read the provisioned local credential. Customer mode supports local round recording; fleet recording remains disabled until native event delivery is available.
 
-**Superintendent:** the sidebar now includes the upstream status face. Customer/direct RCON mode reacts to the real event feed, with redacted addresses and reduced-motion support. fleet-console displays “Native event feed not connected” because the managed adapter does not stream game events. Its presence does not add event coverage or game-server polling.
+**Superintendent:** the sidebar includes the upstream status face. Customer/direct RCON mode reacts to the real event feed, with redacted addresses and reduced-motion support. fleet-console receives bounded findings from independent, read-only node observers through the private authenticated operator API. F11 shows findings and observer coverage; the managed adapter still does not stream the full native feed into F2.
 
 **Join-time ping:** the player table and dossier can show the latency recorded when a player joined, using an optional direct/SSH log reader. It is not live ping or packet-loss monitoring. fleet-console has no game-log access and shows `—` for unknown ping. The automatic customer lobby configuration does not enable it; an operator can supply a private manual configuration with `ping_log = ["tail", "-F", "/srv/reclaimer/logs/{port}.log"]`, existing log-read permission and their server entries. Run `oni --config /absolute/path/to/oni-rcon.toml`; do not edit the generated lobby list. Shell strings and shell expansion are disabled. SSH readers require a trusted host key and POSIX host with `setsid`. See the [configuration examples](README.md#player-ping).
 
@@ -60,7 +60,7 @@ The 0.8.1 integration includes the upstream Halo archive and larger Superintende
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. This source version is `0.9.0+ibigs.4`, a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. The deployed runtime is `0.9.0+ibigs.7` at `79a1c44`, also packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Later repository documentation/CI changes do not replace the immutable signed deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
