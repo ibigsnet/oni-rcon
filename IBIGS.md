@@ -1,6 +1,6 @@
 # IBIGS Reclaimer terminal
 
-## Customer VPS controls (0.9.0+ibigs.8)
+## Customer VPS controls (0.9.0+ibigs.9)
 
 Customers run `oni` in their VPS. F6 opens ReclaimerForge with provisioned access or their personal API-key override; F7 starts and stops their lobbies;
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
@@ -60,7 +60,7 @@ The 0.8.1 integration includes the upstream Halo archive and larger Superintende
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.8` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.9` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
@@ -151,3 +151,26 @@ Ordinary game-mod talk, command tutorials and negated accusations are excluded.
 Repeated topics across speakers wait two minutes; each speaker/category waits one
 minute. Phase changes and reconnects reset evidence windows but keep cooldowns.
 Evidence retains the original request for review. No external language service is used.
+
+
+### Conversation context (0.9.0+ibigs.9)
+
+Review findings now include player chat from the same lobby: at most 20 messages in the
+120 seconds before the finding, the triggering message when applicable, and at most 20
+messages in the following 120 seconds. The alert is immediate. Follow-ups update the
+existing finding without re-alerting or undoing acknowledgement, including chat requests
+whose duplicate notifications were suppressed. Kick-vote patterns and native flags also
+receive context. Server-channel automated announcements are excluded.
+
+F11 labels BEFORE / TRIGGER / AFTER, timestamps and channels, and links speakers through
+the same exact-ID roster check. EXPAND hides the report list to make room for reading;
+SPLIT VIEW restores it. New messages preserve the evidence scroll position. Ambiguous
+pronouns are not roster targets. Connection gaps/restarts close pending conversations
+with an interruption notice; round changes keep chat continuity. Context begins only
+when the observer/console has a live feed, so earlier messages cannot be reconstructed.
+
+The existing 200-finding / one-hour retention remains. Ring buffers, text lengths and
+follow-up windows are bounded. Fleet context is an additive authenticated response field;
+older clients continue receiving the original report schema. A byte budget keeps responses
+under the terminal ceiling, prioritizing recent conversations. Already-received context
+is never discarded by an older or budget-limited poll. No external language service is used.

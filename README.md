@@ -1,4 +1,4 @@
-## IBIGS 0.9.0+ibigs.8 (11 October 2026)
+## IBIGS 0.9.0+ibigs.9 (11 October 2026)
 
 This private fork incorporates upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 and
 the IBIGS customer and fleet controls. `main` and `ibigs/fleet` carry the maintained source;
@@ -10,6 +10,13 @@ Confirmation names the target server, map, mode and player count. End match keep
 **Clickable findings and notifications** open the relevant server and recheck the reported player's full ID
 against a fresh roster. The reporter and subject are separate links. Missing or ambiguous identities leave
 no player selected; opening a report never performs moderation.
+
+**Conversation context:** review findings retain up to 20 player messages from the preceding two minutes,
+mark the trigger, then collect up to 20 follow-up messages over two minutes. F11 updates the same finding
+without another alert; **EXPAND** gives the conversation the full evidence panel. Timestamps, channels and
+clickable speakers help identify what a request refers to. Pronouns such as “him” never guess a player.
+Feed gaps are marked; round changes preserve chat. Only observed messages are available, with the existing
+one-hour / 200-finding history limit. Busy fleet responses prioritize newer conversations.
 
 **Quieter Superintendent:** Infection, Fat Kid and SWAT suppress kill-count highlights and suspicion flags.
 Other modes limit highlights to one per player per five minutes and one per server per minute. Explicit

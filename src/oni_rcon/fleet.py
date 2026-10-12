@@ -283,7 +283,8 @@ class FleetApp(FleetHealthMixin, OniApp):
             stations = {s.rcon.ident: s for s in self.stations if s.rcon}
             for raw in reversed(data['findings'][:200]):
                 try:
-                    row = Finding(**{**raw, **data.get('links', {}).get(raw.get('id'), {})})
+                    row = Finding(**{**raw, **data.get('links', {}).get(raw.get('id'), {}),
+                                    'chat_context': data.get('chat_contexts', {}).get(raw.get('id'), {})})
                     st = stations.get(row.server)
                     if st is None:
                         continue

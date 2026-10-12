@@ -6,7 +6,7 @@ relay arrival time, drives windows. Gaps reset pattern state, not report history
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import hashlib
 import json
 import math
@@ -18,6 +18,9 @@ HISTORY = 200
 RETENTION = 3600
 VOTE_WINDOW = 300
 CHAT_REPEAT = 120
+CHAT_BEFORE = 120
+CHAT_AFTER = 120
+CHAT_LIMIT = 20
 FAST_MODES = re.compile(r'\b(?:infection|infected|swat|fat[ _-]?kid)\b', re.I)
 
 
@@ -137,6 +140,7 @@ class Finding:
     source: str = 'Native RCON events'
     subjects: tuple = ()
     reporter: dict = field(default_factory=dict)
+    chat_context: dict = field(default_factory=dict)
 
     def row(self):
         return asdict(self)
@@ -150,6 +154,8 @@ class Observations:
     cooldowns: dict = field(default_factory=dict)
     last: float = 0
     combat: tuple = ()
+    chat: deque = field(default_factory=lambda: deque(maxlen=CHAT_LIMIT+1))
+    chat_since: float | None = None
 
 
 class Findings:
@@ -159,10 +165,26 @@ class Findings:
         self.states = {}
         self.acknowledged_at = 0
 
-    def reset(self, server):
+    def reset(self, server, *, keep_chat=False):
         # A round change or reconnect breaks evidence windows, not alert suppression.
         if server in self.states:
-            self.states[server] = Observations(cooldowns=self.states[server].cooldowns)
+            old = self.states[server]
+            self.states[server] = Observations(cooldowns=old.cooldowns)
+            if keep_chat:
+                state = self.states[server]
+                state.chat, state.chat_since = old.chat, old.chat_since
+                state.last, state.recent = old.last, old.recent
+        if not keep_chat and server in self.states:
+            self.interrupt_chat(server)
+
+    def interrupt_chat(self, server=None):
+        """Never join conversations across an unobserved connection or process gap."""
+        for i, row in enumerate(self.history):
+            ctx = row.chat_context
+            if (server is None or row.server == str(server)) and ctx.get('status') == 'collecting':
+                status = 'complete' if self.now() >= ctx['until'] else 'interrupted'
+                self.history[i] = replace(row, chat_context={**ctx, 'status': status,
+                    'revision': ctx['revision']+1})
 
     def acknowledge(self):
         self.acknowledged_at = self.now()
@@ -172,10 +194,36 @@ class Findings:
         return [r for r in reversed(self.history) if 0 <= now - r.at <= RETENTION]
 
     def add(self, finding):
-        if not 0 <= self.now() - finding.at <= RETENTION or any(r.id == finding.id for r in self.history):
+        if not 0 <= self.now() - finding.at <= RETENTION:
             return False
+        for i, row in enumerate(self.history):
+            if row.id == finding.id:
+                # New context updates the existing finding without a second notification.
+                # A delayed poll may not roll back evidence already received.
+                if (row.server == finding.server and row.at == finding.at and row.kind == finding.kind
+                        and row.evidence == finding.evidence and
+                        finding.chat_context.get('revision', -1) > row.chat_context.get('revision', -1)):
+                    self.history[i] = replace(row, chat_context=finding.chat_context)
+                return False
         self.history.append(finding)
         return True
+
+    def append_chat(self, server, message):
+        for i, row in enumerate(self.history):
+            ctx = row.chat_context
+            if row.server != str(server) or ctx.get('status') not in ('collecting', 'complete'):
+                continue
+            if message['at'] > ctx['until']:
+                if ctx['status'] == 'collecting':
+                    self.history[i] = replace(row, chat_context={**ctx, 'status': 'complete',
+                        'revision': ctx['revision']+1})
+                continue
+            if message['at'] < row.at:
+                continue
+            messages = [*ctx['messages'], {**message, 'position': 'after'}]
+            count = sum(m['position'] == 'after' for m in messages)
+            self.history[i] = replace(row, chat_context={**ctx, 'messages': messages,
+                'revision': ctx['revision']+1, 'status': 'limited' if count >= CHAT_LIMIT else ctx['status']})
 
     def ingest(self, server, event, names=None, context=None, roster=()):
         now, names, context = self.now(), names or {}, context or {}
@@ -184,13 +232,17 @@ class Findings:
             return []
         kind = event.get('event')
         if kind in ('lagged', 'phase') or (kind == 'control' and event.get('action') == 'kill_feed' and not event.get('ok')):
-            self.reset(server)
+            self.reset(server, keep_chat=kind != 'lagged')
             return []
         if server not in self.states:
             if len(self.states) >= 256:
-                self.states.pop(next(iter(self.states)))
+                evicted = next(iter(self.states))
+                self.interrupt_chat(evicted)
+                self.states.pop(evicted)
             self.states[server] = Observations()
         state = self.states[server]
+        if state.chat_since is None:
+            state.chat_since = stamp
         combat = (context.get('map'), context.get('mode'), quiet_kill_mode(context))
         if combat != state.combat:
             state.kills.clear()
@@ -208,6 +260,14 @@ class Findings:
             state.recent[signature] = stamp
         state.cooldowns = {k: t for k, t in state.cooldowns.items() if stamp - t < VOTE_WINDOW}
         found = []
+        while state.chat and stamp-state.chat[0]['at'] > CHAT_BEFORE:
+            state.chat.popleft()
+        chat = None
+        if kind == 'chat' and str(event.get('channel', '')).casefold() != 'server' and words(event.get('text')):
+            chat = {'at': stamp, 'speaker': subject({'id': event.get('player_id') or event.get('id') or event.get('player'),
+                    'name': event.get('name')}, names, roster),
+                    'channel': words(event.get('channel') or 'all', 24), 'text': words(event.get('text'), 500)}
+            self.append_chat(server, chat)
 
         def player(value):
             if isinstance(value, dict):
@@ -226,7 +286,12 @@ class Findings:
             ident = hashlib.sha256(json.dumps([server, stamp, key, evidence]).encode()).hexdigest()[:24]
             row = Finding(ident, str(server), stamp, category, level, words(title), words(evidence, 700),
                           subjects=tuple(subject(v, names, roster) for v in subjects),
-                          reporter=subject(reporter, names, roster) if reporter is not None else {})
+                          reporter=subject(reporter, names, roster) if reporter is not None else {},
+                          chat_context={'messages': [*({**m, 'position': 'before'} for m in list(state.chat)[-CHAT_LIMIT:]),
+                                         *([{**chat, 'position': 'trigger'}] if chat else [])],
+                              'since': max(state.chat_since, stamp-CHAT_BEFORE), 'until': stamp+CHAT_AFTER,
+                              'before_limited': len(state.chat) > CHAT_LIMIT, 'status': 'collecting', 'revision': 1}
+                              if level == 'review' else {})
             if self.add(row):
                 found.append(row)
                 return True
@@ -286,7 +351,9 @@ class Findings:
             if request:
                 reporter = {'id': event.get('player_id') or event.get('id') or event.get('player'), 'name': event.get('name')}
                 ident, name = player(reporter)
-                targets = (request.target,) if request.target else (reporter,) if request.kind == 'admin_help' else ()
+                # Pronouns are conversation references, not an identified roster player.
+                target = request.target if request.target not in ('him', 'her', 'them', 'someone', 'somebody', 'that guy', 'this guy') else ''
+                targets = (target,) if target else (reporter,) if request.kind == 'admin_help' else ()
                 actor_key = ('chat-actor', ident, request.kind)
                 if stamp-state.cooldowns.get(actor_key, float('-inf')) >= 60:
                     title = {'admin_help': 'Player needs help', 'moderation_request': 'Player requests moderation',
@@ -306,4 +373,6 @@ class Findings:
                 report(('perfection', ident), 'perfection', 'highlight', f'Server reported Perfection: {name}',
                        'Explicit Perfection award in the native event feed. Never inferred from a partial match.', 60,
                        subjects=({'id': ident, 'name': name},))
+        if chat:
+            state.chat.append(chat)
         return found

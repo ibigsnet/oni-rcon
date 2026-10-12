@@ -1665,8 +1665,10 @@ class OniApp(App):
         if not st:
             self.notify("This server is no longer in the inventory.", severity="warning")
             return
-        target = row.reporter if role == "reporter" else (
-            row.subjects[index] if role == "subject" and 0 <= index < len(row.subjects) else {})
+        messages = row.chat_context.get("messages", [])
+        target = (messages[index].get("speaker", {}) if role == "chat" and 0 <= index < len(messages) else
+                  row.reporter if role == "reporter" else (
+            row.subjects[index] if role == "subject" and 0 <= index < len(row.subjects) else {}))
         target = target if isinstance(target, dict) else {}
         self.action_station(st.index)
         ready = asyncio.Event()
@@ -1687,7 +1689,7 @@ class OniApp(App):
             matches = [p for p in st.players if player_id and str(pick(p, "player_id", "id", default="")).casefold() == player_id.casefold()]
             if len(matches) == 1:
                 verified = target_of(matches[0])
-                notice = "Selected the reported player by their verified ID."
+                notice = "Selected the linked player by their verified ID."
             elif target:
                 notice = ("Player has left or their identity is ambiguous; no player selected." if player_id else
                           "The report did not identify a unique player; no player selected.")
