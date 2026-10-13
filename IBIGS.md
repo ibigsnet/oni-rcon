@@ -1,10 +1,13 @@
 # IBIGS Reclaimer terminal
 
-## Customer VPS controls (0.9.0+ibigs.9)
+## Customer VPS controls (0.9.0+ibigs.10)
 
 Customers run `oni` in their VPS. F6 opens ReclaimerForge with provisioned access or their personal API-key override; F7 starts and stops their lobbies;
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
 every lobby is stopped. Fleet mode keeps its existing controls and never enables the tenant scheduler.
+
+From 0.9.0+ibigs.10 customer consoles open with the same full boot sequence as the fleet-console fleet console every time
+(`oni --intro quick` or `oni --no-intro` opt out). Enter, any other key or a click skips it.
 
 Jobs support five-field numeric cron with an explicit IANA timezone, UTC-aligned intervals in minutes, and observed
 match boundaries. Before-match broadcasts run when voting opens or loading begins; after-match broadcasts require
@@ -60,7 +63,7 @@ The 0.8.1 integration includes the upstream Halo archive and larger Superintende
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.9` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.10` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
 
 Local source: `/home/user/Projects/ibigs-reclaimer-console`.
 fleet-console source: `/srv/appdata/reclaimer/terminal/source`.

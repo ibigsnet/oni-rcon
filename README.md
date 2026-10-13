@@ -1,3 +1,7 @@
+## IBIGS 0.9.0+ibigs.10 (13 October 2026)
+
+Customer consoles get the fleet console's full boot sequence on every start; Enter, any key or a click skips it.
+
 ## IBIGS 0.9.0+ibigs.9 (11 October 2026)
 
 This private fork incorporates upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 and

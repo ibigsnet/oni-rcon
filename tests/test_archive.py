@@ -174,6 +174,20 @@ def test_full_still_plays_with_the_rest_of_the_motion_reduced(tmp_path):
     asyncio.run(go())
 
 
+def test_enter_skips_the_whole_sequence(tmp_path):
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = full_app(ports, tmp_path)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.pause(0.3)
+            assert isinstance(app.screen, Archive)
+            await pilot.press("enter")
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, (Archive, Boot))
+
+    asyncio.run(go())
+
+
 def test_a_click_skips_the_whole_sequence(tmp_path):
     async def go():
         ports, keep = await serve_fakes(tick=False)
