@@ -880,7 +880,8 @@ class Archive(Screen):
     """The boot sequence's first act, the Halo ASCII Archive from the design project: the ONI emblem, Section Three,
     Installation 04, 343 Guilty Spark and the Superintendent decrypt one file at a time (archive.frame draws each
     moment). Then Boot plays the last act, the emblem returning for the clearance check. Any key skips both, and F1
-    to F6 go straight to their tab. Only with full animations: with them off there's nothing to watch."""
+    to F6 go straight to their tab; a click skips as well. It plays whenever "full" is asked for, even with the
+    console's other motion reduced."""
 
     def compose(self) -> ComposeResult:
         with Vertical(id="boot"):
@@ -900,6 +901,10 @@ class Archive(Screen):
     def on_key(self, e: events.Key) -> None:
         if e.key not in TABS:
             e.stop()
+        self.action_skip()
+
+    def on_click(self, e: events.Click) -> None:
+        e.stop()
         self.action_skip()
 
     def tick(self) -> None:
@@ -930,7 +935,7 @@ class Archive(Screen):
 
 
 class Boot(Screen):
-    """The splash: decrypts the title and materialises the emblem while the stations sign in. Any key skips it,
+    """The splash: decrypts the title and materialises the emblem while the stations sign in. Any key or click skips it,
     and F1 to F6 go straight to their tab. With animations off (TEXTUAL_ANIMATIONS) it all appears at once."""
     HEADING = "O F F I C E   O F   N A V A L   I N T E L L I G E N C E"
     SHOW_DOWN = 5  # a fleet's stations that can't connect, listed by name; any more are counted
@@ -958,6 +963,10 @@ class Boot(Screen):
             e.stop()  # skipping shouldn't also redact, broadcast or switch station unseen
         self.action_skip()
 
+    def on_click(self, e: events.Click) -> None:
+        e.stop()  # a click skips too, and never lands on whatever is underneath
+        self.action_skip()
+
     @staticmethod
     def dotted(k: str, v: str, color: str) -> Text:
         dots = max(3, min(46 - len(k), 59 - len(k) - len(v)))  # a long value takes from the dots, not the next line
@@ -965,7 +974,8 @@ class Boot(Screen):
 
     def tick(self) -> None:
         app, el = self.app, time.monotonic() - self.t0
-        t = el if app.animation_level == "full" else 9.0  # past every effect: drawn whole at once
+        # past every effect, drawn whole at once, unless the full sequence was asked for by name
+        t = el if app.animation_level == "full" or app.intro == "full" else 9.0
         # leave room for the title, the log (a line per tunnel and station) and the progress bar
         rows = app.size.height - 9 - self.lines
         if t < 1.9 or self.drawn != rows:  # materialise, sweep once, then leave it be
@@ -1501,7 +1511,7 @@ class OniApp(App):
         self.set_interval(self.fsetup.poll, self.forge_watch)
         self.set_timer(5, self.forge_watch)  # once soon after start, for what changed while the console was closed
         self.paint_all()
-        if self.intro == "full" and self.animation_level == "full":
+        if self.intro == "full":  # asked for by name: it plays even with the rest of the console's motion reduced
             self.prefs.intro_seen = True
             self.prefs.save()
             self.push_screen(Archive())

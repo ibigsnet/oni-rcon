@@ -162,14 +162,35 @@ def test_quick_and_off_skip_the_archive(tmp_path):
     asyncio.run(go())
 
 
-def test_no_animations_means_no_archive(tmp_path):
+def test_full_still_plays_with_the_rest_of_the_motion_reduced(tmp_path):
     async def go():
         ports, keep = await serve_fakes(tick=False)
         app = full_app(ports, tmp_path)
         app.animation_level = "none"  # what TEXTUAL_ANIMATIONS=none sets, once the app has read it
         async with app.run_test(size=(160, 48)) as pilot:
             await pilot.pause(0.3)
-            assert isinstance(app.screen, Boot) and not app.prefs.intro_seen  # nothing was shown: not seen
+            assert isinstance(app.screen, Archive) and app.prefs.intro_seen
+
+    asyncio.run(go())
+
+
+def test_a_click_skips_the_whole_sequence(tmp_path):
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = full_app(ports, tmp_path)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.pause(0.3)
+            assert isinstance(app.screen, Archive)
+            await pilot.click(offset=(80, 10))
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, (Archive, Boot))
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro="quick")
+        async with app.run_test(size=(160, 48)) as pilot:
+            await pilot.pause(0.3)
+            assert isinstance(app.screen, Boot)
+            await pilot.click(offset=(80, 10))
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, Boot)
 
     asyncio.run(go())
 
