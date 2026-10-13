@@ -1,5 +1,34 @@
 # IBIGS Reclaimer terminal
 
+## Content browser, playlists, copy and team moves (0.9.0+ibigs.11)
+
+LOAD MAP+MODE, CHANGE MAP, CHANGE MODE, QUEUE NEXT, Forge's `l` and the playlist editor open one browser: a tree of
+stock maps, mod maps, ReclaimerForge downloads (with title, version and author, grouped by folder), the content
+folder, Halo 3 and Matchmaking variants, and saved and Workshop variants. The groups come from each reference's
+shape, because the server's `maps` and `modes` replies only say map, mode or variant. Type to filter by name, author,
+folder or file. Click NAME, INSTALLED, DOWNLOADS or RATING to order; click again to reverse. Where Forge installs are
+possible, GET MORE FROM RECLAIMERFORGE lists listings not installed yet; choosing one installs it (confirmed, every
+file checked) and then uses it once the server lists it. F6 orders the catalog by any column the same way (`o` next
+column, `r` reverse). Forge's "load now" now matches installed files by name (`Game Modes/Forge/rf-<sha>.json`);
+before, it always said the server didn't list them.
+
+F3 PLAYLISTS (customer VPSes) shows the Playlists library (Forge downloads and your own) and what each lobby plays,
+with filtering and column ordering. It makes and edits playlists; ADD GAME uses the browser, and weights, order,
+copy and remove are on keys and buttons. It deploys to one lobby or all. The work is done by `oni playlist`
+(`list|show|save|check|use|single|delete`), also usable from the shell. Before anything changes, the server checks
+every game itself (`dedicated playlist show`, inside the running lobby). Each lobby gets its own copy in
+`playlists/`, and `dedicated.toml` is backed up to `.oni-backup/` and re-read before replacement. Lobbies restart
+only when asked, with F7's player checks; players are disconnected only by explicit choice. Forge's playlist copies
+are never rewritten: edits are saved as copies in `Playlists/Oni`.
+
+Ctrl+Y on any page or dialog copies what is selected: player ID, name, tag, clan, ban target, listing or version ID,
+server address, any cell, the row, the whole table, or the feed. Addresses stay blanked while redacted.
+
+F2 now follows the selected server; ALL SERVERS, or F2 again, shows every server. A team move reports the game's
+verdict: the server's "Moving X to Red team." only means the request was accepted. The game can still refuse, for
+example "Teams must stay even", "Players are joining or leaving" or "Already on Red team". Customer consoles show the
+refusal from the event; the fleet console re-reads the roster for up to about 25 seconds.
+
 ## Customer VPS controls (0.9.0+ibigs.10)
 
 Customers run `oni` in their VPS. F6 opens ReclaimerForge with provisioned access or their personal API-key override; F7 starts and stops their lobbies;

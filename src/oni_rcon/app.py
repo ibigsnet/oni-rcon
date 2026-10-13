@@ -6,6 +6,7 @@ import contextlib
 import json
 import re
 import shlex
+import subprocess
 import threading
 import time
 from collections import Counter, deque
@@ -47,12 +48,14 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
+from .content import CATALOG_SORT, catalog_items, forge_entry, forge_index, items_for
 from .install import InstallError, place, plan, size_words, target_for
 from .pings import JOIN_PING, follow_join_pings
 from .medals import Medals
 from .findings import Findings, public_roster, quiet_kill_mode
 from .prefs import Prefs
 from .rcon import Rcon, Tunnel
+from .safety import clean
 from .state import ForgeState, norm, refs_of
 from .stats import Rounds
 from .superintendent import BELOW, BIG, HUGE, LARGE, MINI, SMALL, WORDS, XL, Superintendent, below, card as sup_card
@@ -124,12 +127,13 @@ OPS = [("load", "LOAD MAP+MODE", "primary"), ("map", "CHANGE MAP", "default"), (
        ("startvote", "CALL VOTE", "default"), ("passvote", "PASS VOTE", "success"),
        ("cancelvote", "CANCEL VOTE", "default"), ("broadcast", "BROADCAST", "primary"),
        ("servername", "RENAME", "default"), ("password", "JOIN PASSWORD", "default"),
-       ("maxping", "PING LIMIT", "default"), ("reconnect", "RECONNECT", "default")]
+       ("maxping", "PING LIMIT", "default"), ("reconnect", "RECONNECT", "default"),
+       ("playlists", "PLAYLISTS", "primary")]
 BAN_OPS = [("newban", "NEW BAN", "error"), ("unban", "UNBAN  u", "warning"), ("vpnallow", "VPN ALLOW  a", "default"),
            ("vpnrevoke", "VPN REVOKE  r", "default"), ("vpncheck", "CHECK IP", "default")]
 OP_GROUPS = [("MATCH", ["load", "map", "mode", "nextmap", "endround", "endgame"]),
              ("TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]),
-             ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect"])]
+             ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect", "playlists"])]
 PLAYER_OPS = [("tell", "TELL", "t"), ("kick", "KICK", "k"), ("ban", "BAN", "b"), ("mute", "MUTE", "m"),
               ("team", "TEAM", "j"), ("vpnallow", "VPN OK", "v"), ("copy", "COPY ID", "y")]
 
@@ -151,6 +155,8 @@ TIPS = {
     "op-password": "Make players type a password to join (or remove it).",
     "op-maxping": "Stop players with a high ping from joining.",
     "op-reconnect": "Drop this connection and sign in again.",
+    "op-playlists": "Make, edit and deploy playlists to your lobbies: ReclaimerForge's and your own. Needs the IBIGS "
+                    "oni helper, which checks every game with the server first.",
     "bl-newban": "Ban a player ID, an IP address or a whole range.",
     "bl-unban": "Lift the selected ban.  Key: u",
     "bl-vpnallow": "Let a player or address join through a VPN.  Key: a",
@@ -164,9 +170,10 @@ TIPS = {
     "pl-vpnallow": "Let them join through a VPN.  Key: v",
     "pl-copy": "Copy their player ID, for a ban list or a report.  Key: y",
     "add-server": "Add another server with the setup screen.",
-    "f-local": "Show only what happens on the selected server.",
+    "f-all": "Show what happens on every server, not only the selected one.  Key: F2 again",
     "fg-install": "Put the selected version on this server, every file checked against Forge's manifest.  Key: i",
-    "fg-load": "Load the installed map or gametype now, once the server lists it. Ends the current game.  Key: l",
+    "fg-load": "Load the installed map or gametype now, once the server lists it. Ends the current game. A playlist: "
+               "choose the lobbies that play it.  Key: l",
     "fg-ack": "Say you've seen that it was withdrawn: CONDITION goes back to GREEN. It stays flagged.  Key: a",
     "fg-key": "Load your own ReclaimerForge API key.  Key: k",
     "fg-more": "Fetch the next page of the catalog.  Key: n",
@@ -569,6 +576,7 @@ class Station:
     checking: bool = False
     health_ok: float = 0.0  # when the last report came in (epoch), 0 before the first
     health_err: str = ""  # why the last report didn't, scrubbed; empty while they come
+    controls: list = field(default_factory=list)  # (action, future) awaiting the engine's own verdict on a command
 
     @property
     def online(self) -> bool:
@@ -768,6 +776,9 @@ GUIDE = [
         ("Go to", "g lists every server, the busiest first: type part of a name and press Enter."),
         ("Tabs", "F1 to F6 and F10, or click the names along the top."),
         ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
+        ("Copy", "Ctrl+Y, on any page or dialog, lists what can be copied from where you are: a player's ID, name, "
+                 "tag and clan, a ban's target, a listing's ID, the server's address, any cell, the row, the whole "
+                 "table or the feed. Pick one and it's on your clipboard. Addresses stay blanked while redacted (x)."),
         ("Superintendent", "The small green face on the left, on every tab, watches every server's feed. It welcomes a "
                            "join, startles at a call for an admin, scowls at a cheat flag, approves a kick or ban, is "
                            "impressed by a medal and unimpressed by a mute. Click the face or press F11 for recent "
@@ -784,8 +795,9 @@ GUIDE = [
                        "their streak count what this console has seen since it connected."),
     ]),
     ("F2  INTERCEPTS  ·  what's happening", [
-        ("The feed", "Chat, kills, joins, kicks and bans from every server, newest at the bottom. Scroll up to read "
-                     "back; it holds still until you press End."),
+        ("The feed", "Chat, kills, joins, kicks and bans from the selected server, newest at the bottom. Tick ALL "
+                     "SERVERS, or press F2 again, to see every server; the feed's title says which. Scroll up to "
+                     "read back; it holds still until you press End."),
         ("Talk back", "Type in the box at the bottom to chat as [Server]. Start with @all to reach every server: they "
                       "go out a few at a time, and the command log tallies how it went."),
         ("Medals", "Kills carry their Halo 3 medals as they happen: double kill and up, sprees, killjoys."),
@@ -1048,7 +1060,8 @@ class ForgePane(Vertical):
                 Binding("a", "app.forge('ack')", "Acknowledge"),
                 Binding("s", "app.forge('sort')", "Sort"), Binding("w", "app.forge('window')", "Window"),
                 Binding("n", "app.forge('more')", "More"), Binding("y", "app.forge('copy')", "Copy ID"),
-                Binding("k", "app.forge('key')", "Key")]
+                Binding("k", "app.forge('key')", "Key"), Binding("o", "app.forge('column')", "Order by"),
+                Binding("r", "app.forge('flip')", "Reverse")]
 
 
 def rating_text(x: dict) -> Text:
@@ -1059,6 +1072,33 @@ def rating_text(x: dict) -> Text:
     if not total:
         return Text("no votes", DIM)
     return Text(f"▲{up or 0:,}", GREEN) + Text(f" ▼{down or 0:,}", DIM)
+
+
+# F6: click a column's name to order the catalog by it, again to turn the order round; o does the same from the keys
+LISTING_COLUMNS = ["installed", "type", "title", "author", "rating", "recent", "fit"]
+HIGH_FIRST = {"installed", "rating", "recent", "fit"}  # first click: the most, the best, the installed at the top
+
+
+def listing_key(how: str, x: dict, window: str, version, here: bool):
+    """What a listing is ordered by for one F6 column. Unknowns sort after everything known."""
+    title = title_of(x).casefold()
+    if how == "installed":
+        return here, title
+    if how == "type":
+        return kind_of(x), title
+    if how == "author":
+        a = author_of(x).casefold()
+        return not a, a, title
+    if how == "rating":
+        up, down, total = votes_of(x)
+        return total is not None, (up or 0) - (down or 0), up or 0, title
+    if how == "recent":
+        r = recent_of(x, window)
+        return r is not None, r or 0, title
+    if how == "fit":
+        ok = compatible(compat_of(x), version)
+        return {True: 2, None: 1, False: 0}[ok], title
+    return title
 
 
 def fit_text(x: dict, version) -> Text:
@@ -1261,6 +1301,7 @@ class OniApp(App):
         Binding("f10", "tab('health')", "Health"),
         Binding("ctrl+b", "broadcast", "Broadcast"),
         Binding("ctrl+l", "clear_alerts", "Clear alerts", show=False, priority=True),
+        Binding("ctrl+y", "copy_menu", "Copy", priority=True),
         Binding("f11", "findings", "Findings", show=False),
         Binding("ctrl+r", "refresh", "Refresh"), Binding("x", "redact", "Redact"),
         Binding("question_mark", "help", "Help"), Binding("slash", "focus_input", "Type", show=False),
@@ -1284,6 +1325,8 @@ class OniApp(App):
         self.forge: ForgeClient | None = None
         self.listings: list[dict] = []  # the catalog as fetched, in its order
         self.listing_rows: dict[str, dict] = {}
+        self.browse_order = ("name", False)  # the map and game type browser's column, remembered between opens
+        self.listing_order: tuple[str, bool] | None = None  # (F6 column, reversed): None keeps the catalog's order
         self.details: dict[str, dict] = {}  # listing id -> the listing with its versions, once fetched
         self.forge_next: dict | None = None  # the query for the catalog's next page
         self.forge_note, self.forge_stale, self.forge_opened = "", 0, False
@@ -1302,7 +1345,7 @@ class OniApp(App):
         self.sel, self.redact, self.raw_events = 0, True, False
         self.feed: deque = deque(maxlen=UI_LOG_LIMIT)
         self.feed_pending: deque = deque(maxlen=UI_LOG_LIMIT)
-        self.filters, self.local_only = set(CATS), False
+        self.filters, self.local_only = set(CATS), True  # F2 follows the selected server; ALL SERVERS widens it
         self.tunnels: dict[str, Tunnel] = {}
         self.history: list[str] = []
         self.hpos, self.draft = 0, ""
@@ -1364,7 +1407,7 @@ class OniApp(App):
                     with Horizontal(id="filters"):
                         for cat in CATS:
                             yield Checkbox(cat.upper(), True, id=f"f-{cat}")
-                        yield Checkbox("THIS STATION ONLY", False, id="f-local")
+                        yield Checkbox("ALL SERVERS", False, id="f-all")
                     yield Feed(id="feed", wrap=True, max_lines=UI_LOG_LIMIT)
                     yield Input(id="say", placeholder="» type to chat as [Server] on this server   ·   start with @all "
                                                       "to reach every server")
@@ -2183,6 +2226,11 @@ class OniApp(App):
         st.activity.append(time.monotonic())
         self.log_event(st, ev)
         self.sup.react(ev, reaction_words(ev, names, self.redact) if self.sup.wants(ev) else "")
+        if kind == "control":  # the engine's verdict on a command it had accepted
+            for action, verdict in list(st.controls):
+                if action == ev.get("action") and not verdict.done():
+                    verdict.set_result(ev)
+                    break
         if kind in ("join", "leave", "refused", "kick", "ban", "mute", "unmute", "control"):
             self.fetch(st, "players", "status")
         if kind in ("ban", "unban"):
@@ -2284,12 +2332,13 @@ class OniApp(App):
         self.paint_masthead()
         for st in self.stations:
             self.paint_card(st)
-        rate = sum(sum(st.rate(1, 60)) for st in self.stations)
+        rate = sum(sum(st.rate(1, 60)) for st in self.stations if not self.local_only or st is self.cur)
         live = any(st.online for st in self.stations)
         title = Text.assemble(
             ("SIGINT FEED  ", AMBER),
             ("●" if live else "○", RED if live and time.time() % 2 < 1 else blend(RED, INK, .4) if live else DIM),
-            (f" LIVE · {rate}/min" if live else " NO SIGNAL", DIM))
+            (f" LIVE · {rate}/min" if live else " NO SIGNAL", DIM),
+            (f"  ·  {self.cur.label.upper()} ONLY" if self.local_only and self.stations else "  ·  ALL SERVERS", CYAN))
         feed = self.query_one("#feed")
         if feed.border_title != title:
             feed.border_title = title
@@ -2550,8 +2599,9 @@ class OniApp(App):
         self.query_one("#sitrep", Static).update(g)
         voting = bool(vote.get("vote")) if "vote" in st.data else None  # unknown until the first fetch: leave on
         for op, *_ in OPS:  # greyed out when it can't work right now, so nobody wonders why nothing happened
-            off = (op != "reconnect" and not st.online or op in ("passvote", "cancelvote") and voting is False
-                   or op == "startvote" and voting is True)
+            off = (op not in ("reconnect", "playlists") and not st.online
+                   or op in ("passvote", "cancelvote") and voting is False or op == "startvote" and voting is True
+                   or op == "playlists" and not self.playlist_tool())
             self.query_one(f"#op-{op}", Button).disabled = off
         self.paint_theatre()
         here = str(s.get("map") or "").lower().replace(" ", "_")
@@ -2720,8 +2770,8 @@ class OniApp(App):
         cid = e.checkbox.id or ""
         if cid == "raw":
             self.raw_events = e.value
-        elif cid == "f-local":
-            self.local_only = e.value
+        elif cid == "f-all":
+            self.local_only = not e.value
             self.repaint_feed()
         elif cid.startswith("f-"):
             (self.filters.add if e.value else self.filters.discard)(cid[2:])
@@ -2784,6 +2834,10 @@ class OniApp(App):
             self.action_add_server()
 
     def action_tab(self, tab: str) -> None:
+        if tab == "intercepts" and self.query_one(TabbedContent).active == "intercepts":
+            box = self.query_one("#f-all", Checkbox)  # F2 again: this server only <-> every server
+            box.value = not box.value
+            return
         self.query_one(TabbedContent).active = tab
         w = self.query_one(PANE_FOCUS[tab])
         if w.disabled or not w.display:  # a greyed-out button can't take focus: the pane's first one that can, else the server list
@@ -2946,20 +3000,286 @@ class OniApp(App):
             if f is not None:
                 self.send(st, "mute", t, *opt(f["time"]), *opt(f["reason"]), then=("players",))
         elif what == "team":
-            team = await self.push_screen_wait(Pick(f"MOVE {name} TO", [(Text(c.upper(), TEAM_COLOR[c]), c)
-                                                                         for c in TEAMS]))
-            if team:
-                self.send(st, "team", t, team, then=("players",))
+            now_on = team_of(p)
+            team = await self.push_screen_wait(Pick(f"MOVE {name} TO", [
+                (Text.assemble((c.upper(), TEAM_COLOR[c]), ("   (on it now)" if c == now_on else "", DIM)), c)
+                for c in TEAMS]))
+            if team == now_on:
+                self.notify(f"{name} is on {team.upper()} already.", title="TEAM", severity="warning")
+            elif team:
+                self.run_worker(self.move_team(st, p, team), group="team", exit_on_error=False)
         elif what == "vpnallow":
             f = await self.push_screen_wait(Form(f"VPN ALLOW · {name}", [("note", "Note (why)", "")], verb="ALLOW",
                                                  note="Lets them join through a VPN on every server sharing the ban list."))
             if f is not None:
                 self.send(st, "vpnallow", t, *opt(f["note"]), then=("vpn",))
 
+    async def move_team(self, st: Station, p: dict, team: str) -> None:
+        """Move a player and say whether it happened. The server's reply ("Moving X to Red team.") only means it was
+        asked: the game decides a moment later, and may refuse (teams must stay even, players are joining or
+        leaving, already on that team, a game type that doesn't allow it). Its verdict comes as a control event;
+        a console without events (the fleet) reads the roster again until it shows the move, or gives up."""
+        name, t = str(pick(p, "name", default="?")), target_of(p)
+        verdict: asyncio.Future = asyncio.get_running_loop().create_future()
+        st.controls.append(("team", verdict))
+        try:
+            r = await self.cmd(st, "team", t, team, toast=False)
+            if not r.get("ok"):
+                self.notify(self.reply_text(r), title=f"{st.label} · TEAM", severity="error")
+                return
+            try:
+                ev = await asyncio.wait_for(asyncio.shield(verdict), 6)
+            except TimeoutError:
+                ev = None
+        finally:
+            st.controls[:] = [c for c in st.controls if c[1] is not verdict]
+        if ev is not None and ev.get("ok") is False:
+            self.notify(redact_text(str(ev.get("text") or "The server refused the team change."), self.redact),
+                        title=f"{st.label} · {name} NOT MOVED", severity="error", timeout=12)
+            await self._fetch(st, ("players",))
+            return
+        for wait in (0, 2, 4, 8, 12):  # the roster can lag: a fleet's is cached for up to 20 seconds
+            await asyncio.sleep(wait)
+            await self._fetch(st, ("players",))
+            now = next((x for x in st.players if target_of(x) == t), None)
+            if now is None:
+                self.notify(f"{name} has left {st.label}.", title="TEAM", severity="warning")
+                return
+            if team_of(now) == team:
+                self.notify(f"{name} is on {team.upper()} now.", title=f"{st.label} · TEAM")
+                return
+        self.notify(f"{name} is still on {team_of(now).upper() or 'the same team'}. The game can refuse a move: "
+                    "teams must stay even under the game type's team balancing, players are joining or leaving, or "
+                    "the game type doesn't allow team changes. The server's log says which.",
+                    title=f"{st.label} · {name} NOT MOVED", severity="warning", timeout=15)
+
     def entries(self, st: Station, what: str) -> list:
         return [(Text.assemble((str(pick(e, "name", default="?")), WHITE), (f"  {e.get('kind', '')}", DIM),
                                (f"  {e.get('reference', '')}", DIM)), str(pick(e, "reference", "name")))
                 for e in st.data.get(what, {}).get("entries") or []]
+
+    # --- copy: Ctrl+Y anywhere --------------------------------------------------------------------------------
+    def copy_extras(self) -> list[tuple[str, str]]:
+        """What the page knows about its selection beyond the cells on screen."""
+        out: list[tuple[str, str]] = []
+        st = self.cur
+        if not self.stations:
+            return out
+        pane = self.query_one(TabbedContent).active
+        s = st.data.get("status", {})
+        if pane == "assets" and (p := self.cur_player()):
+            out += [("Player ID", str(pick(p, "player_id", "id", "xuid", default=""))),
+                    ("Name", str(pick(p, "name", default=""))),
+                    ("Service tag", str(pick(p, "service_tag", "tag", default=""))),
+                    ("Clan", str(pick(p, "clan", "clan_tag", default=""))),
+                    ("Team", str(team_of(p) or "")),
+                    ("Address", str(pick(p, "address", "ip", default=""))),
+                    ("Everything the server says about them", json.dumps(redact_data(p, self.redact), indent=1,
+                                                                          ensure_ascii=False, default=str))]
+        elif pane == "forge" and (x := self.cur_listing()):
+            v = self.selected_version(x) or {}
+            out += [("Listing ID", listing_id(x)), ("Title", title_of(x)), ("Author", author_of(x)),
+                    ("Version ID", version_id(v)), ("Version", version_label(v))]
+        elif pane == "intercepts":
+            lines = [ln.text for ln in self.query_one("#feed").lines][-200:]
+            out.append((f"The feed as shown ({len(lines)} lines)", "\n".join(lines)))
+        elif pane == "console":
+            lines = [ln.text for ln in self.query_one("#console-log").lines][-200:]
+            out.append(("The command log", "\n".join(lines)))
+        out += [("Server name", str(s.get("name") or st.label)), ("Server connection", str(st.server.where)),
+                ("Public address", str(s.get("address") or "")), ("Map", str(s.get("map") or "")),
+                ("Mode", str(s.get("mode") or ""))]
+        return out
+
+    @work(exclusive=True, group="copy")
+    async def action_copy_menu(self) -> None:
+        from .clip import finish, label, widget_choices
+        screen = self.screen
+        if isinstance(screen, Pick) and getattr(screen, "t", "") == "COPY":
+            return
+        choices = widget_choices(screen.focused)
+        if screen is self.screen_stack[0]:  # the main console, not a dialog over it
+            choices += self.copy_extras()
+        choices = finish(choices, lambda t: redact_text(t, self.redact))
+        if not choices:
+            self.notify("Nothing here to copy. Select a row first.", title="COPY", severity="warning")
+            return
+        got = await self.push_screen_wait(Pick("COPY", [(label(w, t), str(i)) for i, (w, t) in enumerate(choices)]))
+        if got is None:
+            return
+        what, text = choices[int(got)]
+        self.copy_to_clipboard(text)
+        one = text.replace("\n", " ⏎ ")
+        self.notify(one[:200] + ("…" if len(one) > 200 else ""), title=f"COPIED · {what.upper()}", timeout=6)
+
+    # --- playlists: the IBIGS oni helper does the work (oni playlist ...); this shows, asks and confirms ---------
+    def playlist_tool(self) -> str:
+        """The helper that changes playlists on this machine's lobbies, or "" where there is none (a fleet, or a
+        plain RCON connection: those servers' playlists belong to whoever runs them)."""
+        return ""
+
+    async def tool_run(self, *args: str, stdin: str | None = None, timeout: float = 900) -> tuple[int, str]:
+        tool = self.playlist_tool()
+        if not tool:
+            return 127, "This needs the IBIGS oni command on the server's machine."
+
+        def run():
+            try:
+                r = subprocess.run([tool, *args], capture_output=True, text=True, timeout=timeout,
+                                   input=stdin, stdin=None if stdin is not None else subprocess.DEVNULL)
+                return r.returncode, (r.stdout + r.stderr)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                return 1, str(exc)
+        return await asyncio.to_thread(run)
+
+    async def playlists(self, start: tuple[str, str] | None = None) -> None:
+        """The playlist manager, round and round until it's closed: every change reopens it on the new state."""
+        from .content import PlaylistError, check_playlist
+        from .playlist_ui import Editor, Playlists, describe_lobbies
+        note = ""
+        while True:
+            rc, out = await self.tool_run("playlist", "list", "--json", timeout=120)
+            try:
+                data = json.loads(out.strip().splitlines()[-1]) if rc == 0 else None
+            except (ValueError, IndexError):
+                data = None
+            if data is None:
+                self.notify(scrub(out.strip())[-400:] or "Could not read the playlists.", title="PLAYLISTS",
+                            severity="warning", timeout=12)
+                return
+            choice, start = start or await self.push_screen_wait(Playlists(data, note)), None
+            if not choice:
+                return
+            what, path = choice
+            note = ""
+            lobs = data.get("lobbies") or []
+            if what in ("new", "edit"):
+                p, where = {}, ""
+                if what == "edit":
+                    rc, out = await self.tool_run("playlist", "show", path, "--json", timeout=60)
+                    try:
+                        p = check_playlist(json.loads(out.strip().splitlines()[-1]))
+                    except (ValueError, IndexError, PlaylistError):
+                        self.notify(scrub(out.strip())[-300:], title="CAN'T OPEN IT", severity="warning")
+                        continue
+                    where = path if path.lower().startswith("oni/") else ""
+                    if not where:
+                        p["name"] = f"{p['name']} (copy)"
+                got = await self.push_screen_wait(Editor(p, title=f"EDIT  {p.get('name', '')}" if p else
+                                                         "NEW PLAYLIST", where=where))
+                if not got:
+                    continue
+                args = ["playlist", "save", "--json"] + ([where] if where else [])
+                rc, out = await self.tool_run(*args, stdin=json.dumps(got), timeout=60)
+                note = (f"Saved {got['name']}. USE ON LOBBIES… plays it." if rc == 0 else
+                        "NOT SAVED: " + scrub(out.strip())[-300:])
+            elif what == "delete":
+                if await self.push_screen_wait(Confirm(f"DELETE  {path}", "Removes it from the library. Lobbies "
+                                                       "playing a copy keep playing it.", verb="DELETE")):
+                    rc, out = await self.tool_run("playlist", "delete", path, timeout=60)
+                    note = scrub(out.strip())[-300:]
+            elif what in ("use", "check", "single"):
+                if not lobs:
+                    self.notify("No lobbies found on this machine.", severity="warning")
+                    continue
+                pick_ = await self.push_screen_wait(Pick(
+                    "WHICH LOBBIES?" if what != "check" else "CHECK IT ON WHICH LOBBY?",
+                    ([(f"ALL LOBBIES ({len(lobs)})", "all")] if what != "check" and len(lobs) > 1 else [])
+                    + [(Text.assemble((lob["service"], CYAN), "  ", clean(str(lob.get("name") or "")), "  ",
+                                      ("running" if lob.get("running") else "stopped", DIM)), lob["service"])
+                       for lob in lobs]))
+                if not pick_:
+                    continue
+                chosen = lobs if pick_ == "all" else [lob for lob in lobs if lob["service"] == pick_]
+                services = [lob["service"] for lob in chosen]
+                if what == "check":
+                    rc, out = await self.tool_run("playlist", "check", path, services[0], timeout=180)
+                    verdict = {0: "Every game can be played.", 3: "It can't be checked while the lobby is stopped."}
+                    await self.push_screen_wait(Confirm(f"CHECK  {path} ON {services[0]}",
+                                                        f"{verdict.get(rc, 'Some games cannot be played:')}\n\n"
+                                                        f"{scrub(out.strip())[-1500:]}", verb="OK", danger=rc == 1))
+                    continue
+                if what == "single":
+                    st = self.cur
+                    if not (st.online and st.data.get("maps", {}).get("entries")):
+                        f = await self.push_screen_wait(Form("ONE MAP + MODE", [("map", "Map", ""),
+                                                                                 ("game", "Game type", "")],
+                                                             verb="NEXT", required=("map", "game")))
+                        if not f:
+                            continue
+                        mp, md = f["map"], f["game"]
+                    else:
+                        mp = await self.browse(st, "maps", "ONE MAP + MODE · MAP")
+                        md = mp and await self.browse(st, "modes", f"ONE MAP + MODE · {mp} · GAME TYPE")
+                        if not (mp and md):
+                            continue
+                    change, args = f"{mp} / {md}", ["playlist", "single", *services, "--map", mp, "--game", md]
+                else:
+                    change, args = f"playlist {path}", ["playlist", "use", path, *services]
+                busy = [lob for lob in chosen if lob.get("running") and (lob.get("players") is None or lob["players"])]
+                running = [lob for lob in chosen if lob.get("running")]
+                options = [("Next time it starts: change it now, restart later (F7)", "later")]
+                if running:
+                    options.append(("Restart now if nobody is playing (a lobby with players waits)", "restart"))
+                if busy:
+                    options.append(("Restart now, disconnecting players", "force"))
+                when_ = await self.push_screen_wait(Pick(f"{change.upper()} · WHEN?", options))
+                if not when_:
+                    continue
+                body = (f"{change}\n\n{describe_lobbies(chosen)}\n\nThe server checks every game first and nothing "
+                        f"changes if one can't be played. dedicated.toml is backed up before it's changed.")
+                if when_ == "force":
+                    body += "\n\nPlayers on these lobbies are DISCONNECTED for about a minute."
+                if not await self.push_screen_wait(Confirm(f"USE ON {', '.join(services).upper()}", body,
+                                                           verb="DISCONNECT + USE" if when_ == "force" else "USE",
+                                                           danger=when_ != "later")):
+                    continue
+                args += {"later": [], "restart": ["--restart", "--yes"], "force": ["--restart", "--yes", "--force"]}[when_]
+                self.notify(f"{change}: checking with the server and applying…", title="PLAYLISTS", timeout=6)
+                rc, out = await self.tool_run(*args)
+                text = scrub(out.strip())
+                if rc == 6:
+                    await self.push_screen_wait(Confirm("NOT CHANGED", "The server says some games can't be "
+                                                        f"played:\n\n{text[-1500:]}", verb="OK", danger=True))
+                    continue
+                if rc == 4:
+                    note = "Changed; not restarted, because players are on. It takes effect at the next restart (F7)."
+                else:
+                    note = ("Done. " if rc == 0 else "PROBLEM: ") + text[-400:]
+                self.action_refresh()
+
+    async def browse(self, st: Station, what: str, title: str, keep=None) -> str | None:
+        """The map or game type browser for one server: its content in groups, and ReclaimerForge's that it doesn't
+        have yet. A catalog pick is installed first (asked, checked, as with i on F6) and then chosen once the server
+        lists it. Returns the reference to send, a Keep's value, or None."""
+        from .content_ui import Browser
+        entries = st.data.get(what, {}).get("entries") or []
+        installed = self.fstate.installed(st.server.where)
+        want = "map" if what == "maps" else "gametype"
+        catalog = None
+        if self.forge and not isinstance(target_for(st.server), str):
+            async def catalog(sort: str, flip: bool) -> list:
+                rows, _, _ = await self.forge.listings(CATALOG_SORT.get(sort, "latest"), page_size=100)
+                return catalog_items(rows, want, set(installed))
+        s = st.data.get("status", {})
+        playing = str(s.get("map" if what == "maps" else "mode") or "")
+        sort, flip = self.browse_order
+        browser = Browser(title, what, items_for(entries, installed), sort=sort, flip=flip, keep=keep,
+                          playing=playing, catalog=catalog)
+        got = await self.push_screen_wait(browser)
+        self.browse_order = (browser.sort, browser.flip)
+        if not isinstance(got, dict):
+            return got
+        entry = await self.forge_install(got, wait=True)
+        if not entry:
+            return None
+        found = self.listed(st, entry)
+        if not found:
+            self.notify(f"{entry.get('title', 'It')} is installed, but {st.label} doesn't list it yet: it may need a "
+                        "restart to pick new content up (F7).", title="INSTALLED · NOT LISTED YET", severity="warning",
+                        timeout=15)
+            return None
+        return found[1]
 
     @work(exclusive=True, group="dialog")
     async def op(self, name: str) -> None:
@@ -2976,24 +3296,25 @@ class OniApp(App):
                 st.rcon.password = st.server.password = f["pw"]
             self.reconnect(st)
             return
+        if name == "playlists":
+            await self.playlists()
+            return
         if not st.online:
             self.notify(f"{st.label} is not connected.", severity="warning")
             return
         if name in ("load", "map", "mode", "nextmap"):
+            from .content_ui import Keep
             mp = md = ""
             if name != "mode":
-                maps = self.entries(st, "maps")
-                if not maps:
+                if not self.entries(st, "maps"):
                     self.notify("Map list not loaded yet.", severity="warning")
                     return
-                mp = await self.push_screen_wait(Pick("SELECT MAP", maps))
+                mp = await self.browse(st, "maps", "SELECT MAP")
                 if not mp:
                     return
             if name != "map":
-                modes = self.entries(st, "modes")
-                if name == "nextmap":
-                    modes = [(Text("(keep the current rules)", DIM), "")] + modes
-                md = await self.push_screen_wait(Pick("SELECT MODE", modes))
+                keep = Keep("(keep the current rules)") if name == "nextmap" else None
+                md = await self.browse(st, "modes", f"{mp} · SELECT MODE" if mp else "SELECT MODE", keep=keep)
                 if md is None or (name != "nextmap" and not md):
                     return
             args = [a for a in (mp, md) if a]
@@ -3183,10 +3504,20 @@ class OniApp(App):
                                Text(title_of(x), WHITE), Text(author or "—", WHITE if author else DIM), rating_text(x),
                                str(recent) if recent is not None else "—", fit_text(x, version)]))
         t = self.query_one("#listings", Roster)
+        here = self.fstate.installed(self.cur.server.where)
+        if self.listing_order:
+            how, flip = self.listing_order
+            rows.sort(key=lambda r: listing_key(how, self.listing_rows[r[0]], window, version, r[0] in here),
+                      reverse=(how in HIGH_FIRST) != flip)
+        self.paint_listing_headers(t)
+        order = ""
+        if self.listing_order:
+            how, flip = self.listing_order
+            order = f" · BY {how.upper()} {'▼' if (how in HIGH_FIRST) != flip else '▲'}"
         t.fill(rows)
-        t.border_title = Text(f"INSTALLED ON {self.cur.label.upper()} · {len(rows)}" if sort == "installed" else
+        t.border_title = Text(f"INSTALLED ON {self.cur.label.upper()} · {len(rows)}{order}" if sort == "installed" else
                               f"FORGE CATALOG · {len(rows)}{'+' if self.forge_next else ''} · {str(sort).upper()}"
-                              + (f" {window}" if sort in WINDOWED else ""))
+                              + (f" {window}" if sort in WINDOWED else "") + order)
         sub = [SITE]
         if self.forge and self.forge_stale:
             sub.append(f"OFFLINE COPY, {self.forge_stale // 60}m OLD")
@@ -3196,6 +3527,39 @@ class OniApp(App):
         self.query_one("#forge-window", Select).disabled = sort not in WINDOWED
         self.query_one("#fg-more", Button).disabled = not (self.forge and self.forge_next)
         self.paint_listing()
+
+    def paint_listing_headers(self, t: DataTable) -> None:
+        """The column the catalog is ordered by carries ▲ or ▼ after its name."""
+        names = ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"]
+        for i, col in enumerate(t.columns.values()):
+            label = names[i] if i < len(names) else str(col.label)
+            if self.listing_order and LISTING_COLUMNS[i] == self.listing_order[0]:
+                how, flip = self.listing_order
+                label = (label or "◉") + (" ▼" if (how in HIGH_FIRST) != flip else " ▲")
+            if str(col.label) != label:
+                col.label = Text(label)
+                t.refresh(layout=True)
+
+    def order_listings(self, how: str | None = None, flip: bool = False) -> None:
+        """Order F6 by a column: a new column starts in its natural direction, the same one again turns it round,
+        and a third time goes back to the catalog's own order."""
+        cur = self.listing_order
+        if flip:  # r: the same column the other way round
+            self.listing_order = (cur[0], not cur[1]) if cur else None
+        elif how is None:  # o: the next column along
+            i = LISTING_COLUMNS.index(cur[0]) + 1 if cur else 0
+            self.listing_order = (LISTING_COLUMNS[i], False) if i < len(LISTING_COLUMNS) else None
+        elif cur and cur[0] == how:
+            self.listing_order = (how, True) if not cur[1] else None
+        else:
+            self.listing_order = (how, False)
+        self.paint_forge()
+
+    @on(DataTable.HeaderSelected, "#listings")
+    def _listing_header(self, e: DataTable.HeaderSelected) -> None:
+        e.stop()
+        if 0 <= e.column_index < len(LISTING_COLUMNS):
+            self.order_listings(LISTING_COLUMNS[e.column_index])
 
     def cur_listing(self) -> dict | None:
         lid = self.query_one("#listings", Roster).selected
@@ -3282,7 +3646,7 @@ class OniApp(App):
         have = self.fstate.installed(self.cur.server.where).get(lid)
         self.query_one("#fg-install", Button).disabled = is_withdrawn(x) or self.fstate.blocks(lid)
         self.query_one("#fg-ack").display = lid in self.fstate.alarms()
-        self.query_one("#fg-load", Button).disabled = not have or kind_of(have) == "playlist"
+        self.query_one("#fg-load", Button).disabled = not have or kind_of(have) == "playlist" and not self.playlist_tool()
         vs = versions_of(x)
         versions.display = bool(vs)
         versions.fill([(version_id(v), [self.version_mark(x, v), Text(version_label(v), WHITE if usable(v) else DIM),
@@ -3359,6 +3723,8 @@ class OniApp(App):
             await self.forge_play()
         elif what == "more":
             self.forge_load(more=True)
+        elif what in ("column", "flip"):
+            self.order_listings(flip=what == "flip")
         elif what == "copy":
             if x := self.cur_listing():
                 self.copy_to_clipboard(listing_id(x))
@@ -3409,10 +3775,10 @@ class OniApp(App):
 
     def listed(self, st: Station, entry: dict) -> tuple[str, str] | None:
         """Where the server lists an installed listing: ("maps" or "modes", the reference to load it by)."""
-        names = refs_of(entry)
+        index = forge_index({str(entry.get("listing_id") or ""): entry})
         for what in ("maps", "modes"):
             for e in st.data.get(what, {}).get("entries") or []:
-                if any(norm(v) in names for v in (pick(e, "reference"), pick(e, "name")) if v):
+                if forge_entry(e, index):  # by its file (Game Modes/Forge/rf-<sha>.json), reference or name
                     return what, str(pick(e, "reference", "name"))
         return None
 
@@ -3420,28 +3786,36 @@ class OniApp(App):
         vid = self.query_one("#versions", Roster).selected
         return next((v for v in versions_of(x) if version_id(v) == vid), None) or latest_of(x)
 
-    async def forge_install(self) -> None:
-        st, x = self.cur, self.cur_listing()
+    async def forge_install(self, chosen: dict | None = None, wait: bool = False) -> dict | None:
+        """Install a listing's version on the selected server: F6's selection, or one chosen in the browser (its
+        newest usable version). With wait, the copy is awaited and its forge-state entry returned."""
+        st, x = self.cur, chosen or self.cur_listing()
         if not (self.forge and x):
             self.notify("Pick a listing first." if self.forge else "Load your Forge key first (k).", severity="warning")
-            return
+            return None
+        if chosen is not None:
+            try:
+                x = await self.forge.listing(listing_id(chosen))
+            except ForgeError as e:
+                self.notify(e.text, title=f"FORGE · {e.short}", severity="error", timeout=15)
+                return None
         title, lid = title_of(x), listing_id(x)
         target = target_for(st.server)
         if isinstance(target, str):
             self.notify(target, title=f"{st.label} · CAN'T INSTALL HERE", severity="warning", timeout=15)
-            return
+            return None
         if is_withdrawn(x) or self.fstate.blocks(lid):
             self.notify("It's been withdrawn from ReclaimerForge, so it isn't installed anywhere new.",
                         title=f"FORGE · {title}", severity="warning")
-            return
-        v = self.selected_version(x)
+            return None
+        v = latest_of(x) if chosen is not None else self.selected_version(x)
         if not v or not version_id(v):
             self.notify("It has no version to install yet.", title=f"FORGE · {title}", severity="warning")
-            return
+            return None
         if not usable(v) or self.fstate.pulled(lid, {'version_id': version_id(v)}):
             self.notify("That version is withdrawn or unpublished, so it isn't installed. Pick another.",
                         title=f"FORGE · {title}", severity="warning")
-            return
+            return None
         vid, label = version_id(v), version_label(v)
         try:
             manifest = await self.forge.manifest(lid, vid)
@@ -3449,10 +3823,10 @@ class OniApp(App):
             there = await target.existing([f.path for f in files])
         except ForgeError as e:
             self.notify(e.text, title=f"FORGE · {e.short}", severity="error", timeout=15)
-            return
+            return None
         except (InstallError, OSError) as e:
             self.notify(explain(str(e)), title=f"FORGE · {title}", severity="error", timeout=15)
-            return
+            return None
         have = self.fstate.installed(st.server.where).get(lid)
         lines = [f"{len(files)} file{'s' * (len(files) != 1)}, {size_words(sum(f.size for f in files))}, into "
                  f"{st.server.content_dir} on {target.where}."]
@@ -3469,11 +3843,14 @@ class OniApp(App):
         replacing = bool(there or have)
         if not await self.push_screen_wait(Confirm(f"INSTALL  {title} v{label}", "\n\n".join(lines),
                                                    verb="REPLACE" if replacing else "INSTALL", danger=replacing)):
-            return
+            return None
+        if wait:
+            return await self.forge_put(st, x, v, manifest, files, target)
         # a worker of its own: opening another dialog meanwhile must not cancel a copy halfway
         self.run_worker(self.forge_put(st, x, v, manifest, files, target), group="install", exit_on_error=False)
+        return None
 
-    async def forge_put(self, st: Station, x: dict, v: dict, manifest: dict, files: list, target) -> None:
+    async def forge_put(self, st: Station, x: dict, v: dict, manifest: dict, files: list, target) -> dict | None:
         title, lid, vid, label = title_of(x), listing_id(x), version_id(v), version_label(v)
         stamp = Text(time.strftime("%H:%M:%S "), DIM) + Text(f"{st.label} ", CYAN)
         self.log_cmd(stamp + Text(f"» forge install {title} v{label}  ({lid} {vid})", WHITE))
@@ -3485,11 +3862,11 @@ class OniApp(App):
                 await target.put(path, f)
         except (ForgeError, Unverified, InstallError, OSError) as e:
             if not self.is_running:
-                return
+                return None
             words = e.text if isinstance(e, ForgeError) else explain(str(e))
             self.log_cmd(Text("  ✕ " + words, RED))
             self.notify(words, title="FORGE · NOT INSTALLED", severity="error", timeout=20)
-            return
+            return None
         entry = {"listing_id": lid, "version_id": vid, "version": label, "title": title, "kind": kind_of(x)
                  or kind_of(manifest), "author": author_of(x), "owner_id": owner_of(x),
                  "reference": str(pick(manifest, "reference", "map_reference", "name", default="")),
@@ -3498,7 +3875,7 @@ class OniApp(App):
         sharing = self.sharing(st)
         self.fstate.record([o.server.where for o in sharing], entry)
         if not self.is_running:
-            return
+            return None
         self.log_cmd(Text(f"  ✓ {len(files)} file{'s' * (len(files) != 1)} checked and in place", GREEN))
         self.paint_masthead()
         self.paint_ops()
@@ -3507,12 +3884,14 @@ class OniApp(App):
             if o.online:
                 await self._fetch(o, ("maps", "modes"))
         if kind_of(entry) == "playlist":
-            after = "Point the server's playlist setting at it to use it: oni-rcon doesn't edit dedicated.toml."
+            after = ("l, or F3 PLAYLISTS, puts it on your lobbies." if self.playlist_tool() else
+                     "Point the server's playlist setting at it to use it: oni-rcon doesn't edit dedicated.toml.")
         elif self.listed(st, entry):
             after = "The server lists it now: l loads it."
         else:
             after = "The server doesn't list it yet: it may need a restart to pick new content up."
         self.notify(f"{title} v{label} is on {st.label}. {after}", title="FORGE · INSTALLED", timeout=15)
+        return entry
 
     async def forge_play(self) -> None:
         """Load an installed map or gametype now: the same as LOAD MAP+MODE on F3, with this half filled in."""
@@ -3522,8 +3901,13 @@ class OniApp(App):
             self.notify("Install it on this server first (i).", severity="warning")
             return
         if kind_of(entry) == "playlist":
-            self.notify("A playlist isn't loaded from here: point the server's playlist setting at it.",
-                        severity="warning")
+            files = [str(f.get("path") or "") for f in entry.get("files") or []]
+            path = next((f.split("/", 1)[1] for f in files if f.lower().startswith("playlists/")), "")
+            if self.playlist_tool() and path:
+                await self.playlists(start=("use", path))  # straight to: which lobbies, and when
+            else:
+                self.notify("A playlist isn't loaded from here: point the server's playlist setting at it.",
+                            severity="warning")
             return
         if not st.online:
             self.notify(f"{st.label} is not connected.", severity="warning")
@@ -3538,10 +3922,10 @@ class OniApp(App):
         what, ref = found
         title = entry.get("title") or ref
         if what == "maps":
-            other = await self.push_screen_wait(Pick(f"{title} · SELECT MODE", self.entries(st, "modes")))
+            other = await self.browse(st, "modes", f"{title} · SELECT MODE")
             args = [ref, other]
         else:
-            other = await self.push_screen_wait(Pick(f"{title} · SELECT MAP", self.entries(st, "maps")))
+            other = await self.browse(st, "maps", f"{title} · SELECT MAP")
             args = [other, ref]
         if not other:
             return

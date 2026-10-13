@@ -753,8 +753,9 @@ def test_install_over_ssh(fake, tmp_path, monkeypatch):
 
 
 def test_install_and_load_from_f6(fake, tmp_path):
-    from oni_rcon.app import Confirm, Pick
+    from oni_rcon.app import Confirm
     from oni_rcon.config import Server
+    from oni_rcon.content_ui import Browser
     from oni_rcon.demo import serve_fakes
     from oni_rcon.forge import ForgeSetup
 
@@ -793,9 +794,9 @@ def test_install_and_load_from_f6(fake, tmp_path):
             await pilot.pause(0.2)
             assert not isinstance(app.screen, Confirm)
 
-            await pilot.press("l")  # load now: its map, a mode to go with it, a confirm
-            assert await until(pilot, lambda: isinstance(app.screen, Pick))
-            await pilot.press("enter")
+            await pilot.press("l")  # load now: its map, a mode to go with it from the browser, a confirm
+            assert await until(pilot, lambda: isinstance(app.screen, Browser))
+            await pilot.press(*"slayer", "enter")  # filtered, Enter takes the first match
             assert await until(pilot, lambda: isinstance(app.screen, Confirm))
             app.screen.query_one("#yes").press()
             fake_rcon = keep[0]
@@ -928,3 +929,86 @@ def test_rounds_are_counted_locally(tmp_path, monkeypatch):
     assert lines[0]["client"] == "oni-rcon/test" and lines[0]["server"] == "Probe | Slayer"  # its public name
     assert not any(k in json.dumps(lines) for k in ("203.0.113", "admin@", "11774"))  # never how it's reached
     assert Rounds(None).observe("s", status("in_game")) is None  # nowhere to keep them: counted in memory only
+
+
+def test_f6_columns_order_the_catalog_when_clicked(fake, tmp_path):
+    """Clicking RATING puts the best first, again the lowest first, a third time back to Forge's own order; TITLE is
+    A-Z then Z-A; o walks the columns from the keyboard."""
+    from textual.widgets import DataTable
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = forge_app(ports, fake, tmp_path)
+        async with app.run_test(size=(170, 50)) as pilot:
+            await pilot.press("f6")
+            t = app.query_one("#listings")
+            assert await until(pilot, lambda: t.row_count == 25)
+            forge_order = list(t.ids)
+            net = lambda lid: (lambda v: (v[0] or 0) - (v[1] or 0))(forge.votes_of(app.listing_rows[lid]))
+            titles = lambda: [forge.title_of(app.listing_rows[lid]).casefold() for lid in t.ids]
+
+            def click(i):
+                t.post_message(DataTable.HeaderSelected(t, list(t.columns)[i], i, t.ordered_columns[i].label))
+            click(4)  # RATING
+            await pilot.pause(0.2)
+            assert [net(x) for x in t.ids] == sorted((net(x) for x in t.ids), reverse=True)
+            assert "▼" in str(t.ordered_columns[4].label) and "BY RATING ▼" in str(t.border_title)
+            click(4)
+            await pilot.pause(0.2)
+            assert [net(x) for x in t.ids] == sorted(net(x) for x in t.ids)  # lowest rated first
+            click(4)
+            await pilot.pause(0.2)
+            assert t.ids == forge_order and "▼" not in str(t.ordered_columns[4].label)
+            click(2)  # TITLE
+            await pilot.pause(0.2)
+            assert titles() == sorted(titles())
+            click(2)
+            await pilot.pause(0.2)
+            assert titles() == sorted(titles(), reverse=True)
+            t.focus()
+            await pilot.press("o")  # the keyboard: the next column along
+            await pilot.pause(0.2)
+            assert app.listing_order == ("author", False)
+            await pilot.press("r")
+            await pilot.pause(0.2)
+            assert app.listing_order == ("author", True)
+    asyncio.run(go())
+
+
+def test_the_browser_installs_from_the_catalog_then_loads_it(fake, tmp_path):
+    from oni_rcon.app import Confirm
+    from oni_rcon.config import Server
+    from oni_rcon.content_ui import Browser
+    from oni_rcon.demo import serve_fakes
+
+    async def go():
+        shared = tmp_path / "shared"
+        ports, keep = await serve_fakes(tick=False, content_dirs=[shared, shared, shared])
+        app = forge_app(ports[:1], fake, tmp_path, servers=[Server(port=ports[0], password="demo",
+                                                                   content_dir=str(shared))])
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: all(st.online and "maps" in st.data for st in app.stations))
+            await pilot.press("f3")
+            app.query_one("#op-load").press()
+            assert await until(pilot, lambda: isinstance(app.screen, Browser))
+            tree = app.screen.query_one("#browse-tree")
+            more = next(n for n in tree.root.children if n.data == "catalog")
+            more.expand()
+            assert await until(pilot, lambda: any(n.data == "catalog" and n.children and
+                                                  hasattr(n.children[0].data, "group") for n in tree.root.children))
+            more = next(n for n in tree.root.children if n.data == "catalog")
+            pick_ = more.children[0].data
+            assert pick_.group == "catalog" and pick_.kind == "map"
+            app.screen.chosen(pick_)  # a catalog map: asked to install first
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            assert app.screen.verb == "INSTALL"
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: pick_.listing in app.fstate.ids(), 200)
+            assert await until(pilot, lambda: isinstance(app.screen, Browser) and app.screen.what == "modes", 200)
+            await pilot.press(*"slayer", "enter")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            entry = app.fstate.installed(app.stations[0].server.where)[pick_.listing]
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: keep[0].status["map"] == entry["reference"])
+    asyncio.run(go())

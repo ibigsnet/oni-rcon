@@ -197,3 +197,25 @@ FindingsView .dialog-buttons Button { min-width: 0; width: 1fr; margin: 0; }
 #setup-list { height: auto; }
 #setup-form .dialog-buttons { margin-top: 0; }
 .setup-gap { width: 1fr; }
+
+/* the map and game type browser (content_ui.py) */
+.dialog.browse { width: 100; max-width: 96%; height: 90%; }
+#browse-cols { height: 1; margin-top: 1; }
+#browse-by { width: auto; margin-right: 1; }
+.browse-col { margin-right: 1; min-width: 0; }
+#browse-tree { height: 1fr; border: round $primary 35%; background: $background; scrollbar-gutter: stable; }
+#browse-detail { height: 1; margin-top: 1; text-overflow: ellipsis; text-wrap: nowrap; }
+
+/* playlists (playlist_ui.py) */
+.dialog.playlists { width: 120; max-width: 96%; height: 92%; }
+#pl-lib { height: 1fr; min-height: 6; border: round $primary 35%; }
+#pl-lobbies { height: auto; max-height: 10; border: round $primary 35%; }
+.pl-head { margin-top: 1; }
+#pl-note, #pe-note { height: auto; max-height: 3; margin-top: 1; }
+.pl-buttons { height: auto; }
+.pl-buttons Button { margin-right: 1; min-width: 0; }
+.pe-fields { height: 3; }
+.pe-label { width: auto; padding: 1 1 0 0; color: $text-muted; }
+#pe-name { width: 1fr; }
+#pe-vote { width: 10; }
+#pe-games { height: 1fr; border: round $primary 35%; }

@@ -88,8 +88,8 @@ class TenantApp(OniApp):
 
     def welcome(self):
         super().welcome()
-        self.notify('Managing this VM’s lobbies. F7 starts or stops servers. Ctrl+F finds a server; F6 opens '
-                    'ReclaimerForge. Use your own Forge key. Installing content never restarts a game.',
+        self.notify('Managing this VM’s lobbies. F7 starts or stops servers; F3 PLAYLISTS deploys playlists. Ctrl+F '
+                    'finds a server; F6 opens ReclaimerForge. Installing content never restarts a game.',
                     title='IBIGS', timeout=8)
 
     def compose_stations(self) -> ComposeResult:
@@ -132,19 +132,13 @@ class TenantApp(OniApp):
         e.stop()
         self.action_power()
 
-    async def power_run(self, *args):
-        tool = os.environ.get('IBIGS_ONI_POWER', '')
-        if not tool:
-            return 127, 'Start/stop needs the IBIGS oni command: leave and type  oni servers'
+    def playlist_tool(self) -> str:
+        return os.environ.get('IBIGS_ONI_POWER', '')  # the oni wrapper: `oni playlist ...` as well as start/stop
 
-        def run():
-            try:
-                r = subprocess.run([tool, *args], capture_output=True, text=True, timeout=POWER_TIMEOUT,
-                                   stdin=subprocess.DEVNULL)
-                return r.returncode, (r.stdout + r.stderr)
-            except (OSError, subprocess.TimeoutExpired) as exc:
-                return 1, str(exc)
-        return await asyncio.to_thread(run)
+    async def power_run(self, *args):
+        if not self.playlist_tool():
+            return 127, 'Start/stop needs the IBIGS oni command: leave and type  oni servers'
+        return await self.tool_run(*args, timeout=POWER_TIMEOUT)
 
     @work(exclusive=True, group='dialog')
     async def action_power(self) -> None:

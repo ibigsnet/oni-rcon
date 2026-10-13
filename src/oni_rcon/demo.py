@@ -20,6 +20,13 @@ CALLSIGNS = ["Bravo", "Echo 4", "Viper", "Nomad", "Ghost", "Rook", "Sable", "Kes
 MAPS = ["guardian", "the_pit", "narrows", "construct", "valhalla", "sandtrap", "high_ground", "last_resort",
         "isolation", "epitaph", "foundry", "standoff", "snowbound", "heretic"]
 MODES = ["Slayer", "Team Slayer", "Capture the Flag", "Oddball", "King of the Hill", "Territories", "Assault", "SWAT"]
+# shaped like a real server's lists: base maps by engine name, then variants from Halo 3, MCC and the content folder
+DEMO_MAP_VARIANTS = [("Guardian", "default_guardian_012.mvar"), ("MLG Guardian", "MLG Guardian"),
+                     ("SWAT Guardian", "SWAT Guardian"), ("Pit Stop", "Maps/Forge/rf-3c1d0a9e44b2f7d81e02.json"),
+                     ("Club Dead", "Maps/Club Dead.mvar")]
+DEMO_MODE_VARIANTS = [("Team Slayer", "2v2_team_slayer_010.bin"), ("MLG Team Slayer", "mlg_cstruct_ts8_010.bin"),
+                      ("Fiesta Small", "FIESTA SMALL"), ("UFM | Team KOTH", "Game Modes/Forge/UFM Encompass/UFM _Team_KOTH.json")]
+DEMO_MODS = [("Hang 'Em High", "hang_em_high")]
 TEAMS = ["red", "blue"]
 WEAPONS = ["battle rifle", "sniper rifle", "shotgun", "energy sword", "frag grenade", "rocket launcher", "melee"]
 CHAT = ["gg", "nice shot", "who has sniper?", "lag on blue base", "rematch?", "ez", "push top mid",
@@ -32,6 +39,7 @@ class Fake:
     def __init__(self, name: str, password: str, max_players: int, crowd: int, content_dir: str = ""):
         self.password, self.clients, self.engine, self.skill = password, set(), 0, {}
         self.content = Path(content_dir) if content_dir else None  # Forge installs land here, and get listed
+        self.even_teams = False  # the game type's team balancing: a move may not make a team bigger than the other
         self.status = {"name": name, "address": "203.0.113.7:49176", "map": random.choice(MAPS), "mode": "Team Slayer",
                        "phase": "in_game", "max_players": max_players, "players": 0, "password_required": False,
                        "max_ping": 0, "hidden": False, "anti_cheat": "enforce", "anti_cheat_active": True,
@@ -112,9 +120,14 @@ class Fake:
                                     "players": self.players},
                 "status": lambda: self.status,
                 "maps": lambda: {"entries": [{"kind": "map", "name": m.replace("_", " ").title(), "reference": m}
-                                             for m in MAPS] + self.installed(".map")},
+                                             for m in MAPS]
+                                 + [{"kind": "map", "name": n, "reference": r} for n, r in DEMO_MODS]
+                                 + [{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MAP_VARIANTS]
+                                 + self.installed(".map")},
                 "modes": lambda: {"entries": [{"kind": "mode", "name": m, "reference": m.lower().replace(" ", "_")}
-                                              for m in MODES] + self.installed(".gt")},
+                                              for m in MODES]
+                                  + [{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MODE_VARIANTS]
+                                  + self.installed(".gt")},
                 "bans": lambda: self.bans,
                 "vpn": lambda: {"allowed": self.allowed, "block_vpn": True, "ranges": 41812},
                 "vote": lambda: {"vote": self.vote, "playlist": None,
@@ -146,10 +159,20 @@ class Fake:
                 p["muted"] = cmd == "mute"
                 await self.emit(cmd, player=p["name"], by=by)
                 return ok(f"{p['name']} was {cmd}d by {by}.")
-            if cmd == "team":
-                p["team"] = args[1] if len(args) > 1 else p["team"]
-                await self.emit("control", text=f"{p['name']} moved to {p['team']}.")
-                return ok(f"Moving {p['name']} to {p['team']}.")
+            if cmd == "team":  # as the real server: the reply says it's asked; the game's verdict follows as an event
+                want = args[1].lower() if len(args) > 1 else p["team"]
+                same = sum(x["team"] == want for x in self.players) >= sum(x["team"] == p["team"] for x in self.players)
+                if want == p["team"]:
+                    why = f"Team change refused: Already on {want.title()} team."
+                elif self.even_teams and same:
+                    why = f"Team change refused: Teams must stay even: {want.title()} team has as many players as yours."
+                else:
+                    why = ""
+                if not why:
+                    p["team"] = want
+                asyncio.get_running_loop().call_later(0.3, lambda: asyncio.ensure_future(self.emit(
+                    "control", action="team", ok=not why, text=why or f"{p['name']} moved to {want.title()} team.")))
+                return ok(f"Moving {p['name']} to {want.title()} team.")
             self.allowed.append({"target": p["player_id"], "note": " ".join(args[1:])})
             return ok(f"{p['name']} may join through a VPN.")
         if cmd in ("unban", "vpnrevoke"):
