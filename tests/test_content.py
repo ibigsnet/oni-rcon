@@ -82,19 +82,21 @@ def test_the_catalog_branch_offers_only_what_isnt_here():
 
 def test_playlists_are_checked_in_the_servers_own_shape():
     good = {"name": "Team Mix", "games": [{"map": "Guardian", "game": "Team Slayer", "weight": 3},
-                                          {"map": "Valhalla", "game": "Slayer", "weight": 1}]}
+                                          {"map": "Valhalla", "game": "Slayer", "weight": 1},
+                                          {"map": "The Pit", "game": "Slayer"}]}
     out = check_playlist(good)
     assert out == {"version": 2, "name": "Team Mix", "vote_seconds": 20,
                    "games": [{"map": "Guardian", "game": "Team Slayer", "weight": 3},
-                             {"map": "Valhalla", "game": "Slayer"}]}
+                             {"map": "Valhalla", "game": "Slayer"}, {"map": "The Pit", "game": "Slayer"}]}
     assert playlist_json(good).endswith("}\n")
     for bad, words in [({"name": "", "games": good["games"]}, "name"),
-                       ({"name": "x", "games": []}, "at least one"),
-                       ({"name": "x", "games": [{"map": "Guardian"}]}, "both a map and a game type"),
-                       ({"name": "x", "games": [{"map": "a", "game": "b", "weight": 0}]}, "weight"),
+                       ({"name": "x", "games": []}, "at least 3"),
+                       ({"name": "x", "games": good["games"][:2]}, "at least 3 games \\(it has 2\\)"),
+                       ({"name": "x", "games": [{"map": "Guardian"}] * 3}, "both a map and a game type"),
+                       ({"name": "x", "games": [{"map": "a", "game": "b", "weight": 0}] * 3}, "weight"),
                        ({"name": "x", "games": [{"map": "a", "game": "b"}] * 129}, "at most 128"),
                        ({"name": "x", "games": good["games"], "shuffle": True}, "Unknown playlist setting"),
-                       ({"name": "x", "games": [{"map": "a", "game": "b", "script": 1}]}, "unknown settings")]:
+                       ({"name": "x", "games": [{"map": "a", "game": "b", "script": 1}] * 3}, "unknown settings")]:
         with pytest.raises(PlaylistError, match=words):
             check_playlist(bad)
 

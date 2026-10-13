@@ -3134,7 +3134,6 @@ class OniApp(App):
 
     async def playlists(self, start: tuple[str, str] | None = None) -> None:
         """The playlist manager, round and round until it's closed: every change reopens it on the new state."""
-        from .content import PlaylistError, check_playlist
         from .playlist_ui import Editor, Playlists, describe_lobbies
         note = ""
         while True:
@@ -3157,9 +3156,11 @@ class OniApp(App):
                 p, where = {}, ""
                 if what == "edit":
                     rc, out = await self.tool_run("playlist", "show", path, "--json", timeout=60)
-                    try:
-                        p = check_playlist(json.loads(out.strip().splitlines()[-1]))
-                    except (ValueError, IndexError, PlaylistError):
+                    try:  # opened as it is, short or not: saving is what has to pass the checks
+                        p = json.loads(out.strip().splitlines()[-1])
+                        if not isinstance(p, dict) or not isinstance(p.get("games"), list):
+                            raise ValueError(p)
+                    except (ValueError, IndexError):
                         self.notify(scrub(out.strip())[-300:], title="CAN'T OPEN IT", severity="warning")
                         continue
                     where = path if path.lower().startswith("oni/") else ""

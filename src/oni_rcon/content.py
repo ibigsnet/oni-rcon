@@ -211,6 +211,7 @@ def items_for(entries: list[dict], installed: dict[str, dict]) -> list[Item]:
 
 
 # --- playlists: the files a lobby's `playlist = "playlists/<file>.json"` names ---------------------------------
+MIN_GAMES = 3  # the server's ballots offer three different games each time
 MAX_GAMES = 128  # the most the dedicated server plays in one rotation
 PLAYLIST_KEYS = {"version", "name", "vote_seconds", "games"}
 GAME_KEYS = {"map", "game", "name", "weight", "options", "world", "rules"}
@@ -241,8 +242,10 @@ def check_playlist(p) -> dict:
     if not isinstance(vote, int) or isinstance(vote, bool) or not 0 <= vote <= 300:
         raise PlaylistError("Vote seconds must be a whole number from 0 to 300.")
     games = p.get("games")
-    if not isinstance(games, list) or not games:
-        raise PlaylistError("Add at least one game: a map and a game type.")
+    if not isinstance(games, list) or len(games) < MIN_GAMES:
+        n = len(games) if isinstance(games, list) else 0
+        raise PlaylistError(f"A playlist needs at least {MIN_GAMES} games (it has {n}): players vote on three "
+                            "different games each time.")
     if len(games) > MAX_GAMES:
         raise PlaylistError(f"A playlist holds at most {MAX_GAMES} games; this one has {len(games)}.")
     out = []

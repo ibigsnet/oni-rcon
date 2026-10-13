@@ -12,7 +12,7 @@ file checked) and then uses it once the server lists it. F6 orders the catalog b
 column, `r` reverse). Forge's "load now" now matches installed files by name (`Game Modes/Forge/rf-<sha>.json`);
 before, it always said the server didn't list them.
 
-F3 PLAYLISTS (customer VPSes) shows the Playlists library (Forge downloads and your own) and what each lobby plays,
+F3 PLAYLISTS (customer VPSes; a playlist needs 3 to 128 games, because the server's ballots offer three each time) shows the Playlists library (Forge downloads and your own) and what each lobby plays,
 with filtering and column ordering. It makes and edits playlists; ADD GAME uses the browser, and weights, order,
 copy and remove are on keys and buttons. It deploys to one lobby or all. The work is done by `oni playlist`
 (`list|show|save|check|use|single|delete`), also usable from the shell. Before anything changes, the server checks
