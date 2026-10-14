@@ -274,6 +274,8 @@ class Worker:
         self.rules = Runner(RuleStore(store.root), self.clients, start=self.start_lobby, poster=poster or post_discord)
         self.players_at = {}
         self.roles_said = {}  # lobby -> what its last 'waiting' said, so the history isn't one line a minute
+        self.found = []
+        self.frames = {}  # lobby -> perf.Perf, read from `oni health-report` while a rule wants frame rates
 
     async def apply_roles(self):
         """Roles and the votes switch (F8 → ROLES) need a restart to reach the server: the wrapper writes them and
@@ -292,6 +294,31 @@ class Worker:
                                                             self.roles_said.get(row.get('lobby')) != row.get('text')):
                 self.roles_said[row.get('lobby')] = row.get('text')
                 self.rules.note('roles', str(row.get('lobby', '')), clean(str(row.get('text', ''))), 'Roles and votes')
+
+    async def read_frames(self):
+        """Each lobby's frame rate, for rules that use it: the server logs every minute it fell under 54 fps, and
+        `oni health-report` passes those lines on (perf.py reads them)."""
+        from . import health as hc
+        from . import perf as pf
+        for lobby in list(self.found):
+            port = lobby.get('port')
+            if not isinstance(port, int):
+                continue
+            try:
+                result = await asyncio.to_thread(subprocess.run, [WRAPPER, 'health-report', str(port), '900s'],
+                                                 stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            rep = hc.parse_report(result.stdout)
+            if not rep.host.get('perf'):
+                continue
+            p = self.frames.setdefault(lobby['name'], pf.Perf())
+            for m in pf.minutes_in(rep.lines, hc.clock_for(rep.host, time.time()), hc.split_stamp):
+                p.add(m)
+            p.read_at = time.time()
+            reading = p.reading(time.time())
+            if reading:
+                self.rules.on_fps(lobby['name'], reading.fps)
 
     async def start_lobby(self, name):
         """A rule's 'start a stopped server': the wrapper's own start, never forced, one lifecycle action at a time."""
@@ -403,6 +430,7 @@ class Worker:
 
     async def refresh_clients(self):
         found = await asyncio.to_thread(self.discover)
+        self.found = found
         if self.rules.active:
             with contextlib.suppress(Exception):
                 self.rules.on_inventory(await asyncio.to_thread(self.states))
@@ -453,6 +481,7 @@ class Worker:
 
     async def run(self):
         next_roles = time.time() + 20
+        next_frames = time.time() + 30
         next_inventory = 0
         next_heartbeat = 0
         names = []
@@ -482,6 +511,11 @@ class Worker:
                     self.queue(job, target, key)
             await asyncio.gather(*(self.poll(n, c) for n, c in self.clients.items()))
             self.rules.tick()
+            if now >= next_frames:
+                next_frames = now + 60
+                if self.rules.wants_fps:
+                    task = asyncio.create_task(self.read_frames())
+                    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             if now >= next_roles:
                 next_roles = now + 60
                 task = asyncio.create_task(self.apply_roles())

@@ -108,6 +108,14 @@ class Runner:
     def tick(self):
         self.carry_out(self.engine.tick())
 
+    def on_fps(self, server, fps):
+        self.carry_out(self.engine.frame_rate(server, fps))
+
+    @property
+    def wants_fps(self) -> bool:
+        return any(r["enabled"] and (r["when"]["type"] in ("fps_below", "fps_recovered") or
+                                     any(c["type"] == "fps_under" for c in r["if"])) for r in self.engine.rules)
+
     # carrying out ------------------------------------------------------------------------------------------------
     def carry_out(self, firings):
         for f in firings:
@@ -156,6 +164,9 @@ class Runner:
                 self.discord_at = self.clock()
                 code = await asyncio.to_thread(self.poster, url, step.text)
             return step.words() + (": done" if 200 <= code < 300 else f": Discord answered {code}")
+        if step.kind == "wait":
+            await asyncio.sleep(step.args[0])
+            return step.words()
         if step.kind == "start":
             lob = self.engine.lobbies.get(step.server)
             if lob and lob.up:

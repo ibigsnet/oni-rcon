@@ -39,7 +39,8 @@ CHAIN = 4.0  # seconds between kills that still chain into a multi-kill (Halo 3'
 MEDALS = [*SPREES.values(), *MULTIS.values(), "Killjoy", "Perfection"]
 MAX_RULES = 128
 INSTANT = {"medal", "spree", "multikill", "join", "leave", "match_start", "match_end", "before_match", "every", "at",
-           "vote"}
+           "vote", "weapon_kill", "first_blood", "kills_reached"}
+DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 MAX_LINE = 240
 
 # --- the menus ------------------------------------------------------------------------------------------------
@@ -55,6 +56,18 @@ CATALOG = {
                   "on.", [F("counts", "At these counts (comma list)", "text", "5,10,15,20,25,30", max=60)]),
         "multikill": ("A player gets a multi-kill", "Kills less than 4 seconds apart: 2 is a Double Kill, 3 a "
                       "Triple, 4 an Overkill.", [F("min", "At least this many kills", "int", 3, min=2, max=10)]),
+        "weapon_kill": ("A player gets a kill with a weapon", "Part of the weapon's name is enough: sniper, sword, "
+                        "rocket, melee, grenade…", [F("weapon", "Weapon", "text", "sniper", max=40)]),
+        "first_blood": ("First blood", "The first kill of a match.", []),
+        "kills_reached": ("A player reaches N kills in a match", "Counted from the kill feed this match.",
+                          [F("count", "N kills", "int", 25, min=1, max=500)]),
+        "betrayal": ("A player betrays a teammate", "A teammate kill. Rules can only talk about it: no punishment.",
+                     []),
+        "fps_below": ("A server's frame rate drops under N", "The server's own minute-by-minute report: 60 is "
+                      "perfect, under 54 players notice, under 40 is laggy.",
+                      [F("fps", "Frames a second", "int", 40, min=5, max=59)]),
+        "fps_recovered": ("A server's frame rate is back to N or more", "After it had dropped under N.",
+                          [F("fps", "Frames a second", "int", 54, min=5, max=60)]),
         "join": ("A player joins", "Someone finishes connecting.", []),
         "leave": ("A player leaves", "Someone disconnects or is removed.", []),
         "command": ("A player types a !command", "Only messages that START with the command count, e.g. !admin. "
@@ -90,6 +103,18 @@ CATALOG = {
         "no_admin_online": ("No admin is online", "Nobody with ADMIN is playing anywhere on this VPS.", []),
         "player_role": ("The player has a role", "The player who triggered the rule.",
                         [F("role", "Role", "choice", "vip", options=[*ROLES, "none"])]),
+        "player_kd": ("The player's kills/deaths this match", "Kills divided by deaths (deaths of 0 count as 1), with "
+                      "at least some kills so one lucky kill doesn't count.",
+                      [F("min_kd", "At least this K/D (e.g. 2.5)", "number", "2.0", min=0, max=100),
+                       F("min_kills", "And at least this many kills", "int", 5, min=0, max=500)]),
+        "day_of_week": ("The day is", "Comma list: mon,tue,wed,thu,fri,sat,sun.",
+                        [F("days", "Days", "text", "fri,sat,sun", max=40),
+                         F("timezone", "Timezone", "text", "America/New_York", max=48)]),
+        "fps_under": ("The server's frame rate is under N", "Right now, from its latest report.",
+                      [F("fps", "Frames a second", "int", 54, min=5, max=60)]),
+        "server_players": ("Another server's player count is between", "",
+                           [F("server", "Server", "server", ""), F("min", "At least", "int", 0, min=0, max=128),
+                            F("max", "At most", "int", 128, min=0, max=128)]),
         "map_is": ("The map is", "Part of the map's name is enough.", [F("text", "Map", "text", "", max=40)]),
         "mode_is": ("The game mode is", "Part of the mode's name is enough.", [F("text", "Mode", "text", "", max=40)]),
         "time_between": ("The time is between", "Local time, e.g. 18:00 to 23:59. Wraps past midnight.",
@@ -117,16 +142,19 @@ CATALOG = {
         "shuffle": ("Shuffle the teams", "Only while a match is being played.", []),
         "start_server": ("Start a stopped server", "Does nothing if it's already running.",
                          [F("server", "Server", "server", "")]),
+        "wait": ("Wait a few seconds", "Pause before the next step (1–300 seconds).",
+                 [F("seconds", "Seconds", "int", 5, min=1, max=300)]),
         "discord": ("Post to Discord", "Sends the message to a Discord channel through a webhook you've added.",
                     [F("webhook", "Webhook", "webhook", ""), F("message", "Message", "message", "")]),
     },
 }
 
 TEMPLATE_HELP = ("{player} the player · {server} this server · {count} players on it · {max} its slots · {medal} the "
-                 "medal · {kills} spree or multi-kill count · {map} · {mode} · {admins} admins online · {target} a "
-                 "vote's target · {args} what followed a !command · {down} the server that went down · {time}")
+                 "medal · {kills} kill count · {weapon} · {victim} · {kd} K/D · {fps} frame rate · {map} · {mode} · "
+                 "{admins} admins online · {target} a vote's target · {args} what followed a !command · {down} the "
+                 "server that went down · {time}")
 PLACEHOLDERS = {"player", "server", "count", "max", "medal", "kills", "map", "mode", "admins", "target", "args",
-                "down", "time"}
+                "down", "time", "weapon", "victim", "fps", "kd"}
 
 # Starting points: copy one, change the words. Kept small and obviously useful.
 STARTERS = [
@@ -138,6 +166,15 @@ STARTERS = [
     {"name": "Perfection", "when": {"type": "medal", "medal": "Perfection"},
      "then": [{"type": "say", "to": "all", "message": "PERFECTION! {player} won on {server} without dying."}],
      "cooldown": 0, "per_hour": 60},
+    {"name": "First blood", "when": {"type": "first_blood"},
+     "then": [{"type": "say", "to": "this", "message": "First blood: {player} took out {victim}!"}]},
+    {"name": "Sniper shout-out", "when": {"type": "weapon_kill", "weapon": "sniper"},
+     "if": [{"type": "player_kd", "min_kd": "3", "min_kills": 10}],
+     "then": [{"type": "say", "to": "this", "message": "{player} is sniping at a {kd} K/D!"}], "cooldown": 300},
+    {"name": "Lag alert", "when": {"type": "fps_below", "fps": 40},
+     "then": [{"type": "tell_admins", "where": "any", "message": "{server} has dropped to {fps} fps ({count} players)."},
+              {"type": "discord", "webhook": "", "message": "{server} is lagging: {fps} fps with {count} players."}],
+     "cooldown": 900},
     {"name": "Welcome", "when": {"type": "join"},
      "then": [{"type": "tell_player", "message": "Welcome to {server}, {player}! Type !admin if you need help."}],
      "cooldown": 0, "per_hour": 600},
@@ -192,6 +229,14 @@ def _block(part, block, servers=()):
                 raise ValueError(f"{label}: {f['label']} must be a whole number.") from None
             if not f["min"] <= v <= f["max"]:
                 raise ValueError(f"{label}: {f['label']} must be {f['min']}–{f['max']}.")
+        elif kind == "number":
+            try:
+                v = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f"{label}: {f['label']} must be a number like 2.5.") from None
+            if not f["min"] <= v <= f["max"]:
+                raise ValueError(f"{label}: {f['label']} must be {f['min']}–{f['max']}.")
+            v = str(round(v, 2))
         elif kind == "choice":
             if v not in f["options"]:
                 raise ValueError(f"{label}: choose one of {', '.join(f['options'])}.")
@@ -216,6 +261,15 @@ def _block(part, block, servers=()):
         if not re.fullmatch(r"![A-Za-z0-9_-]{1,23}", out["command"]):
             raise ValueError("A command starts with ! and has letters or numbers, like !admin.")
         out["command"] = out["command"].lower()
+    elif t == "day_of_week":
+        days = [d.strip().lower()[:3] for d in out["days"].split(",") if d.strip()]
+        if not days or any(d not in DAYS for d in days):
+            raise ValueError("Days: use mon,tue,wed,thu,fri,sat,sun.")
+        out["days"] = ",".join(sorted(set(days), key=DAYS.index))
+        try:
+            ZoneInfo(out["timezone"])
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError("Use a timezone such as America/New_York or UTC.") from None
     elif t in ("at", "time_between"):
         try:
             ZoneInfo(out["timezone"])
@@ -227,7 +281,7 @@ def _block(part, block, servers=()):
             for k in ("start", "end"):
                 if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", out[k]):
                     raise ValueError("Times look like 18:00 or 07:30.")
-    elif t == "players_between" and out["min"] > out["max"]:
+    elif t in ("players_between", "server_players") and out["min"] > out["max"]:
         raise ValueError("Player count: 'at least' is more than 'at most'.")
     return out
 
@@ -453,6 +507,9 @@ class Lobby:
     chains: dict = field(default_factory=dict)  # engine id -> (kills chained, time of the last)
     matches: MatchEvents = field(default_factory=MatchEvents)
     vote_id: object = None  # the ballot last seen, so a vote fires once
+    tally: dict = field(default_factory=dict)  # engine id -> [kills, deaths] this match
+    blooded: bool = False  # first blood has been drawn this match
+    fps: float | None = None  # the latest minute's frame rate, when something reports it
 
 
 @dataclass
@@ -535,6 +592,8 @@ class Engine:
         if isinstance(phase, str) and phase != lob.phase:
             if phase == "playing" or lob.phase == "playing":
                 lob.sprees, lob.chains = {}, {}  # sprees end with the game
+            if phase == "playing" and lob.phase not in ("round_over", "between_rounds", "playing"):
+                lob.tally, lob.blooded = {}, False  # a new match
             lob.phase = phase
         for ev in lob.matches.observe(s):
             out += self.fire({"after_match": "match_end"}.get(ev, ev), server, self.context(server))
@@ -659,17 +718,34 @@ class Engine:
             ended = lob.sprees.get(victim[0], 0)
             lob.sprees[victim[0]] = 0
             lob.chains.pop(victim[0], None)
-        if not killer or (victim and killer[0] == victim[0]):
+            lob.tally.setdefault(victim[0], [0, 0])[1] += 1
+        if not killer or (victim and killer[0] == victim[0]) or ev.get("suicide") is True:
             return out
-        if any(ev.get(k) is True for k in ("betrayal", "teamkill", "suicide")) or (
+        weapon = clean(str(ev.get("weapon") or ""))[:40]
+        if any(ev.get(k) is True for k in ("betrayal", "teamkill")) or (
                 victim and killer[1].get("team") is not None and killer[1]["team"] == victim[1].get("team")):
-            return out  # betrayals earn nothing
+            return self.fire("betrayal", server, self.context(server, player=killer[1]["name"], weapon=weapon,
+                                                              victim=victim[1]["name"] if victim else ""),
+                             player_id=killer[1]["id"])  # betrayals earn nothing else
         k, p = killer
+        t = lob.tally.setdefault(k, [0, 0])
+        t[0] += 1
+        kd = t[0] / max(1, t[1])
+        vname = victim[1]["name"] if victim else ""
+        common = dict(player=p["name"], weapon=weapon, victim=vname, kd=f"{kd:.2f}")
+        if weapon:
+            out += self.fire("weapon_kill", server, self.context(server, kills=t[0], **common), player_id=p["id"],
+                             weapon=weapon)
+        if not lob.blooded:
+            lob.blooded = True
+            out += self.fire("first_blood", server, self.context(server, kills=1, **common), player_id=p["id"])
+        out += self.fire("kills_reached", server, self.context(server, kills=t[0], **common), player_id=p["id"],
+                         count=t[0])
         n = lob.sprees[k] = lob.sprees.get(k, 0) + 1
         chained, last = lob.chains.get(k, (0, float("-inf")))
         chained = chained + 1 if now - last <= CHAIN else 1
         lob.chains[k] = (chained, now)
-        base = dict(player=p["name"])
+        base = common
         if chained >= 2:
             medal = MULTIS[min(chained, 10)]
             ctx = self.context(server, medal=medal, kills=chained, **base)
@@ -685,6 +761,16 @@ class Engine:
             out += self.fire("medal", server, self.context(server, medal="Killjoy", kills=ended, **base),
                              player_id=p["id"], medal="Killjoy")
         return out
+
+    def frame_rate(self, server, fps: float | None) -> list[Firing]:
+        """The server's latest minute (perf.Reading.fps): fires the frame-rate triggers on a crossing."""
+        lob = self.lobby(server)
+        if fps is None:
+            return []
+        before, lob.fps = lob.fps, float(fps)
+        ctx = self.context(server, fps=f"{lob.fps:.0f}")
+        return self.fire("fps_below", server, ctx, fps=(before, lob.fps)) + \
+            self.fire("fps_recovered", server, ctx, fps=(before, lob.fps))
 
     def tick(self) -> list[Firing]:
         """Timers and outages: call every couple of seconds."""
@@ -727,6 +813,17 @@ class Engine:
             return facts.get("count", 0) >= w["min"]
         if t == "command":
             return facts.get("command") == w["command"]
+        if t == "weapon_kill":
+            return w["weapon"].casefold() in str(facts.get("weapon", "")).casefold()
+        if t == "kills_reached":
+            return facts.get("count") == w["count"]
+        if t in ("fps_below", "fps_recovered"):
+            before, now = facts.get("fps", (None, None))
+            if now is None:
+                return False
+            if t == "fps_below":
+                return now < w["fps"] and (before is None or before >= w["fps"])
+            return before is not None and before < w["fps"] <= now
         if t == "vote":
             return w["kind"] == "any" or facts.get("vote") == w["kind"]
         if t in ("players_above", "players_below"):
@@ -748,6 +845,17 @@ class Engine:
         if t == "player_role":
             roles = self.role_of(facts.get("player_id"))
             return (not roles) if c["role"] == "none" else c["role"] in roles
+        if t == "player_kd":
+            hit = self.find(lob, facts.get("player_id"))
+            k, d = lob.tally.get(hit[0], [0, 0]) if hit else (0, 0)
+            return k >= c["min_kills"] and k / max(1, d) >= float(c["min_kd"])
+        if t == "day_of_week":
+            return DAYS[datetime.now(ZoneInfo(c["timezone"])).weekday()] in c["days"].split(",")
+        if t == "fps_under":
+            return lob.fps is not None and lob.fps < c["fps"]
+        if t == "server_players":
+            other = self.lobby(c["server"])
+            return other.up and other.count is not None and c["min"] <= other.count <= c["max"]
         if t == "map_is":
             return c["text"].casefold() in lob.map.casefold()
         if t == "mode_is":
@@ -805,6 +913,8 @@ class Step:
             return f"Post to Discord ({self.webhook}): {self.text}"
         if self.kind == "start":
             return f"Start {self.server} if it's stopped"
+        if self.kind == "wait":
+            return f"Wait {self.args[0]} s"
         cmd = self.args[0]
         if cmd == "say":
             return f"Say on {self.server}: {self.args[1]}"
@@ -848,6 +958,8 @@ def plan(engine: Engine, firing: Firing) -> list[Step]:
             steps.append(Step("start", a["server"]))
         elif t == "discord":
             steps.append(Step("discord", webhook=a["webhook"], text=msg))
+        elif t == "wait":
+            steps.append(Step("wait", args=(a["seconds"],)))
     return steps
 
 
@@ -863,4 +975,8 @@ def sample(engine: Engine, rule: dict, server: str) -> Firing:
         ctx.update(medal=MULTIS[w["min"]], kills=w["min"])
     elif w["type"] == "medal":
         ctx.update(medal="Perfection" if w["medal"] == "any" else w["medal"], kills="")
+    elif w["type"] in ("weapon_kill", "first_blood", "kills_reached", "betrayal"):
+        ctx.update(weapon=w.get("weapon", "sniper rifle"), victim="ExampleVictim", kills=w.get("count", 1), kd="2.50")
+    elif w["type"] in ("fps_below", "fps_recovered"):
+        ctx.update(fps=w["fps"] - 1 if w["type"] == "fps_below" else w["fps"])
     return Firing(rule, server, {**ctx, "_player_id": "0" * 64})

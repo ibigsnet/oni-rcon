@@ -1,5 +1,26 @@
 # IBIGS Reclaimer terminal
 
+## More rule building blocks (0.9.0+ibigs.16)
+
+**WHEN:**
+- a kill with a weapon ("sniper", "sword"…)
+- first blood
+- a player reaching N kills in a match
+- a betrayal (rules can only talk about it)
+- a server's frame rate dropping under N, or recovering to N
+
+**IF:** the player's K/D this match (with a minimum number of kills), the day of the week, the server's frame rate
+under N, another server's player count.
+
+**THEN:** wait N seconds between steps.
+
+New templates: First blood, Sniper shout-out, Lag alert (to admins and Discord).
+
+Frame rates reach the rules through the service. Once a minute, and only while a rule uses frame rate, it reads each
+lobby's `oni health-report`, the same source F10 uses.
+
+The guides are also published on the website at ibigs.us/halo-3/lag and ibigs.us/halo-3/automation.
+
 ## Automation: rules, roles, votes and Discord (0.9.0+ibigs.15)
 
 F8 on customer VPSes is now AUTOMATION. Its sections are RULES, SCHEDULES (the existing jobs), ROLES, VOTES and

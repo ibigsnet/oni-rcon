@@ -305,3 +305,61 @@ def test_the_background_service_runs_rules_over_real_connections(tmp_path):
                 task.cancel()
             await asyncio.gather(*worker.tasks.values(), return_exceptions=True)
     asyncio.run(go())
+
+
+def test_weapons_first_blood_kill_counts_betrayals_and_kd():
+    e, clock = world([
+        ({"type": "weapon_kill", "weapon": "sniper"}, [{"type": "say", "to": "this", "message": "{player} sniped {victim}"}]),
+        ({"type": "first_blood"}, [{"type": "say", "to": "this", "message": "First blood: {player}"}]),
+        ({"type": "kills_reached", "count": 3}, [{"type": "say", "to": "this", "message": "{player} has {kills} (K/D {kd})"}]),
+        ({"type": "betrayal"}, [{"type": "say", "to": "this", "message": "{player} betrayed {victim}"}]),
+        rule({"type": "kills_reached", "count": 4}, [{"type": "tell_player", "message": "on fire"}],
+             **{"if": [{"type": "player_kd", "min_kd": "3", "min_kills": 4}]})])
+    k = lambda killer, victim, weapon="battle rifle", **x: steps(e, e.event("h3-01", {"event": "kill", "killer": killer,
+                                                                                         "victim": victim, "weapon": weapon, **x}))
+    clock.t += 10
+    assert k(1, 2, "Sniper Rifle") == ["Say on h3-01: Alpha sniped Bravo", "Say on h3-01: First blood: Alpha"]
+    clock.t += 10
+    assert k(1, 2) == []
+    clock.t += 10
+    assert k(1, 2) == ["Say on h3-01: Alpha has 3 (K/D 3.00)"]
+    clock.t += 10
+    assert k(1, 2) == ["Tell Alpha on h3-01: on fire"]  # 4 kills, 0 deaths
+    clock.t += 10
+    assert k(1, 2, betrayal=True) == ["Say on h3-01: Alpha betrayed Bravo"]
+    e.status("h3-01", {"phase": "round_over"})
+    e.status("h3-01", {"phase": "playing"})  # a round break isn't a new match: no new first blood
+    clock.t += 10
+    assert "First blood" not in " ".join(k(2, 1))
+    e.status("h3-01", {"phase": "finished"})
+    e.status("h3-01", {"phase": "playing"})
+    clock.t += 10
+    assert "Say on h3-01: First blood: Bravo" in k(2, 1)
+
+
+def test_frame_rate_triggers_and_conditions():
+    e, _ = world([({"type": "fps_below", "fps": 40}, [{"type": "tell_admins", "where": "any", "message": "{server} at {fps} fps"}]),
+                  ({"type": "fps_recovered", "fps": 54}, [{"type": "say", "to": "this", "message": "smooth again"}]),
+                  rule({"type": "join"}, [{"type": "say", "to": "this", "message": "laggy, sorry"}],
+                       **{"if": [{"type": "fps_under", "fps": 54}]})])
+    assert steps(e, e.frame_rate("h3-01", 60)) == []
+    assert steps(e, e.frame_rate("h3-01", 36)) == ["Tell Charlie on h3-02: h3-01 at 36 fps"]
+    assert steps(e, e.frame_rate("h3-01", 30)) == []  # still under: once per drop
+    assert steps(e, e.event("h3-01", {"event": "join", "name": "X", "player_id": B})) == ["Say on h3-01: laggy, sorry"]
+    assert steps(e, e.frame_rate("h3-01", 50)) == []
+    assert steps(e, e.frame_rate("h3-01", 60)) == ["Say on h3-01: smooth again"]
+
+
+def test_wait_day_of_week_and_another_servers_count():
+    r = rule({"type": "join"}, [{"type": "say", "to": "this", "message": "a"}, {"type": "wait", "seconds": 5},
+                                {"type": "say", "to": "this", "message": "b"}],
+             **{"if": [{"type": "day_of_week", "days": "MONDAY,tue,Wed,thu,fri,sat,sun"},
+                       {"type": "server_players", "server": "h3-02", "min": 1, "max": 4}]})
+    assert r["if"][0]["days"] == "mon,tue,wed,thu,fri,sat,sun"
+    e, _ = world([r])
+    assert steps(e, e.event("h3-01", {"event": "join", "name": "X", "player_id": B})) == \
+        ["Say on h3-01: a", "Wait 5 s", "Say on h3-01: b"]
+    with pytest.raises(ValueError, match="Days"):
+        R.validate({**r, "if": [{"type": "day_of_week", "days": "funday"}]})
+    with pytest.raises(ValueError, match="number"):
+        R.validate({**r, "if": [{"type": "player_kd", "min_kd": "lots"}]})

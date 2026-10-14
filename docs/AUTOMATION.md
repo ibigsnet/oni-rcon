@@ -28,6 +28,9 @@ Choose **TEMPLATE**, pick one, change the words if you like, and save. The templ
 - **Spree announcer**: "Alpha is on a Killing Frenzy! (10 kills)"
 - **Multi-kill shout-out**: "Overkill by Alpha!"
 - **Perfection**: tells every server when someone wins a match without dying
+- **First blood**: "First blood: Alpha took out Bravo!"
+- **Sniper shout-out**: a sniper kill by someone on a 3+ K/D
+- **Lag alert**: tells the admins, and Discord, when a server drops under 40 fps
 - **Welcome**: a private hello to each player who joins
 - **!admin call**: a player types `!admin <problem>` and every online admin gets a private message, wherever they're playing
 - **!admin with nobody on**: the same, but pings Discord when no admin is online
@@ -49,6 +52,11 @@ Choose **NEW**. You pick from menus, so there's nothing to type except names and
 | A player earns a medal | Any of: Killing Spree, Killing Frenzy, Running Riot, Rampage, Untouchable, Invincible, Double Kill, Triple Kill, Overkill, Killtacular, Killtrocity, Killimanjaro, Killtastrophe, Killpocalypse, Killionaire, Killjoy, Perfection. You can pick "any". |
 | A player reaches a killing spree | Choose your own counts, like `5,10,15` or `3,7`. |
 | A player gets a multi-kill | Kills less than 4 seconds apart: 2 is a Double Kill, 3 a Triple Kill, 4 an Overkill. |
+| A player gets a kill with a weapon | Part of the name is enough: `sniper`, `sword`, `rocket`, `melee`, `grenade`. |
+| First blood | The first kill of a match. |
+| A player reaches N kills in a match | |
+| A player betrays a teammate | Rules can only talk about it; nothing punishes anyone. |
+| A server's frame rate drops under N / is back to N or more | From the server's own minute-by-minute report (60 is perfect, under 54 players notice, under 40 is laggy). See [Is my server lagging?](SERVER-PERFORMANCE.md). |
 | A player joins / leaves | |
 | A player types a !command | Only messages that **start** with the command count, like `!admin`. Ordinary chat never triggers anything. |
 | A vote starts | Any vote, or just kick, end-round, end-game, shuffle or playlist votes. |
@@ -63,6 +71,10 @@ Choose **NEW**. You pick from menus, so there's nothing to type except names and
 - The player count is between two numbers
 - An admin is online (anywhere, on this server, or on another server), or no admin is online
 - The player has a role (ADMIN, VIP, MOD or none)
+- The player's kills/deaths this match is at least a number (with a minimum number of kills)
+- The day of the week
+- The server's frame rate is under a number
+- Another server's player count is between two numbers
 - The map or game mode is something (part of the name is enough)
 - The time is between two times
 - Another server is up, down, full or empty
@@ -77,6 +89,7 @@ Choose **NEW**. You pick from menus, so there's nothing to type except names and
 - Shuffle the teams (only during a match)
 - Start a stopped server
 - Post to Discord
+- Wait a few seconds before the next step
 
 **Messages** can include these words in curly brackets, which get filled in:
 
@@ -89,6 +102,8 @@ Choose **NEW**. You pick from menus, so there's nothing to type except names and
 | `{map}`, `{mode}` | the current map and game mode |
 | `{admins}` | the admins online |
 | `{target}` | who a vote is against |
+| `{weapon}`, `{victim}`, `{kd}` | for kills: the weapon, who was killed, and the killer's K/D this match |
+| `{fps}` | the server's frame rate |
 | `{args}` | what someone typed after a !command |
 | `{down}` | the server that went down |
 | `{time}` | the time |
