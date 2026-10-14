@@ -24,6 +24,9 @@ async def until(pilot, predicate):
 def test_customer_can_save_pause_and_delete_a_job_without_shell(size,tmp_path,monkeypatch):
     store=Store(tmp_path/'jobs')
     monkeypatch.setattr('oni_rcon.jobs_ui.Store',lambda:store)
+    from oni_rcon import rules as R
+    real=R.RuleStore
+    monkeypatch.setattr(R,'RuleStore',lambda root=None:real(tmp_path/'jobs'))
     tool=tmp_path/'oni'
     tool.write_text('#!/bin/sh\nprintf \'%s\\n\' \'[{"service":"h3-01"}]\'\n')
     tool.chmod(0o755)
@@ -33,6 +36,11 @@ def test_customer_can_save_pause_and_delete_a_job_without_shell(size,tmp_path,mo
         app=TenantApp([Server(name='h3-01',port=1,password='demo')],by='test',intro=False)
         async with app.run_test(size=size) as pilot:
             await pilot.press('f8')
+            from oni_rcon.automation_ui import Panel
+            await until(pilot,lambda:isinstance(app.screen,Panel))  # F8 is the AUTOMATION hub; SCHEDULES is in it
+            assert 'SCHEDULES' in str(app.screen.query_one('#panel-list').get_option_at_index(1).prompt)
+            app.screen.query_one('#panel-list').highlighted=1
+            await pilot.click('#p-open')
             await until(pilot,lambda:isinstance(app.screen,JobsPanel))
             for button in app.screen.query(Button):
                 assert button.region.intersection(app.screen.region)==button.region

@@ -43,7 +43,7 @@ independent private node observers; it does not stream the full native feed into
 
 Customer VMs launch `oni`, which discovers only their own local lobbies. **F6** opens ReclaimerForge;
 provisioning supplies a private customer catalog/download credential, and personal overrides are preserved.
-**F7** controls lobbies, **F8** manages persistent schedules, and **F9** checks updates and manages automatic
+**F7** controls lobbies, **F8** is AUTOMATION (rules such as spree announcers, `!admin` calls and server-down alerts; schedules; ADMIN/VIP/MOD roles; the votes switch; Discord; see [docs/AUTOMATION.md](docs/AUTOMATION.md)), and **F9** checks updates and manages automatic
 updates. New-client images enable Oni and guarded game updates by default; existing choices are preserved.
 Verified Forge downloads are staged with content hashes, without silently loading a map or restarting a game.
 On fleet-console, **F9** browses the controller's shared Forge catalog and **F6** retains guarded container operations.
@@ -505,4 +505,4 @@ contains no game files.
 GPL-3.0-or-later. Copyright (c) 2026 ibigs, LLC. See [LICENSE](LICENSE).
 
 
-IBIGS customer controls remain F7 Start/Stop, F8 Jobs and F9 Updates. The upstream Health tab is F10. Generated customer inventory enables the local, read-only health helper automatically.
+IBIGS customer controls remain F7 Start/Stop, F8 Automation (rules, schedules, roles, votes, Discord) and F9 Updates. The upstream Health tab is F10. Generated customer inventory enables the local, read-only health helper automatically.

@@ -1,5 +1,48 @@
 # IBIGS Reclaimer terminal
 
+## Automation: rules, roles, votes and Discord (0.9.0+ibigs.15)
+
+F8 on customer VPSes is now AUTOMATION. Its sections are RULES, SCHEDULES (the existing jobs), ROLES, VOTES and
+DISCORD. The plain guide is [docs/AUTOMATION.md](docs/AUTOMATION.md).
+
+**RULES** read as WHEN → IF → THEN and are built entirely from menus (`rules.CATALOG`).
+- Triggers:
+  - every spree count, every multi-kill (Double Kill to Killionaire), Killjoy, and Perfection or any other medal the
+    server reports
+  - joins and leaves, and `!commands`
+  - votes, and match start, end and pre-match
+  - a server going down or coming back
+  - a server filling up or emptying, and player counts crossing a number
+  - timers
+- Conditions: player count, admin online (here or elsewhere), the player's role, map or mode, time of day, and another
+  server's state.
+- Actions: say on this, every, other or one server; private messages to the player, to every admin wherever they're
+  playing, or to a role; cancel the vote; shuffle; start a stopped server; post to Discord.
+- Messages fill in `{player} {server} {medal} {kills} {args} {down}` and more.
+- Ten templates are included (spree announcer, `!admin` call, server-down pager, full-server alert and so on).
+- TEST shows the exact steps without sending anything. History shows what fired.
+- Limits: each rule has a cooldown and an hourly cap, and rules never send a server more than 20 messages a minute.
+
+Rules run in `ibigs-oni-jobs` on the same RCON connections as the scheduled jobs. That is one connection per lobby
+while any rule is on. The engine counts sprees and multi-kills from the native kill feed the way the fleet's
+`medal_notices` does: by engine ID, betrayals and suicides earn nothing, and a game's sprees reset with the game. A
+lobby stopped with F7 is "stopped", not "down".
+
+Rules cannot kick, ban, mute or restart a busy server. Chat triggers nothing except a message that starts with a
+`!command`: IBIGS moderates cheating, not speech.
+
+**ROLES** (`e` on F1 opens it for the selected player):
+- **ADMIN** is written to `dedicated.toml` `admins` by `oni roles apply` the next time the lobby is empty, with the
+  usual backup and a re-read check. The lobby then restarts only if it is still empty. The service tries once a
+  minute. Hand-added admins are kept; only IDs recorded in `applied.json` are ever removed.
+- **VIP** can't be vote-kicked, starting now: a built-in rule cancels the ballot.
+- **MOD** is stored until Project Reclaimer supports it.
+
+**VOTES** sets each lobby's `votes` switch, applied the same way as ADMIN.
+
+**DISCORD** walks through creating a webhook, takes the pasted URL (only `discord.com/api/webhooks/…` URLs are
+accepted), offers a test post and shows the URL masked. Posts never ping anyone and are spaced 2 seconds apart.
+
 ## Frame-time chart and bottleneck (0.9.0+ibigs.13)
 
 Under F10's FRAME RATE table, FRAME TIME charts the selected server's last 30 minutes, one column a minute. Each

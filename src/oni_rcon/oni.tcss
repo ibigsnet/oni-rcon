@@ -37,6 +37,7 @@ VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 .dialog.jobs { width: 108; max-width: 100%; }
 .jobs .dialog-buttons Button { width: 1fr; min-width: 8; }
 .jobs-history { height: auto; max-height: 8; overflow-y: auto; margin: 1 0; }
+.automation #panel-list { height: auto; max-height: 16; min-height: 3; }
 .dialog.job-form { width: 85; max-width: 100%; height: 90%; }
 .job-fields { height: 1fr; }
 #sidebar > Center { height: auto; align-vertical: middle; }
@@ -168,6 +169,7 @@ FindingsView .dialog-title { margin-bottom: 0; }
 FindingsView .dialog-buttons, FindingsView .dialog-keys { margin-top: 0; }
 FindingsView .dialog-buttons Button { min-width: 0; width: 1fr; margin: 0; }
 .pick { height: auto; }
+WidePick .dialog { width: 130; max-width: 96%; }
 #pick-list { height: auto; max-height: 20; border: round $primary 35%; background: $background; text-wrap: nowrap;
              text-overflow: ellipsis; }
 

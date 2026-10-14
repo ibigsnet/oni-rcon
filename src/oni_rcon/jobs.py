@@ -238,6 +238,12 @@ def inventory():
     return wrapper['lobbies'](wrapper['read_env']())
 
 
+def container_states():
+    """service -> docker compose state (running, exited, ...), so rules can tell a stop from an outage."""
+    wrapper = runpy.run_path(WRAPPER)
+    return {k: v.get('state', '') for k, v in wrapper['compose_services']().items()}
+
+
 def scheduled_targets(job, names):
     if job['action'].startswith('update-') or (job['target'] == 'all' and job['action'] in {'start', 'stop', 'restart'}):
         return ['all']
@@ -251,8 +257,10 @@ def run_fixed(argv, timeout=1800):
 
 
 class Worker:
-    def __init__(self, store, discover=inventory):
-        self.store, self.discover = store, discover
+    def __init__(self, store, discover=inventory, states=container_states, poster=None):
+        from .rules import RuleStore
+        from .rules_run import Runner, post_discord
+        self.store, self.discover, self.states = store, discover, states
         self.state = store.state()
         self.clients = {}
         self.tasks = {}
@@ -262,6 +270,33 @@ class Worker:
         self.pending = set()
         self.action_lock = asyncio.Lock()
         self.stopping = False
+        # Rules (rules.py) share these connections; they need one to every lobby while any rule is on.
+        self.rules = Runner(RuleStore(store.root), self.clients, start=self.start_lobby, poster=poster or post_discord)
+        self.players_at = {}
+        self.roles_said = {}  # lobby -> what its last 'waiting' said, so the history isn't one line a minute
+
+    async def apply_roles(self):
+        """Roles and the votes switch (F8 → ROLES) need a restart to reach the server: the wrapper writes them and
+        restarts a lobby only while it's empty. Busy lobbies wait for the next try, a minute later."""
+        if not any((self.store.root / f).exists() for f in ('roles.json', 'applied.json')) or self.action_lock.locked():
+            return
+        async with self.action_lock:
+            result = await asyncio.to_thread(subprocess.run, [WRAPPER, 'roles', 'apply', '--when-empty', '--json'],
+                                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=900)
+        try:
+            rows = json.loads(result.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            rows = [{'lobby': '', 'state': 'failed', 'text': clean(result.stderr.strip()[-300:]) or 'no answer'}]
+        for row in rows:
+            if row.get('state') in ('applied', 'failed') or (row.get('state') == 'pending' and
+                                                            self.roles_said.get(row.get('lobby')) != row.get('text')):
+                self.roles_said[row.get('lobby')] = row.get('text')
+                self.rules.note('roles', str(row.get('lobby', '')), clean(str(row.get('text', ''))), 'Roles and votes')
+
+    async def start_lobby(self, name):
+        """A rule's 'start a stopped server': the wrapper's own start, never forced, one lifecycle action at a time."""
+        async with self.action_lock:
+            return await asyncio.to_thread(run_fixed, [WRAPPER, 'start', name, '--yes'], 600)
 
     def save(self):
         self.state['heartbeat'] = time.time()
@@ -273,11 +308,13 @@ class Worker:
         self.save()
 
     def connection(self, target, state):
+        self.rules.on_connection(target, state == 'online')
         if state != 'online':
             self.generations[target] = self.generations.get(target, 0) + 1
             self.trackers[target] = MatchEvents()
 
     def event(self, target, msg):
+        self.rules.on_event(target, msg)
         if msg.get('event') == 'lagged' or msg.get('type') == 'lagged':
             self.generations[target] = self.generations.get(target, 0) + 1
             self.trackers[target] = MatchEvents()
@@ -366,8 +403,12 @@ class Worker:
 
     async def refresh_clients(self):
         found = await asyncio.to_thread(self.discover)
-        needed = {s['name']: s for s in found if any(j['enabled'] and j['action'] in {'broadcast', 'shuffle'}
-                  and j['target'] in {'all', s['name']} for j in self.jobs)}
+        if self.rules.active:
+            with contextlib.suppress(Exception):
+                self.rules.on_inventory(await asyncio.to_thread(self.states))
+        needed = {s['name']: s for s in found if self.rules.active or any(
+                  j['enabled'] and j['action'] in {'broadcast', 'shuffle'} and j['target'] in {'all', s['name']}
+                  for j in self.jobs)}
         for name in list(self.clients):
             client = self.clients[name]
             info = needed.get(name)
@@ -399,12 +440,19 @@ class Worker:
                 return  # a native event or disconnect superseded this in-flight snapshot
             if result.get('ok') and isinstance(result.get('data'), dict):
                 self.observe(name, result['data'])
+                self.rules.on_status(name, result['data'])
+                if self.rules.active and time.time() - self.players_at.get(name, 0) >= 5:
+                    self.players_at[name] = time.time()  # who's where, their admin flags, kill feed names
+                    roster = await client.call('players', timeout=3)
+                    if roster.get('ok'):
+                        self.rules.on_players(name, roster.get('data'))
             else:
                 self.trackers[name] = MatchEvents()
         except (OSError, ValueError, TimeoutError, ConnectionError):
             self.trackers[name] = MatchEvents()
 
     async def run(self):
+        next_roles = time.time() + 20
         next_inventory = 0
         next_heartbeat = 0
         names = []
@@ -412,6 +460,7 @@ class Worker:
         release = active.resolve() if active.exists() else None
         while True:
             self.jobs = self.store.load()  # malformed policy fails closed, systemd reports the failure
+            self.rules.reload()  # a bad rules file pauses the rules only, and says so in their history
             now = time.time()
             if now >= next_inventory:
                 if release and active.exists() and active.resolve() != release and not self.pending:
@@ -432,6 +481,11 @@ class Worker:
                         continue
                     self.queue(job, target, key)
             await asyncio.gather(*(self.poll(n, c) for n, c in self.clients.items()))
+            self.rules.tick()
+            if now >= next_roles:
+                next_roles = now + 60
+                task = asyncio.create_task(self.apply_roles())
+                task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             if now >= next_heartbeat:
                 self.save()
                 next_heartbeat = now + 10

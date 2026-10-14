@@ -84,18 +84,20 @@ class TenantApp(OniApp):
     TITLE = 'IBIGS Server Console'
     BINDINGS = [*OniApp.BINDINGS, Binding('ctrl+f', 'goto', 'Find server', priority=True),
                 Binding('f7', 'power', 'Start/Stop', priority=True),
-                Binding('f8', 'jobs', 'Jobs', priority=True), Binding('f9', 'updates', 'Updates', priority=True)]
+                Binding('f8', 'jobs', 'Automation', priority=True), Binding('f9', 'updates', 'Updates', priority=True),
+                Binding('e', 'give_role', 'Give role', show=False)]
 
     def welcome(self):
         super().welcome()
-        self.notify('Managing this VM’s lobbies. F7 starts or stops servers; F3 PLAYLISTS deploys playlists. Ctrl+F '
-                    'finds a server; F6 opens ReclaimerForge. Installing content never restarts a game.',
-                    title='IBIGS', timeout=8)
+        self.notify('Managing this VM’s lobbies. F7 starts or stops servers; F3 PLAYLISTS deploys playlists. F8 '
+                    'AUTOMATION: rules (sprees, !admin, server alerts), schedules, roles, votes and Discord. On F1, e '
+                    'gives the selected player a role. F6 opens ReclaimerForge.',
+                    title='IBIGS', timeout=10)
 
     def compose_stations(self) -> ComposeResult:
         yield from super().compose_stations()
         yield Button('⏻ START / STOP SERVERS  F7', id='power-btn', compact=True, variant='warning')
-        yield Button('SCHEDULED JOBS  F8', id='jobs-btn', compact=True)
+        yield Button('AUTOMATION  F8', id='jobs-btn', compact=True)
         yield Button('UPDATES  F9', id='updates-btn', compact=True)
 
     def sidebar_room(self):
@@ -114,13 +116,30 @@ class TenantApp(OniApp):
 
     @work(exclusive=True, group='dialog')
     async def action_jobs(self) -> None:
-        from .jobs_ui import jobs_dialog
+        from .automation_ui import automation_dialog
+        await automation_dialog(self, await self.lobby_names())
+
+    async def lobby_names(self) -> list:
         rc, out = await self.power_run('status', '--json')
         try:
-            targets = [l['service'] for l in json.loads(out)] if rc == 0 else []
+            return [l['service'] for l in json.loads(out)] if rc == 0 else []
         except (ValueError, KeyError):
-            targets = []
-        await jobs_dialog(self, targets)
+            return []
+
+    @work(exclusive=True, group='dialog')
+    async def action_give_role(self) -> None:
+        """e on F1: give the selected player ADMIN, VIP or MOD."""
+        from .automation_ui import add_role
+        from .rules import RuleStore
+        p = self.cur_player()
+        pid = str((p or {}).get('player_id') or (p or {}).get('id') or '')
+        if not p or len(pid) != 64:
+            self.notify('Choose a player on F1 first (their ID must be known).', title='Roles', timeout=6)
+            return
+        try:
+            await add_role(self, RuleStore(), await self.lobby_names(), (pid, clean(str(p.get('name') or ''))))
+        except (OSError, ValueError) as exc:
+            self.notify(clean(str(exc)), title='Roles', severity='error', timeout=10)
 
     @work(exclusive=True, group='dialog')
     async def action_updates(self) -> None:
