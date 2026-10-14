@@ -42,6 +42,7 @@ from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, 
                   pixels, spark, split_bar)
 from . import health as hc
 from . import perf as pf
+from .perf_view import chart as frame_chart
 from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
                     Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
@@ -846,10 +847,19 @@ GUIDE = [
                     "CONTAINER-RESTART is one that started again. PLAYERS is how many were on. DROPPED means this "
                     "console's RCON connection fell at the same moment."),
         ("Frame rate", "Each server's frames a second, from its own log: the server aims at 60 and logs every minute "
-                       "it spent under 54. FPS NOW is the latest minute, 5 MIN the average, WORST the slowest seconds' "
-                       "average, LONGEST FRAME the worst stall (50 ms and up is a visible hitch). Under 54 is amber, "
-                       "under 40 red; a server falling behind also shows it on its card and in F3's SERVER FPS. The "
-                       "fix is more processor time or fewer players. CPU is the server's share of one core (fleet)."),
+                       "it spent under 54. FPS is the latest minute, 5 MIN the average, WORST the slowest seconds' "
+                       "average, LONGEST the worst stall (50 ms and up is a visible hitch). Under 54 is amber, under "
+                       "40 red; a server falling behind also shows it on its card and in F3's SERVER FPS. CPU is the "
+                       "server's share of one core (fleet). Under the table, FRAME TIME charts the selected row's last "
+                       "30 minutes, a column a minute: the average frame, the longest (╸) and the 60 fps line."),
+        ("Bottleneck", "The game runs on one thread and makes most calls through wineserver, which is single-threaded "
+                       "too, so a lobby runs out of one core's speed long before the box runs out of cores. GAME and "
+                       "WINE are those threads' share of one core. ONE CORE MAXED: the game thread is at 90%+, so only "
+                       "a faster core or fewer players helps. GAME+WINE ONE CORE: the two together take 130%+ of a "
+                       "core; they wait on each other, so it's the same limit. HOST BUSY: the game thread waits for a "
+                       "free CPU (10%+ of the time), so other work on the box is crowding it. CPU CAP: the container's "
+                       "CPU limit holds it back. NOT CPU: slow, with none of those: look elsewhere. A server keeping "
+                       "up shows its game thread's HEADROOM."),
         ("Host", "Free memory (amber under twice health_min_free_mb, red under it), swap, the kernel's oom_kill "
                  "counter, CPU load, and each container's start time and OOMKilled flag."),
         ("Workaround", "Whether the named systemd service is running, when it last moved a tag, and any warning that "
@@ -1470,6 +1480,7 @@ class OniApp(App):
                     yield Static(id="health-setup")
                     yield Roster(id="crashes", cursor_type="row", zebra_stripes=True)
                     yield Roster(id="perf", cursor_type="row", zebra_stripes=True)
+                    yield Static(id="perf-graph")
                     with Horizontal(id="health-bottom"):
                         with Vertical(id="host-box"):
                             yield Static(id="host")
@@ -1499,7 +1510,8 @@ class OniApp(App):
                 "#versions": ["", "VERSION", "PUBLISHED", "NOTES"],
                 "#crashes": ["WHEN", "SERVER", "CLASS", "PLAYERS", "DETAIL", "RCON"],
                 "#containers": ["SERVER", "STARTED", "UP", "OOMKILLED", "EXIT", "RESTARTS"],
-                "#perf": ["SERVER", "FPS NOW", "5 MIN", "WORST", "LONGEST FRAME", "PLAYERS", "CPU", "LAST SLOW"]}
+                "#perf": ["SERVER", "FPS", "5 MIN", "WORST", "LONGEST", "PLAYERS", "GAME", "WINE", "BOTTLENECK",
+                          "CPU", "LAST SLOW"]}
         for sel, c in cols.items():
             if not (t := self.query_one(sel, DataTable)).columns:  # once, whatever mounts twice
                 fixed = {"#": 3, "SCORE": 5, "K": 3, "D": 3, "K/D": 5, "PING": 5} if sel == "#players" else {}
@@ -1783,7 +1795,7 @@ class OniApp(App):
         on = any(self.watched(st) for st in self.stations)
         setup, crashes, host_box = (self.query_one(i) for i in ("#health-setup", "#crashes", "#host-box"))
         setup.display, crashes.display, host_box.display = not on, on, on
-        self.query_one("#perf").display = on
+        self.query_one("#perf").display = self.query_one("#perf-graph").display = on
         self.paint_perf(now)
         self.query_one("#workaround").display = bool(self.hsetup.service)
         if not on:
@@ -1855,7 +1867,10 @@ class OniApp(App):
             if not self.watched(st):
                 continue
             r, cpu = self.mon.frame_rate(str(st.index), now), self.cpu_of(st)
+            load, verdict, vlevel = self.mon.cpu_verdict(str(st.index), now)
             fps = lambda v: Text(f"{v:.0f}", LEVEL[pf.level(v)])
+            core = lambda v: (Text(f"{v:.0f}%", RED if v >= pf.MAXED else AMBER if v >= 70 else WHITE)
+                              if v is not None else Text("—", DIM))
             rows.append((r.fps if r else 999, st.label.lower(), (str(st.index), [
                 Text(st.label, WHITE),
                 fps(r.fps) if r else Text("—", DIM),
@@ -1863,8 +1878,10 @@ class OniApp(App):
                 Text(f"{r.worst}", LEVEL[pf.level(r.worst)]) if r and r.worst is not None else Text("—", DIM),
                 Text(f"{r.frame_ms} ms", RED if r.frame_ms >= 50 else AMBER) if r and r.frame_ms else Text("—", DIM),
                 Text(str(r.players), WHITE) if r and r.players is not None else Text("—", DIM),
+                core(load.main if load else None), core(load.wine if load else None),
+                Text(verdict, LEVEL[vlevel]) if verdict else Text("—", DIM),
                 Text(f"{cpu * 100:.0f}%", AMBER if cpu >= 0.9 else WHITE) if cpu is not None else Text("—", DIM),
-                Text(f"{age(now - r.since)} ago", DIM) if r and r.since else Text("none in 30 min" if r else "—", DIM)])))
+                Text(f"{age(now - r.since)} ago", DIM) if r and r.since else Text("none" if r else "—", DIM)])))
         rows.sort(key=lambda x: (x[0], x[1]))
         t = self.query_one("#perf", Roster)
         t.fill([row for *_, row in rows])
@@ -1874,6 +1891,28 @@ class OniApp(App):
         t.border_subtitle = (Text(f"{behind} FALLING BEHIND", RED) if behind else
                              Text("ALL KEEPING UP", GREEN) if measured else
                              Text("NO LAG LINES READ YET: UPDATE THE HEALTH REPORT", DIM) if rows else "")
+        self.paint_perf_graph(now)
+
+    def paint_perf_graph(self, now: float | None = None) -> None:
+        """The frame-time chart for the FRAME RATE row the cursor is on (the slowest server until one is picked)."""
+        t, graph = self.query_one("#perf", Roster), self.query_one("#perf-graph", Static)
+        key = t.selected or (t.ids[0] if t.ids else None)
+        if key is None:
+            graph.update("")
+            return
+        graph.update(frame_chart(self.stations[int(key)].label, self.mon.history(key, now)))
+
+    @on(DataTable.RowHighlighted, "#perf")
+    def _perf_row(self, _e: DataTable.RowHighlighted) -> None:
+        self.paint_perf_graph()
+
+    def core_text(self, st: Station) -> Text:
+        """The SITREP's GAME THREAD line: how much of one core the game thread uses, and what limits the server."""
+        load, verdict, vlevel = self.mon.cpu_verdict(str(st.index))
+        if load is None:
+            return Text("measuring", DIM)
+        # short: the SITREP's column is narrow. F10 has wineserver's share too
+        return Text(f"{load.main:.0f}%", RED if load.main >= pf.MAXED else WHITE) + Text(f"  {verdict}", LEVEL[vlevel])
 
     def frame_text(self, st: Station) -> Text:
         """The SITREP's SERVER FPS line."""
@@ -2474,8 +2513,8 @@ class OniApp(App):
         g.add_column(no_wrap=True, overflow="ellipsis", ratio=1)
         g.add_column(justify="right", no_wrap=True)
         count = Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM)
-        if slow is not None:
-            count = Text(f"{slow}fps ", LEVEL[pf.level(slow)]) + count
+        # the frame rate goes on the second line: on the first it would push the server's name about
+        chip = Text(f"{slow}fps", LEVEL[pf.level(slow)] + " bold") if slow is not None else Text()
         g.add_row(Text(f"{glyph} ", color) + Text(f"{self.station_number(st)}  {st.label.upper()}", WHITE),
                   Text.assemble((f"⚑ {st.alerts}  ", RED), count) if st.alerts else count)
         if not st.online:
@@ -2488,11 +2527,11 @@ class OniApp(App):
         place = Text("   ") + Text(" · ").join(Text(str(x).replace("_", " "), CYAN if x == st.tag else DIM)
                                                 for x in where)
         if self.large_fleet:  # two lines: who and how full, then where and what's been happening
-            g.add_row(place, spark(list(trace)))
+            g.add_row(place, chip + Text(" ") + spark(list(trace)) if chip else spark(list(trace)))
             card.show(g)
             return
-        g.add_row(place, Text("" if phase.lower() in QUIET_PHASES else phase.replace("_", " ").upper(),
-                              GREEN if phase == "in_game" else DIM))
+        g.add_row(place, chip if chip else Text("" if phase.lower() in QUIET_PHASES else phase.replace("_", " ").upper(),
+                                                GREEN if phase == "in_game" else DIM))
         full = n / mx if n is not None and mx else 0
         card.show(Group(g, Text("   ") + gauge(full, 8, RED if full >= 1 else AMBER if full >= .75 else GREEN)
                         + Text("  ") + spark(list(trace))))
@@ -2656,6 +2695,7 @@ class OniApp(App):
                      ("NEXT", str(s.get("next") or "playlist")),
                      ("PLAYERS", f"{s.get('players', '—')} / {s.get('max_players', '—')}"),
                      ("SERVER FPS", self.frame_text(st)),
+                     *([("GAME THREAD", self.core_text(st))] if self.mon.threads.get(str(st.index)) else []),
                      ("JOIN PASSWORD", yes_no(s.get("password_required"), "SET", "OPEN")),
                      ("PING LIMIT", f"{s['max_ping']} ms" if s.get("max_ping") else "off"),
                      ("ANTI-CHEAT", f"{s.get('anti_cheat', '—')}" + ("  (active)" if s.get("anti_cheat_active") else "")),

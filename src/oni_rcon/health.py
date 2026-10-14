@@ -113,6 +113,7 @@ class Report:
     host: dict = field(default_factory=dict)
     box: Box | None = None
     lines: list = field(default_factory=list)  # the log, scrubbed
+    threads: dict | None = None  # {"at", "main", "wine"}: the game thread's and wineserver's counters (perf.py)
 
 
 def record(line: str) -> tuple[str, dict] | None:
@@ -122,6 +123,8 @@ def record(line: str) -> tuple[str, dict] | None:
             d = json.loads(line)
         except ValueError:
             return None
+        if isinstance(d, dict) and d.get("kind") == "threads":
+            return "threads", d
         if isinstance(d, dict) and d.get("kind") in ("host", "container"):
             return d["kind"], {k: str(v) for k, v in d.items() if k != "kind"}
         return None
@@ -140,6 +143,10 @@ def parse_report(text: str) -> Report:
         got = record(line)
         if got is None:
             rep.lines.append(scrub(line))
+        elif got[0] == "threads":
+            at = got[1].get("at")
+            if isinstance(at, (int, float)) and not isinstance(at, bool) and math.isfinite(at):
+                rep.threads = {"at": float(at), "main": got[1].get("main"), "wine": got[1].get("wine")}
         elif got[0] == "host":
             f = got[1]
             rep.host = {k: n for k in ("now", "mem_available_mb", "swap_used_mb", "swap_total_mb", "oom_kill", "perf",
@@ -295,6 +302,7 @@ class Monitor:
         self.counts: dict[str, deque] = {}  # key -> (when, players) as the roster was read
         self.drops: dict[str, deque] = {}  # key -> when its RCON connection dropped
         self.perf: dict[str, pf.Perf] = {}  # key -> its lag reports (see perf.py)
+        self.threads: dict[str, pf.Threads] = {}  # key -> its game thread's and wineserver's load (perf.py)
 
     # what the rest of the console tells us
     def sample(self, key: str, players: int | None, now: float | None = None) -> None:
@@ -331,7 +339,10 @@ class Monitor:
         # A report carries the lag lines when its command says so (perf=1) or when it's the raw log: an old `oni
         # health-report` passes only crash lines, and a log with no lag lines in it would read as a steady 60
         if lags or rep.host.get("perf") or any("Network upload over the last" in x for x in rep.lines):
-            notes += self.frames(key, lags, now)
+            # a report reads at least 15 minutes of log, and the first one a day's (as far as the command's tail goes)
+            notes += self.frames(key, lags, now, covers=1800.0)
+        if rep.threads:
+            self.load(key, rep.threads["at"], rep.threads["main"], rep.threads["wine"])
         if rep.box:
             found += self._box(key, host, rep.box, now)
             self.boxes[key] = rep.box
@@ -345,13 +356,15 @@ class Monitor:
         self.events = sorted((e for e in self.events if now - e.ts < DAY), key=lambda e: e.ts)[-500:]
         return notes
 
-    def frames(self, key: str, lags: list, now: float) -> list[Notice]:
+    def frames(self, key: str, lags: list, now: float, covers: float = pf.WINDOW) -> list[Notice]:
         """Fold in a server's lag reports (perf.py). The feed hears once when it gets choppy (a minute under
         perf.BAD) and once when it's held perf.SLOW again for a while."""
         p = self.perf.setdefault(key, pf.Perf())
         for m in lags:
             p.add(m)
         p.read_at = now
+        if p.first_read is None:
+            p.first_read, p.covers = now, covers
         r = p.reading(now)
         if r is None:
             return []
@@ -363,6 +376,21 @@ class Monitor:
             p.choppy = False
             return [Notice("warn", key, f"KEEPING UP  {pf.TARGET} fps again for 3 minutes", quiet=True)]
         return []
+
+    def load(self, key: str, at: float, main, wine, throttled: float | None = None) -> pf.Load | None:
+        t = self.threads.setdefault(key, pf.Threads())
+        t.throttle(at, throttled)
+        return t.add(at, main, wine)
+
+    def cpu_verdict(self, key: str, now: float | None = None) -> tuple[pf.Load | None, str, str]:
+        """(the latest load, bottleneck label, level) for a server; (None, "", "") when nothing measures it."""
+        now = time.time() if now is None else now
+        t, r = self.threads.get(key), self.frame_rate(key, now)
+        load = t.now(now) if t else None
+        return (load, *pf.bottleneck(load, t.capped if t else None, bool(r and r.behind)))
+
+    def history(self, key: str, now: float | None = None, n: int = 30) -> list[dict]:
+        return pf.per_minute(self.perf.get(key), self.threads.get(key), time.time() if now is None else now, n)
 
     def frame_rate(self, key: str, now: float | None = None) -> pf.Reading | None:
         p = self.perf.get(key)

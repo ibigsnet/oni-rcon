@@ -1,5 +1,31 @@
 # IBIGS Reclaimer terminal
 
+## Frame-time chart and bottleneck (0.9.0+ibigs.13)
+
+Under F10's FRAME RATE table, FRAME TIME charts the selected server's last 30 minutes, one column a minute. Each
+column shows the average frame time, the longest frame (`╸`) and the 60 fps line. Strips under the chart show the
+game thread's and wineserver's share of one core for the same minutes. The table adds GAME, WINE and BOTTLENECK, and
+F3's SITREP adds GAME THREAD.
+
+The game simulates on one thread (Wine names it MAIN_THREAD), and most of its system calls are round trips to
+wineserver64, which is also single-threaded. A lobby therefore runs out of one core's speed long before the box runs
+out of cores. On 2026-10-14, Mega Fat Kid on NODE-A fell behind with its game thread at 79% of a core, wineserver at
+59% (about 36,000 round trips a second) and 0.1% waiting for a CPU. That is the two threads waiting on each other, not
+host contention.
+
+BOTTLENECK reads the kernel's scheduler counters for those two threads, comparing two reports.
+- ONE CORE MAXED: the game thread runs 90% or more.
+- GAME+WINE ONE CORE: the game thread and wineserver together take 130% or more of a core.
+- HOST BUSY: the game thread spends 10% or more of its time waiting for a free CPU.
+- CPU CAP: the container's CPU limit throttled it.
+- NOT CPU: the server is slow, but none of the above applies.
+
+A server that keeps up shows its game thread's HEADROOM. The first two verdicts are fixed by a faster core or fewer
+players, not by more cores.
+
+Customers get the counters from `oni health-report`, which reads its own lobby's threads from `/proc`. The fleet gets
+them from the node agents' `threads` row.
+
 ## Server frame rate (0.9.0+ibigs.12)
 
 F10 HEALTH has a FRAME RATE table: every server's frames a second, slowest first. It shows FPS NOW (the latest minute),

@@ -358,6 +358,13 @@ class FakeHost:
                  # a join, as the server logs it: the console must read around the ID and the address
                  f"{iso(n - 3600)} [{fake.status['name']}] Bob connected from 203.0.113.9 "
                  f"(player ID {'ab12' * 16}, ping 77 ms)."]
+        # the game thread's and wineserver's scheduler counters, as `oni health-report` reads them from /proc: the first
+        # server's game thread runs flat out (one core maxed), the others have room
+        busy = 0.95 if port == next(iter(self.fakes)) else 0.3
+        t = time.time()
+        lines.append(json.dumps({"kind": "threads", "at": t,
+                                 "main": [port, int(t * busy * 1e9), int(t * 0.001 * 1e9), int(t * 2000), int(t * 5)],
+                                 "wine": [port + 1, int(t * busy * 0.6 * 1e9), 0, int(t * 30000), int(t * 3)]}))
         if port == next(iter(self.fakes)):  # the busiest box can't keep up: a lag report for each of the last 5 min
             for ago, (slow, avg, frame) in zip(range(270, 0, -60), ((31, 47, 61), (52, 41, 88), (59, 36, 104),
                                                                     (59, 33, 131), (58, 38, 97))):

@@ -50,10 +50,15 @@ def project(snapshot, now=None):
             if not isinstance(row, dict) or not isinstance(row.get('id'), str):
                 continue
             perf = row.get('perf') if isinstance(row.get('perf'), dict) else None
+            threads = row.get('threads') if isinstance(row.get('threads'), dict) else {}
             lobbies[row['id']] = {'node': ident, 'at': observed, 'fresh': bool(fresh),
                 'started_at': number(row.get('started_at')), 'restart_count': number(row.get('restart_count')),
                 'oom_killed': row.get('oom_killed') if isinstance(row.get('oom_killed'), bool) else None,
                 'cpu_seconds': number(row.get('cpu_seconds_total')),
+                'throttled': number(row.get('cpu_throttled_seconds_total')),
+                # the game thread's and wineserver's counters (perf.Threads checks their shape)
+                'threads': {'at': number(threads.get('at')), 'main': threads.get('main'), 'wine': threads.get('wine')}
+                           if number(threads.get('at')) is not None else None,
                 # None: this node's agent doesn't read lag lines yet. A list (maybe empty): it does.
                 'lags': [m for x in (perf.get('lags') or [])[:32] if (m := pf.from_row(x))]
                         if perf and isinstance(perf.get('lags'), list) else None}
@@ -115,6 +120,9 @@ class FleetHealthMixin:
                     box['oom_killed'] = row['oom_killed'] and previous is not None and not previous.oom_killed
                     lines.append(json.dumps(box))
                 self.fleet_cpu(key, row)
+                if row['threads']:
+                    self.mon.load(key, row['threads']['at'], row['threads']['main'], row['threads']['wine'],
+                                  row['throttled'])
                 if row['lags'] is not None:
                     for notice in self.mon.frames(key, row['lags'], row['at']):
                         self.health_notice(notice)

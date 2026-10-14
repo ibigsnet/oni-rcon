@@ -103,6 +103,16 @@ def test_demo_frame_rate_reaches_f10_f3_and_the_card():
             assert len(rows) == 3
             assert rows[0][1:5] == ["38", "41", "33", "131 ms"]  # the slowest first
             assert all(r[1:3] == ["60", "60"] and r[3] == "—" for r in rows[1:])
+            await pilot.press("ctrl+r")  # a second report: the thread counters now make percentages
+            for _ in range(40):
+                await pilot.pause(0.1)
+                if app.mon.cpu_verdict("0")[0]:
+                    break
+            rows = [[str(c) for c in t.get_row_at(r)] for r in range(t.row_count)]
+            assert rows[0][6] == "95%" and rows[0][8] == "ONE CORE MAXED"
+            assert rows[1][8].endswith("HEADROOM")
+            assert "FRAME TIME" in str(app.query_one("#perf-graph").content) and "Slayer" in str(
+                app.query_one("#perf-graph").content)
             assert "1 FALLING BEHIND" in str(app.query_one("#perf").border_subtitle)
             assert "CPU LOAD" in grid_text(app.query_one("#host")) and "of 4 cores" in grid_text(app.query_one("#host"))
             feed = " ".join(str(app.feed_line(st, ev)) for st, ev in app.feed if ev.get("event") == "health")
@@ -114,7 +124,8 @@ def test_demo_frame_rate_reaches_f10_f3_and_the_card():
             await pilot.pause(0.1)
             app.paint_ops()
             sitrep = grid_text(app.query_one("#sitrep"))
-            assert "SERVER FPS" in sitrep and "38/60" in sitrep and "5m 41 · low 33" in sitrep
+            assert "GAME THREAD" in sitrep and "ONE CORE MAXED" in sitrep
+            assert "SERVER FPS" in sitrep and "38/60" in sitrep and "low 33" in sitrep, sitrep
 
     asyncio.run(go())
 
@@ -127,7 +138,9 @@ def test_fleet_lag_rows_and_cpu_come_from_the_snapshot():
         data = snapshot(now - 15)
         data['nodes'][0]['lobbies'].append({**data['nodes'][0]['lobbies'][0], 'id': 'node-b-49176'})
         slow = data['nodes'][0]['lobbies'][0]
-        slow.update(cpu_seconds_total=1000.0, perf={'lags': [[now - 30, 59, 59, 36, 144, 65]]})
+        slow.update(cpu_seconds_total=1000.0, cpu_throttled_seconds_total=0.0,
+                    perf={'lags': [[now - 30, 59, 59, 36, 144, 65]]},
+                    threads={'at': now - 15, 'main': [7, 10 ** 12, 10 ** 9, 5, 5], 'wine': [8, 10 ** 11, 0, 9, 9]})
         data['nodes'][0]['lobbies'][1].update(perf={'lags': []})  # read, and keeping up
         fleet.health_snapshot = Mock(side_effect=lambda: project(data))
         app = cli.FleetApp(fleet)
@@ -137,15 +150,62 @@ def test_fleet_lag_rows_and_cpu_come_from_the_snapshot():
             await app.refresh_health()
             data['nodes'][0]['observed_at'] += 15
             slow['cpu_seconds_total'] += 57.0  # 3.8 cores
+            # 15 s: the game thread ran 11.7 s (78%), waited for a CPU 0.15 s (1%); wineserver ran 9 s (60%)
+            slow['threads'] = {'at': now, 'main': [7, 10 ** 12 + 11_700_000_000, 10 ** 9 + 150_000_000, 9, 9],
+                               'wine': [8, 10 ** 11 + 9 * 10 ** 9, 0, 9, 9]}
             await app.refresh_health()
             await pilot.press('f10')
             await pilot.pause(.1)
             assert app.query_one(TabbedContent).active == 'health'
             t = app.query_one('#perf')
             rows = [[str(c) for c in t.get_row_at(r)] for r in range(t.row_count)]
-            assert rows[0][1:8] == ['36', '55', '36', '144 ms', '65', '380%', rows[0][7]] and rows[0][7].endswith('ago')
+            assert rows[0][1:10] == ['36', '55', '36', '144 ms', '65', '78%', '60%', 'GAME+WINE ONE CORE', '380%']
+            assert rows[0][10].endswith('ago')
+            graph = str(app.query_one('#perf-graph').content)
+            assert 'FRAME TIME' in graph and '60 fps' in graph and 'game thread' in graph
             assert rows[1][1] == '60' and rows[1][2] == '60'
             assert app.stations[0].drawn[7] == 36
             # a node whose agent doesn't read lag lines yet says nothing rather than "60"
             assert all(app.mon.frame_rate(str(s.index)) is None for s in app.stations[2:])
     asyncio.run(run())
+
+
+def test_thread_load_from_two_readings_and_what_limits_the_server():
+    t = pf.Threads()
+    assert t.add(100.0, [7, 0, 0, 0, 0], [8, 0, 0, 0, 0]) is None  # one reading: nothing to compare
+    load = t.add(110.0, [7, 9 * 10 ** 9, 2 * 10 ** 8, 100, 1], [8, 6 * 10 ** 9, 0, 300000, 1])
+    assert (round(load.main), round(load.main_wait), round(load.wine), round(load.wine_switches)) == (90, 2, 60, 30000)
+    assert pf.bottleneck(load, None, True) == ("ONE CORE MAXED", "crit")
+    assert t.add(120.0, [9, 1, 0, 0, 0], None) is None  # another thread: the server restarted
+    assert t.add(120.0, [9, 1, 0, 0, 0], None) is None  # the same reading again
+    L = lambda main, wait=0.0, wine=None: pf.Load(0, main, wait, wine, None)
+    assert pf.bottleneck(L(50, wait=15), None, True) == ("HOST BUSY", "crit")
+    assert pf.bottleneck(L(80, wine=55), None, True) == ("GAME+WINE ONE CORE", "crit")
+    assert pf.bottleneck(L(80, wine=55), None, False) == ("GAME+WINE ONE CORE", "warn")
+    assert pf.bottleneck(L(40, wine=20), 0.3, True) == ("CPU CAP", "crit")
+    assert pf.bottleneck(L(40, wine=20), None, True) == ("NOT CPU", "warn")
+    assert pf.bottleneck(L(40, wine=20), None, False) == ("60% HEADROOM", "ok")
+    assert pf.bottleneck(None, None, True) == ("", "")
+    for bad in ([7, 1, 2, 3], [7, -1, 0, 0, 0], [7, 1.5, 0, 0, 0], "x", None):
+        assert pf.counters(bad) is None
+    t.throttle(0.0, 5.0)
+    t.throttle(10.0, 8.0)
+    assert t.capped == 0.3
+
+
+def test_the_per_minute_history_and_its_chart():
+    from oni_rcon.perf_view import chart
+    p = pf.Perf()
+    p.first_read, p.read_at, p.covers = T0 - 600, T0, 1800.0
+    p.add(pf.Minute(T0 - 90, 59, 59, 30, 140, 80))
+    t = pf.Threads()
+    t.loads.append(pf.Load(T0 - 100, 95.0, 1.0, 50.0, None))
+    hist = pf.per_minute(p, t, T0, n=30)
+    assert len(hist) == 30
+    assert hist[-2]["fps"] == 30 and hist[-2]["longest"] == 140 and hist[-2]["main"] == 95
+    assert hist[-1]["fps"] == 60 and hist[0]["fps"] == 60  # read and fine, back to the first report's 30 min
+    assert pf.per_minute(None, None, T0, n=3) == [dict(fps=None, frame=None, longest=None, main=None, wine=None)] * 3
+    text = chart("Mega", hist).plain
+    assert "FRAME TIME · Mega" in text and "← 60 fps" in text and "╸" in text and "GAME" in text and "now" in text
+    assert "150" in text  # room for the 140 ms frame
+    assert "no frame-rate reports" in chart("Quiet", pf.per_minute(None, None, T0)).plain
