@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
 
+from . import perf as pf
 from .config import health_command
 from .install import SSH_OPTS
 from .pings import remote_command, stop_follower
@@ -141,7 +142,8 @@ def parse_report(text: str) -> Report:
             rep.lines.append(scrub(line))
         elif got[0] == "host":
             f = got[1]
-            rep.host = {k: n for k in ("now", "mem_available_mb", "swap_used_mb", "swap_total_mb", "oom_kill")
+            rep.host = {k: n for k in ("now", "mem_available_mb", "swap_used_mb", "swap_total_mb", "oom_kill", "perf",
+                                                   "load_pct", "cpus")
                         if (n := _num(f.get(k))) is not None}
             if re.fullmatch(r"\d\d:\d\d:\d\d", f.get("clock", "")):
                 rep.host["clock"] = f["clock"]
@@ -253,6 +255,7 @@ class Notice:
     level: str  # crit or warn
     key: str  # the station, or "" for the host
     text: str
+    quiet: bool = False  # the feed only: no banner, no alert
 
 
 @dataclass
@@ -263,6 +266,8 @@ class Host:
     oom: int | None = None  # the cgroup's oom_kill counter
     oom_first: int | None = None  # what it was when this console first looked
     at: float = 0.0
+    load_pct: int | None = None  # the 1-minute load average as a share of the cores, in percent
+    cpus: int | None = None
 
 
 @dataclass
@@ -289,6 +294,7 @@ class Monitor:
         self.low: dict[str, bool] = {}  # hosts short of memory right now
         self.counts: dict[str, deque] = {}  # key -> (when, players) as the roster was read
         self.drops: dict[str, deque] = {}  # key -> when its RCON connection dropped
+        self.perf: dict[str, pf.Perf] = {}  # key -> its lag reports (see perf.py)
 
     # what the rest of the console tells us
     def sample(self, key: str, players: int | None, now: float | None = None) -> None:
@@ -319,7 +325,13 @@ class Monitor:
         now = time.time() if now is None else now
         rep = parse_report(text)
         notes = self._host(host, rep.host, now) if rep.host else []
-        found = crashes_in(rep.lines, clock_for(rep.host, now))
+        at = clock_for(rep.host, now)
+        found = crashes_in(rep.lines, at)
+        lags = pf.minutes_in(rep.lines, at, split_stamp)
+        # A report carries the lag lines when its command says so (perf=1) or when it's the raw log: an old `oni
+        # health-report` passes only crash lines, and a log with no lag lines in it would read as a steady 60
+        if lags or rep.host.get("perf") or any("Network upload over the last" in x for x in rep.lines):
+            notes += self.frames(key, lags, now)
         if rep.box:
             found += self._box(key, host, rep.box, now)
             self.boxes[key] = rep.box
@@ -332,6 +344,29 @@ class Monitor:
         self.seen.add(key)
         self.events = sorted((e for e in self.events if now - e.ts < DAY), key=lambda e: e.ts)[-500:]
         return notes
+
+    def frames(self, key: str, lags: list, now: float) -> list[Notice]:
+        """Fold in a server's lag reports (perf.py). The feed hears once when it gets choppy (a minute under
+        perf.BAD) and once when it's held perf.SLOW again for a while."""
+        p = self.perf.setdefault(key, pf.Perf())
+        for m in lags:
+            p.add(m)
+        p.read_at = now
+        r = p.reading(now)
+        if r is None:
+            return []
+        if r.fps < pf.BAD and not p.choppy:
+            p.choppy = True
+            return [Notice("warn", key, f"FALLING BEHIND  {r.fps:.0f} fps with {r.players} players, longest frame "
+                                        f"{r.frame_ms} ms (the target is {pf.TARGET})", quiet=True)]
+        if p.choppy and r.since is not None and now - r.since > 3 * 60:
+            p.choppy = False
+            return [Notice("warn", key, f"KEEPING UP  {pf.TARGET} fps again for 3 minutes", quiet=True)]
+        return []
+
+    def frame_rate(self, key: str, now: float | None = None) -> pf.Reading | None:
+        p = self.perf.get(key)
+        return p.reading(time.time() if now is None else now) if p else None
 
     def _box(self, key: str, host: str, box: Box, now: float) -> list[Crash]:
         out, prev = [], self.boxes.get(key)
@@ -346,7 +381,7 @@ class Monitor:
         old, notes = self.hosts.get(host), []
         snap = self.hosts[host] = Host(h.get("mem_available_mb"), h.get("swap_used_mb"), h.get("swap_total_mb"),
                                        h.get("oom_kill"), old.oom_first if old and old.oom_first is not None
-                                       else h.get("oom_kill"), now)
+                                       else h.get("oom_kill"), now, h.get("load_pct"), h.get("cpus"))
         if snap.avail is not None:
             low = snap.avail < self.min_free
             if low and not self.low.get(host):

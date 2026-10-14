@@ -305,6 +305,7 @@ class FakeHost:
         self.logs: dict[int, list[str]] = {}
         self.started: dict[int, float] = {}
         self.avail, self.swap_used, self.swap_total, self.oom = 3400, 120, 2048, 0
+        self.load_pct = 82
         self.crashed: list[tuple[str, int]] = []  # (class, port), as they happened
 
     def attach(self, ports: list[int], fakes: list[Fake]) -> None:
@@ -350,12 +351,20 @@ class FakeHost:
         n = int(time.time())
         fake = self.fakes[port]
         lines = [f"host now={n} clock={time.strftime('%H:%M:%S', time.gmtime(n))} mem_available_mb={self.avail} "
-                 f"swap_used_mb={self.swap_used} swap_total_mb={self.swap_total} oom_kill={self.oom}",
+                 f"swap_used_mb={self.swap_used} swap_total_mb={self.swap_total} oom_kill={self.oom} perf=1 "
+                 f"load_pct={self.load_pct} cpus=4",
                  f"container started={iso(self.started[port])} finished=0001-01-01T00:00:00Z oom_killed=false "
                  f"exit_code=0 restarts=0",
                  # a join, as the server logs it: the console must read around the ID and the address
                  f"{iso(n - 3600)} [{fake.status['name']}] Bob connected from 203.0.113.9 "
                  f"(player ID {'ab12' * 16}, ping 77 ms)."]
+        if port == next(iter(self.fakes)):  # the busiest box can't keep up: a lag report for each of the last 5 min
+            for ago, (slow, avg, frame) in zip(range(270, 0, -60), ((31, 47, 61), (52, 41, 88), (59, 36, 104),
+                                                                    (59, 33, 131), (58, 38, 97))):
+                lines.append(f"{iso(n - ago)} [{fake.status['name']}] Server falling behind: under 54 frames a second "
+                             f"for {slow} of the last 59 seconds ({avg} on average, longest frame {frame} ms) with "
+                             f"{len(fake.players)} players. Each player gets one update a frame, so they see lag: give "
+                             f"this server more processor time or fewer players.")
         return "\n".join(lines + self.logs[port])
 
     async def service(self, unit: str) -> str:

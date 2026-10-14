@@ -19,6 +19,7 @@ from textual.widgets import Static, TabbedContent
 from .app import Roster
 from .art import AMBER, CYAN, DIM, GREEN, RED, WHITE
 from .health import HealthError
+from . import perf as pf
 
 SNAPSHOT = 'http://192.0.2.10:9188/snapshot'
 MAX_BYTES = 8 * 1024 * 1024
@@ -48,9 +49,14 @@ def project(snapshot, now=None):
         for row in (node.get('lobbies') or [])[:2048]:
             if not isinstance(row, dict) or not isinstance(row.get('id'), str):
                 continue
+            perf = row.get('perf') if isinstance(row.get('perf'), dict) else None
             lobbies[row['id']] = {'node': ident, 'at': observed, 'fresh': bool(fresh),
                 'started_at': number(row.get('started_at')), 'restart_count': number(row.get('restart_count')),
-                'oom_killed': row.get('oom_killed') if isinstance(row.get('oom_killed'), bool) else None}
+                'oom_killed': row.get('oom_killed') if isinstance(row.get('oom_killed'), bool) else None,
+                'cpu_seconds': number(row.get('cpu_seconds_total')),
+                # None: this node's agent doesn't read lag lines yet. A list (maybe empty): it does.
+                'lags': [m for x in (perf.get('lags') or [])[:32] if (m := pf.from_row(x))]
+                        if perf and isinstance(perf.get('lags'), list) else None}
     return {'nodes': nodes, 'lobbies': lobbies}
 
 
@@ -108,6 +114,10 @@ class FleetHealthMixin:
                     # not the same old flag on every shared snapshot.
                     box['oom_killed'] = row['oom_killed'] and previous is not None and not previous.oom_killed
                     lines.append(json.dumps(box))
+                self.fleet_cpu(key, row)
+                if row['lags'] is not None:
+                    for notice in self.mon.frames(key, row['lags'], row['at']):
+                        self.health_notice(notice)
                 for notice in self.mon.ingest(key, row['node'], '\n'.join(lines)):
                     # Snapshot telemetry cannot prove a native RCON disconnect
                     # or how many people a restart displaced.
@@ -122,8 +132,29 @@ class FleetHealthMixin:
         finally:
             self.fleet_health_busy = False
             self.fleet_health_due = time.monotonic() + 15
-        if self.is_running and self.query_one(TabbedContent).active == 'health':
-            self.paint_health()
+        if self.is_running:
+            for station in self.stations:
+                self.paint_card(station)  # unchanged cards return at once
+            if self.query_one(TabbedContent).active == 'health':
+                self.paint_health()
+
+    def fleet_cpu(self, key, row):
+        """The lobby's share of one core between two snapshots of its CPU-seconds counter. A restarted container
+        starts its counter again: no reading until the next pair."""
+        cpu = getattr(self, 'fleet_cpu_seen', None)
+        if cpu is None:
+            cpu = self.fleet_cpu_seen = {}
+        then, now = cpu.get(key), (row['at'], row['cpu_seconds'], row['started_at'])
+        if row['at'] is None or row['cpu_seconds'] is None:
+            return
+        if then and then[0][2] == now[2] and now[0] > then[0][0] and now[1] >= then[0][1]:
+            cpu[key] = (now, (now[1] - then[0][1]) / (now[0] - then[0][0]))
+        elif not then or now[0] != then[0][0]:
+            cpu[key] = (now, None)
+
+    def cpu_of(self, station):
+        got = getattr(self, 'fleet_cpu_seen', {}).get(str(station.index))
+        return got[1] if got else None
 
     def paint_health(self):
         if getattr(self.fleet, 'health_enabled', False) is not True:

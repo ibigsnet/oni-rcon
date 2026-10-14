@@ -41,6 +41,7 @@ from .archive import FILES, TOTAL, frame as archive_frame
 from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, fit, gauge, hbar,
                   pixels, spark, split_bar)
 from . import health as hc
+from . import perf as pf
 from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
                     Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
@@ -190,7 +191,8 @@ TAB_TIPS = {"assets": "Players on the selected server: click one for their file 
             "blacklist": "Bans, and players allowed to join through a VPN.",
             "console": "Type server commands directly. For when a button doesn't cover it.",
             "forge": "The ReclaimerForge catalog: community maps, gametypes and playlists for your servers.",
-            "health": "Crashes read from each server's log, the host's memory, and whether the workaround service runs."}
+            "health": "Crashes and frame rate read from each server's log, the host's memory, and whether the "
+                      "workaround service runs."}
 
 # A connection failure in words to act on: (what the error says, card text, the full explanation)
 EXPLAIN = [
@@ -837,14 +839,19 @@ GUIDE = [
                      "never shown on screen."),
         ("Thanks", CREDIT),
     ]),
-    ("F10  HEALTH  ·  crashes and memory", [
+    ("F10  HEALTH  ·  crashes, frame rate and memory", [
         ("Crashes", "Each server's last crashes, read from its log: SIGNATURE is the known crash (an exception with its "
                     "code and RVA, the blue developer helmet under Wine), BARE is the engine probe failing with no "
                     "exception, which is a different fault, OOM-KILL is a container killed for memory, and "
                     "CONTAINER-RESTART is one that started again. PLAYERS is how many were on. DROPPED means this "
                     "console's RCON connection fell at the same moment."),
+        ("Frame rate", "Each server's frames a second, from its own log: the server aims at 60 and logs every minute "
+                       "it spent under 54. FPS NOW is the latest minute, 5 MIN the average, WORST the slowest seconds' "
+                       "average, LONGEST FRAME the worst stall (50 ms and up is a visible hitch). Under 54 is amber, "
+                       "under 40 red; a server falling behind also shows it on its card and in F3's SERVER FPS. The "
+                       "fix is more processor time or fewer players. CPU is the server's share of one core (fleet)."),
         ("Host", "Free memory (amber under twice health_min_free_mb, red under it), swap, the kernel's oom_kill "
-                 "counter, and each container's start time and OOMKilled flag."),
+                 "counter, CPU load, and each container's start time and OOMKilled flag."),
         ("Workaround", "Whether the named systemd service is running, when it last moved a tag, and any warning that "
                        "the build isn't the pinned one. Hidden without health_service."),
         ("Alerts", "A new crash, or memory falling under the limit, flashes a banner over every tab (click it away), "
@@ -1462,6 +1469,7 @@ class OniApp(App):
                 with TabPane("[dim]F10[/] HEALTH", id="health"):
                     yield Static(id="health-setup")
                     yield Roster(id="crashes", cursor_type="row", zebra_stripes=True)
+                    yield Roster(id="perf", cursor_type="row", zebra_stripes=True)
                     with Horizontal(id="health-bottom"):
                         with Vertical(id="host-box"):
                             yield Static(id="host")
@@ -1490,7 +1498,8 @@ class OniApp(App):
                 "#listings": ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"],
                 "#versions": ["", "VERSION", "PUBLISHED", "NOTES"],
                 "#crashes": ["WHEN", "SERVER", "CLASS", "PLAYERS", "DETAIL", "RCON"],
-                "#containers": ["SERVER", "STARTED", "UP", "OOMKILLED", "EXIT", "RESTARTS"]}
+                "#containers": ["SERVER", "STARTED", "UP", "OOMKILLED", "EXIT", "RESTARTS"],
+                "#perf": ["SERVER", "FPS NOW", "5 MIN", "WORST", "LONGEST FRAME", "PLAYERS", "CPU", "LAST SLOW"]}
         for sel, c in cols.items():
             if not (t := self.query_one(sel, DataTable)).columns:  # once, whatever mounts twice
                 fixed = {"#": 3, "SCORE": 5, "K": 3, "D": 3, "K/D": 5, "PING": 5} if sel == "#players" else {}
@@ -1614,6 +1623,7 @@ class OniApp(App):
         if self.is_running:
             for n in notes:
                 self.health_notice(n)
+            self.paint_card(st)  # it wears its frame rate when it's falling behind
             self.paint_health()
 
     async def health_service(self, host: str) -> None:
@@ -1638,6 +1648,8 @@ class OniApp(App):
         the alert (a beep, the card, the CONDITION)."""
         st = self.stations[int(n.key)] if n.key else None
         self.log_event(st, {"event": "health", "text": n.text, "level": n.level})
+        if n.quiet:
+            return
         banner = self.query_one("#banner", Static)
         banner.update(Text(f" ⚠ {st.label if st else 'HOST'}  {n.text}      click to dismiss"))
         banner.set_class(n.level != "crit", "-warn")
@@ -1771,6 +1783,8 @@ class OniApp(App):
         on = any(self.watched(st) for st in self.stations)
         setup, crashes, host_box = (self.query_one(i) for i in ("#health-setup", "#crashes", "#host-box"))
         setup.display, crashes.display, host_box.display = not on, on, on
+        self.query_one("#perf").display = on
+        self.paint_perf(now)
         self.query_one("#workaround").display = bool(self.hsetup.service)
         if not on:
             setup.update(self.health_howto())
@@ -1809,6 +1823,10 @@ class OniApp(App):
             hosts.add_row("OOM KILLS", Text(str(snap.oom) if snap.oom is not None else "—",
                                             RED if since else AMBER if snap.oom else GREEN)
                           + Text(f"   +{since} since you opened this" if since else "", RED))
+            if snap.load_pct is not None:
+                hosts.add_row("CPU LOAD", Text(f"{snap.load_pct}%", RED if snap.load_pct >= 100 else AMBER
+                                               if snap.load_pct >= 80 else GREEN)
+                              + Text(f"   of {snap.cpus} cores, last minute" if snap.cpus else "   last minute", DIM))
             hosts.add_row("REPORT", Text(f"{age(now - snap.at)} ago", DIM))
         for st in self.stations:
             if st.health_err and self.watched(st):
@@ -1825,6 +1843,49 @@ class OniApp(App):
         if self.hsetup.service:
             self.query_one("#workaround", Static).update(self.workaround_text(now))
             self.query_one("#workaround").border_title = Text(f"WORKAROUND · {self.hsetup.service}")
+
+    def cpu_of(self, st: Station) -> float | None:
+        """The server's share of one core, where something measures it (the fleet's snapshot); None elsewhere."""
+        return None
+
+    def paint_perf(self, now: float) -> None:
+        """F10's FRAME RATE: every watched server, the slowest first."""
+        rows = []
+        for st in self.stations:
+            if not self.watched(st):
+                continue
+            r, cpu = self.mon.frame_rate(str(st.index), now), self.cpu_of(st)
+            fps = lambda v: Text(f"{v:.0f}", LEVEL[pf.level(v)])
+            rows.append((r.fps if r else 999, st.label.lower(), (str(st.index), [
+                Text(st.label, WHITE),
+                fps(r.fps) if r else Text("—", DIM),
+                fps(r.avg) if r else Text("—", DIM),
+                Text(f"{r.worst}", LEVEL[pf.level(r.worst)]) if r and r.worst is not None else Text("—", DIM),
+                Text(f"{r.frame_ms} ms", RED if r.frame_ms >= 50 else AMBER) if r and r.frame_ms else Text("—", DIM),
+                Text(str(r.players), WHITE) if r and r.players is not None else Text("—", DIM),
+                Text(f"{cpu * 100:.0f}%", AMBER if cpu >= 0.9 else WHITE) if cpu is not None else Text("—", DIM),
+                Text(f"{age(now - r.since)} ago", DIM) if r and r.since else Text("none in 30 min" if r else "—", DIM)])))
+        rows.sort(key=lambda x: (x[0], x[1]))
+        t = self.query_one("#perf", Roster)
+        t.fill([row for *_, row in rows])
+        measured = [x for x in rows if x[0] != 999]
+        behind = sum(1 for x in measured if x[0] < pf.SLOW)
+        t.border_title = Text(f"FRAME RATE · TARGET {pf.TARGET} FPS · {len(measured)} MEASURED")
+        t.border_subtitle = (Text(f"{behind} FALLING BEHIND", RED) if behind else
+                             Text("ALL KEEPING UP", GREEN) if measured else
+                             Text("NO LAG LINES READ YET: UPDATE THE HEALTH REPORT", DIM) if rows else "")
+
+    def frame_text(self, st: Station) -> Text:
+        """The SITREP's SERVER FPS line."""
+        r = self.mon.frame_rate(str(st.index))
+        if r is None:
+            return Text("not measured here" if not self.watched(st) else "waiting for the first report", DIM)
+        out = Text(f"{r.fps:.0f}", LEVEL[pf.level(r.fps)] + " bold") + Text(f"/{pf.TARGET}", DIM)
+        if r.slow_minutes:  # short: the SITREP's column is narrow. F10 spells it out
+            out += Text(f"  5m {r.avg:.0f} · low {r.worst}", AMBER)
+        else:
+            out += Text("  keeping up", GREEN)
+        return out
 
     def workaround_text(self, now: float) -> Table:
         g = Table.grid(padding=(0, 2))
@@ -2390,6 +2451,8 @@ class OniApp(App):
         elif self.beating(st):
             color = "#B4F5D0"  # a heartbeat: brighter for a moment every few seconds
         n, mx = num(s.get("players")), num(s.get("max_players"))
+        r = self.mon.frame_rate(str(st.index)) if st.online else None
+        slow = round(r.fps) if r and r.behind else None  # only a server falling behind wears its frame rate
         width = card.wide or 33
         if not st.online:  # why, in words to act on, and when it tries again
             left = st.retry_at - time.monotonic()
@@ -2401,7 +2464,8 @@ class OniApp(App):
             # a step at a time: redrawn with every event, a few busy servers keep the whole sidebar repainting
             steps = 10 if self.large_fleet else max(4, width - 13)
             detail = (tuple(where), phase, tuple(st.rate(steps, 5, whole=self.large_fleet)))
-        key = (state, glyph, color, st.label, st.alerts, n, mx, width, self.large_fleet, detail, self.station_number(st))
+        key = (state, glyph, color, st.label, st.alerts, n, mx, slow, width, self.large_fleet, detail,
+               self.station_number(st))
         if key == st.drawn:
             return
         st.drawn = key
@@ -2410,6 +2474,8 @@ class OniApp(App):
         g.add_column(no_wrap=True, overflow="ellipsis", ratio=1)
         g.add_column(justify="right", no_wrap=True)
         count = Text(f"{n}/{mx}" if st.online and n is not None else "", AMBER if n else DIM)
+        if slow is not None:
+            count = Text(f"{slow}fps ", LEVEL[pf.level(slow)]) + count
         g.add_row(Text(f"{glyph} ", color) + Text(f"{self.station_number(st)}  {st.label.upper()}", WHITE),
                   Text.assemble((f"⚑ {st.alerts}  ", RED), count) if st.alerts else count)
         if not st.online:
@@ -2589,6 +2655,7 @@ class OniApp(App):
                                                                               s.get("mode"))],
                      ("NEXT", str(s.get("next") or "playlist")),
                      ("PLAYERS", f"{s.get('players', '—')} / {s.get('max_players', '—')}"),
+                     ("SERVER FPS", self.frame_text(st)),
                      ("JOIN PASSWORD", yes_no(s.get("password_required"), "SET", "OPEN")),
                      ("PING LIMIT", f"{s['max_ping']} ms" if s.get("max_ping") else "off"),
                      ("ANTI-CHEAT", f"{s.get('anti_cheat', '—')}" + ("  (active)" if s.get("anti_cheat_active") else "")),

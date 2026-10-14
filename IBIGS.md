@@ -1,5 +1,22 @@
 # IBIGS Reclaimer terminal
 
+## Server frame rate (0.9.0+ibigs.12)
+
+F10 HEALTH has a FRAME RATE table: every server's frames a second, slowest first. It shows FPS NOW (the latest minute),
+5 MIN (the average), WORST (the slowest seconds' average), LONGEST FRAME, PLAYERS, CPU (fleet: the lobby's share of one
+core) and LAST SLOW. A server falling behind shows its frame rate on its card (`38fps 9/16`), and F3's SITREP has a
+SERVER FPS line. When a server drops under 40 fps, the F2 feed says so once, and says so again when it has kept up for
+3 minutes. These are feed messages only, with no banner or beep. The HOST box adds CPU LOAD.
+
+The numbers come from the server's own log. It aims at 60 fps and logs each minute it spent under 54 ("Server falling
+behind: under 54 frames a second for 58 of the last 58 seconds (29 on average, longest frame 125 ms) with 85
+players"). A minute's rate is its slow seconds at their average and the rest at 60. That can slightly overstate a
+fine second, but it never invents a slowdown. RCON and status.json carry no frame rate.
+
+Customer VPSes need the matching `oni` wrapper, which ships in the same release. Its `health-report` now passes the
+lag lines and says `perf=1`. An older wrapper's report shows `—`, not a false 60. The fleet console reads `perf.lags`
+from each node agent's snapshot row. A node whose agent doesn't send them shows `—`.
+
 ## Content browser, playlists, copy and team moves (0.9.0+ibigs.11)
 
 LOAD MAP+MODE, CHANGE MAP, CHANGE MODE, QUEUE NEXT, Forge's `l` and the playlist editor open one browser: a tree of
