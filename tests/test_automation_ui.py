@@ -186,3 +186,77 @@ def test_discord_walks_through_the_steps_and_tests_the_hook(env, monkeypatch):
             listed = str(app.screen.query_one(OptionList).get_option_at_index(0).prompt)
             assert "alerts" in listed and "AAAA" not in listed  # the secret part never shows
     asyncio.run(go())
+
+
+def test_fleet_rules_through_the_admin_api():
+    """F12 on the fleet console: the switch, a rule from a template and a Discord webhook go to /api/rules; the
+    full webhook URL is sent once and only shown masked."""
+    from oni_rcon import fleet as cli
+    from test_terminal_performance import FixtureFleet
+
+    class RulesFleet(FixtureFleet):
+        def __init__(self):
+            super().__init__()
+            self.view = {'origin': 'x', 'csrf': 'y'}
+            self.doc = {'enabled': False, 'rules': [], 'roles': {}, 'webhooks': {}, 'nodes': {}, 'history': []}
+            self.posts = []
+
+        def request(self, path, body=None, timeout=25):
+            if path != '/api/rules':
+                return super().request(path)
+            if body is not None:
+                self.posts.append(body)
+                for k in ('enabled', 'rules', 'roles'):
+                    if k in body:
+                        self.doc[k] = body[k]
+                for n, u in (body.get('webhooks') or {}).items():
+                    if u is None:
+                        self.doc['webhooks'].pop(n, None)
+                    elif u != 'keep':
+                        self.doc['webhooks'][n] = R.masked(u)
+                self.doc['nodes'] = {'node-b': {'ok': True}}
+            return dict(self.doc)
+
+    async def go():
+        fleet = RulesFleet()
+        app = cli.FleetApp(fleet)
+        async with app.run_test(size=(140, 44)) as pilot:
+            await pilot.pause(.3)
+            await pilot.press('f12')
+            await until(pilot, lambda: isinstance(app.screen, Panel) and app.screen.t == 'FLEET AUTOMATION')
+            assert 'OFF: no rule runs anywhere' in str(app.screen.query_one(OptionList).get_option_at_index(0).prompt)
+            await pilot.click('#p-open')  # SWITCH
+            await until(pilot, lambda: isinstance(app.screen, Confirm))
+            await pilot.click('#yes')
+            await until(pilot, lambda: {'enabled': True} in fleet.posts)
+            await until(pilot, lambda: isinstance(app.screen, Panel) and app.screen.t == 'FLEET AUTOMATION')
+            app.screen.query_one(OptionList).highlighted = 3  # DISCORD
+            await pilot.click('#p-open')
+            await until(pilot, lambda: isinstance(app.screen, Panel) and app.screen.t == 'DISCORD')
+            await pilot.click('#p-add')
+            await until(pilot, lambda: isinstance(app.screen, JobForm))
+            app.screen.query_one('#field-url', Input).value = HOOK
+            await pilot.click('#yes')
+            await until(pilot, lambda: isinstance(app.screen, Confirm))
+            await pilot.click('#no')  # no test post
+            await until(pilot, lambda: any('webhooks' in p for p in fleet.posts))
+            assert {'webhooks': {'alerts': HOOK}} in fleet.posts
+            await until(pilot, lambda: isinstance(app.screen, Panel) and app.screen.t == 'DISCORD')
+            assert 'AAAA' not in str(app.screen.query_one(OptionList).get_option_at_index(0).prompt)
+            await pilot.press('escape')
+            await until(pilot, lambda: isinstance(app.screen, Panel) and app.screen.t == 'FLEET AUTOMATION')
+            app.screen.query_one(OptionList).highlighted = 1  # RULES
+            await pilot.click('#p-open')
+            await until(pilot, lambda: isinstance(app.screen, Panel) and app.screen.t == 'RULES')
+            await pilot.click('#p-template')
+            await choose(pilot, app, lambda v: R.STARTERS[v]['name'] == 'Welcome')
+            await ok(pilot, app)
+            await choose(pilot, app, lambda v: v == '_keep')
+            await choose(pilot, app, lambda v: v == '_done')
+            await choose(pilot, app, lambda v: v == '_done')
+            await ok(pilot, app)
+            await until(pilot, lambda: isinstance(app.screen, Confirm))
+            await pilot.click('#yes')
+            await until(pilot, lambda: any(p.get('rules') for p in fleet.posts))
+            assert [r['name'] for r in next(p for p in fleet.posts if p.get('rules'))['rules']] == ['Welcome']
+    asyncio.run(go())

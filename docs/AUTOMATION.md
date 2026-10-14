@@ -173,3 +173,12 @@ it private. `oni` only ever shows the start of it. To revoke it, delete the webh
 Everything is in `/srv/ibigs/automation/`: `rules.json`, `roles.json`, `discord.json` and the run history. It's
 readable by your server's admin group. Rules run in the same background service as SCHEDULES (`ibigs-oni-jobs`).
 From a shell, `oni roles apply --check` shows which servers are waiting for a role or votes change.
+
+## On the IBIGS fleet (operators)
+
+The fleet-console fleet console has the same rules under **F12**, in **FLEET AUTOMATION**:
+- **SWITCH**: rules run only while it's ON, and it starts OFF.
+- **RULES**, **ROLES** (VIP protection and roles for rules) and **DISCORD**.
+
+Every node runs the rules on its own lobbies. Lifecycle stays with the controller, so "start a stopped server" is
+refused there.

@@ -13,7 +13,7 @@ import urllib.request
 from collections import deque
 
 from . import rules as R
-from .jobs import atomic_json
+from .schedule import atomic_json
 
 SAY_PER_MINUTE = 20  # per server, across every rule: a misjudged rule can't flood the chat
 DISCORD_GAP = 2.0  # seconds between Discord posts (Discord allows about 30 a minute per webhook)
@@ -168,11 +168,11 @@ class Runner:
             await asyncio.sleep(step.args[0])
             return step.words()
         if step.kind == "start":
+            if not self.start:  # the IBIGS fleet: lifecycle belongs to the controller
+                return f"{step.words()}: can't start servers from here"
             lob = self.engine.lobbies.get(step.server)
             if lob and lob.up:
                 return f"{step.words()}: already running"
-            if not self.start:
-                return f"{step.words()}: can't start servers from here"
             rc = await self.start(step.server)
             return step.words() + (": done" if rc == 0 else f": failed (exit {rc})")
         return step.words()

@@ -71,7 +71,8 @@ class Fleet:
         return read_snapshot(self.opener)
 
     def request(self, path, body=None, timeout=25):
-        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players','/api/forge','/api/findings'):
+        if path not in ('/api/fleet','/api/jobs','/api/action','/api/console-read','/api/players','/api/forge','/api/findings',
+                        '/api/rules'):
             raise ValueError('unsupported management route')
         headers = {'Authorization':'Bearer '+self.token,'Accept':'application/json'}
         if body is not None:
@@ -183,6 +184,7 @@ class FleetApp(FleetHealthMixin, OniApp):
               Binding('ctrl+f','search_servers','Search',priority=True),
               Binding('ctrl+g','search_players','Find player',priority=True),
               Binding('f7','sort_servers','Sort'),Binding('f8','filter_servers','Filter'),
+              Binding('f12','fleet_rules','Rules'),
               *[Binding(str(i),f'visible_station({i-1})',show=False) for i in range(1,10)]]
     CSS='''
     #fleet-browser { height: 4; background: $panel; }
@@ -306,6 +308,14 @@ class FleetApp(FleetHealthMixin, OniApp):
                                     'cached node and container readings (F10)', self.action_refresh_fleet)
             else:
                 yield command
+
+    @work(exclusive=True, group='dialog')
+    async def action_fleet_rules(self):
+        """F12: the fleet's rules, roles and Discord (automation_ui on /api/rules); every node runs them."""
+        from .automation_ui import FleetRuleStore, automation_dialog
+        store = getattr(self, 'rules_store', None) or FleetRuleStore(self.fleet)
+        self.rules_store = store
+        await automation_dialog(self, sorted(self.fleet.rows), store)
 
     def paint_listing(self):
         super().paint_listing()

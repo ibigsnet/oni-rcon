@@ -1,5 +1,25 @@
 # IBIGS Reclaimer terminal
 
+## Fleet rules (0.9.0+ibigs.17)
+
+F12 in the fleet-console fleet console opens FLEET AUTOMATION, with SWITCH, RULES, ROLES and DISCORD. It's the same rules
+sandbox as the customers' F8, kept by the admin console (`/api/rules`) and run on every node by a `reclaimer-rules`
+worker that uses oni-rcon's own engine, copied unchanged into `reclaimer_control/oni_rules/`.
+
+- **SWITCH starts OFF.** While it's off, no node opens a connection for rules. While it's on, each node keeps one
+  native console connection per eligible lobby (operator-enabled, running, fresh, RCON up, not on hold) as long as at
+  least one rule is enabled. A refused sign-in is never retried for that process.
+- **Rules see their own node's lobbies.** "Admins" means the fleet admin list plus the ADMIN role from ROLES.
+- **Starting servers is refused on the fleet**, because lifecycle stays with the controller. Everything else works
+  as on customer VPSes: say, tell, cancel a vote, shuffle, Discord, and the frame-rate triggers (from each node's
+  `perf.lags`).
+- **Saving** pushes the whole document to every node with the journaled `configure_rules` RPC. FLEET AUTOMATION
+  shows each node's last answer, and history is read back from the nodes.
+- **Webhook URLs** are sent once and only ever shown masked.
+- **Engine refactor:** `schedule.py` holds the dependency-free pieces the engine shares with the jobs (cron, match
+  boundaries, atomic JSON), so the engine runs on the nodes without the console's own dependencies. Server names in
+  rules can be fleet lobby IDs such as `node-a-49178`.
+
 ## More rule building blocks (0.9.0+ibigs.16)
 
 **WHEN:**

@@ -82,15 +82,121 @@ class Panel(Dialog):
         self.dismiss(None if ident == "close" else (ident, self.chosen()))
 
 
+def lobby_id(st) -> str:
+    """How rules name a server: h3-01 on a customer VPS, the lobby ID (node-a-49178) on the IBIGS fleet."""
+    return st.server.url.removeprefix("fleet://") if st.server.url.startswith("fleet://") else st.server.name
+
+
+class FleetRuleStore:
+    """The same interface as rules.RuleStore, kept by the fleet-console admin console (/api/rules) and run by every node.
+    Changes apply here at once and are pushed in the background, so the screen never waits on the nodes."""
+    fleet_mode = True
+
+    def __init__(self, fleet):
+        import threading
+        self.fleet, self.lock = fleet, threading.Lock()
+        self.doc = {"enabled": False, "rules": [], "roles": {}, "webhooks": {}, "nodes": {}, "history": []}
+        self.pending = 0
+        self.last_error = ""
+
+    def load(self):
+        """Blocking GET; call it off the UI thread."""
+        if not self.fleet.view:
+            self.fleet.refresh()  # the CSRF token and origin POSTs need
+        got = self.fleet.request("/api/rules", None, 40)
+        if not isinstance(got, dict) or not isinstance(got.get("rules"), list):
+            raise ValueError("invalid rules reply")
+        with self.lock:
+            self.doc = got
+        return got
+
+    def _post(self, change):
+        import threading
+
+        def go():
+            try:
+                got = self.fleet.request("/api/rules", change, 120)
+                with self.lock:
+                    self.doc, self.last_error = got, ""
+            except Exception as exc:
+                self.last_error = clean(str(exc))[:200]
+            finally:
+                self.pending -= 1
+        self.pending += 1
+        threading.Thread(target=go, daemon=True).start()
+
+    def rules(self):
+        return [R.validate(r) for r in self.doc.get("rules", [])]
+
+    def save_rule(self, rule=None, delete=None):
+        rules = self.rules()
+        if rule is not None:
+            rule = R.validate(rule)
+        ident = rule["id"] if rule else delete
+        rules = [r for r in rules if r["id"] != ident] + ([rule] if rule else [])
+        if len(rules) > R.MAX_RULES:
+            raise ValueError(f"Up to {R.MAX_RULES} rules.")
+        self.doc["rules"] = rules
+        self._post({"rules": rules})
+
+    def roles(self):
+        return {pid: {"name": p.get("name", ""), "roles": p.get("roles", []), "servers": "all"}
+                for pid, p in (self.doc.get("roles") or {}).items()}, {}
+
+    def set_roles(self, pid, name, roles, servers="all"):
+        if not re.fullmatch(r"[0-9a-f]{64}", str(pid)):
+            raise ValueError("That isn't a player ID.")
+        players, _ = self.roles()
+        if roles:
+            players[pid] = {"name": clean(str(name))[:40], "roles": roles, "servers": "all"}
+        else:
+            players.pop(pid, None)
+        self.doc["roles"] = players
+        self._post({"roles": players})
+
+    def set_votes(self, lobby, on):
+        raise ValueError("Fleet votes are managed by vote guard on each node.")
+
+    def webhooks(self):
+        return dict(self.doc.get("webhooks") or {})  # masked: the full URLs stay on fleet-console and the nodes
+
+    def save_webhook(self, name, url=None):
+        if url is not None and not R.webhook_ok(url):
+            raise ValueError("That doesn't look like a Discord webhook URL. It starts with "
+                             "https://discord.com/api/webhooks/")
+        if url is None:
+            self.doc.get("webhooks", {}).pop(name, None)
+        else:
+            self.doc.setdefault("webhooks", {})[name] = R.masked(url)
+        self._post({"webhooks": {name: url}})
+
+    def enabled(self):
+        return bool(self.doc.get("enabled"))
+
+    def set_enabled(self, on):
+        self.doc["enabled"] = bool(on)
+        self._post({"enabled": bool(on)})
+
+    def history(self):
+        return [{**h, "server": h.get("server") or h.get("node", "")} for h in self.doc.get("history", [])]
+
+    def nodes_text(self):
+        bits = []
+        for node, r in sorted((self.doc.get("nodes") or {}).items()):
+            bits.append(f"{node} {'✓' if r.get('ok') else '✗ ' + str(r.get('error') or 'not reached')}")
+        state = "saving…" if self.pending else self.last_error and "last save failed: " + self.last_error
+        return " · ".join(bits) + (f"   ({state})" if state else "")
+
+
 def lobbies_of(app) -> list[str]:
-    return sorted({st.server.name for st in app.stations if re.fullmatch(r"h3-\d{2,3}|server-\d{1,3}", st.server.name)})
+    return sorted({lobby_id(st) for st in app.stations if R.SERVER.fullmatch(lobby_id(st))})
 
 
 def live_engine(app, rules_=(), roles=None) -> R.Engine:
     """The rules engine as this console sees the servers right now: for TEST and for who's online where."""
     e = R.Engine(rules_, roles or {})
     for st in app.stations:
-        name = st.server.name
+        name = lobby_id(st)
         e.connection(name, bool(st.online))
         e.status(name, st.data.get("status", {}))
         e.players(name, [{"engine_id": p.get("engine_id", i), "name": p.get("name"), "admin": p.get("admin"),
@@ -108,9 +214,56 @@ HUB_TEXT = ("Automation runs on this server even when oni is closed.\n\n"
             "DISCORD    Connect a Discord channel so rules can post there.")
 
 
-async def automation_dialog(app, targets):
-    store = R.RuleStore()
+FLEET_HUB_TEXT = ("Fleet rules run on every node, on that node's lobbies, even when no console is open.\n\n"
+                  "RULES    When something happens (a spree, a !command, a server going down), do something.\n"
+                  "ROLES    VIP (can't be vote-kicked) and MOD; ADMIN here counts for rules. The game's own admin\n"
+                  "         list on fleet servers is the fleet admin list, which rules also treat as ADMIN.\n"
+                  "DISCORD  Connect a Discord channel so rules can post there.\n"
+                  "SWITCH   Rules only run while the fleet switch is ON. It starts OFF.")
+
+
+async def automation_dialog(app, targets, store=None):
+    fleet = store is not None
+    store = store or R.RuleStore()
     while True:
+        if fleet:
+            try:
+                await asyncio.to_thread(store.load)
+            except Exception as exc:
+                app.notify(f"Can't reach the fleet's rules: {clean(str(exc))[:160]}", title="Fleet rules",
+                           severity="error", timeout=12)
+                return
+            choice = await app.push_screen_wait(Panel(
+                "FLEET AUTOMATION", FLEET_HUB_TEXT, [
+                    (Text.assemble(("SWITCH     ", CYAN), ("ON: rules are running" if store.enabled() else
+                                                          "OFF: no rule runs anywhere", GREEN if store.enabled() else AMBER)), "switch"),
+                    (Text.assemble(("RULES      ", CYAN), (f"{sum(r['enabled'] for r in store.rules())} on, "
+                                                           f"{len(store.rules())} in all", WHITE)), "rules"),
+                    (Text.assemble(("ROLES      ", CYAN), (f"{len(store.roles()[0])} player(s)", WHITE)), "roles"),
+                    (Text.assemble(("DISCORD    ", CYAN), (f"{len(store.webhooks())} webhook(s)", WHITE)), "discord")],
+                [("CLOSE", "close", False), ("OPEN", "open", True)], foot=store.nodes_text() or "Not pushed to any node yet."))
+            if not choice:
+                return
+            section = choice[1]
+            try:
+                if section == "switch":
+                    on = not store.enabled()
+                    if await app.push_screen_wait(Confirm("FLEET RULES " + ("ON" if on else "OFF"),
+                            ("Every node starts running the enabled rules, with one console connection per lobby."
+                             if on else "Every node stops running rules and closes their connections."),
+                            verb="TURN " + ("ON" if on else "OFF"), danger=on)):
+                        store.set_enabled(on)
+                        app.notify("Sending to every node…", title="Fleet rules", timeout=5)
+                elif section == "rules":
+                    await rules_dialog(app, store, targets)
+                elif section == "roles":
+                    await roles_dialog(app, store, targets)
+                elif section == "discord":
+                    await discord_dialog(app, store)
+            except (OSError, ValueError) as exc:
+                app.notify(clean(str(exc)), title="Fleet rules", severity="error", timeout=12)
+            await asyncio.sleep(0)
+            continue
         try:
             rules_ = store.rules()
             players, votes = store.roles()
@@ -352,8 +505,10 @@ ROLES_TEXT = ("ADMIN  admin commands in game. Written to the server the next tim
 async def roles_dialog(app, store, targets):
     while True:
         players, _ = store.roles()
-        rc, out = await app.power_run("roles", "apply", "--check", "--json")
-        pending = ""
+        rc, out = await app.power_run("roles", "apply", "--check", "--json") if not getattr(store, "fleet_mode", False) \
+            else (2, "")
+        pending = "On the fleet, roles count for rules (VIP kick protection, tell ADMIN/VIP/MOD)." \
+            if getattr(store, "fleet_mode", False) else ""
         if rc in (0, 1):
             import json
             try:
@@ -389,7 +544,7 @@ async def add_role(app, store, targets, preset=None):
         for p in st.players:
             pid = str(p.get("player_id") or p.get("id") or "")
             if re.fullmatch(r"[0-9a-f]{64}", pid):
-                online.append((Text.assemble((clean(str(p.get("name") or "?")), WHITE), (f"  on {st.server.name}", DIM)),
+                online.append((Text.assemble((clean(str(p.get("name") or "?")), WHITE), (f"  on {lobby_id(st)}", DIM)),
                                (pid, clean(str(p.get("name") or "")))))
     if preset:
         pid, name = preset
@@ -476,18 +631,22 @@ async def discord_dialog(app, store):
                 if await app.push_screen_wait(Confirm("SEND A TEST MESSAGE?", f"Post \"oni-rcon is connected.\" to "
                                                       f"{got['name']} now, to check it works?", verb="SEND",
                                                       danger=False)):
-                    await send_test(app, store, got["name"])
+                    await send_test(app, store, got["name"], url=got["url"])
         elif action == "test" and name:
-            await send_test(app, store, name)
+            if getattr(store, "fleet_mode", False):
+                app.notify("Saved fleet webhooks are kept on fleet-console only. Test one with a rule's TEST, or remove and "
+                           "add it again.", title="Discord", timeout=8)
+            else:
+                await send_test(app, store, name)
         elif action == "remove" and name:
             if await app.push_screen_wait(Confirm("REMOVE WEBHOOK", f"Rules stop posting to {name}. (To revoke it "
                                                   "completely, also delete the webhook in Discord.)", verb="REMOVE")):
                 store.save_webhook(name, None)
 
 
-async def send_test(app, store, name):
+async def send_test(app, store, name, url=None):
     from .rules_run import post_discord
-    url = store.webhooks().get(name)
+    url = url or store.webhooks().get(name)
     try:
         code = await asyncio.to_thread(post_discord, url, "oni-rcon is connected. Rules can post here now.")
         ok = 200 <= code < 300

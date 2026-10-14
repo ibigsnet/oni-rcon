@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .jobs import ROOT, MatchEvents, atomic_json, cron_fields, cron_due
+from .schedule import ROOT, MatchEvents, atomic_json, cron_fields, cron_due
 from .safety import clean
 
 ROLES = ("admin", "vip", "mod")
@@ -38,6 +38,8 @@ MULTIS = {2: "Double Kill", 3: "Triple Kill", 4: "Overkill", 5: "Killtacular", 6
 CHAIN = 4.0  # seconds between kills that still chain into a multi-kill (Halo 3's window)
 MEDALS = [*SPREES.values(), *MULTIS.values(), "Killjoy", "Perfection"]
 MAX_RULES = 128
+# A server's name: h3-01 / server-2 on customer VPSes, the lobby ID (node-a-49178) on the IBIGS fleet
+SERVER = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 INSTANT = {"medal", "spree", "multikill", "join", "leave", "match_start", "match_end", "before_match", "every", "at",
            "vote", "weapon_kill", "first_blood", "kills_reached"}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -246,7 +248,7 @@ def _block(part, block, servers=()):
             if not isinstance(v, str) or len(v) > f.get("max", 64) or clean(v) != v:
                 raise ValueError(f"{label}: {f['label']} is too long or has odd characters.")
             v = v.strip()
-            if kind == "server" and not re.fullmatch(r"h3-\d{2,3}|server-\d{1,3}", v):
+            if kind == "server" and not SERVER.fullmatch(v):
                 raise ValueError(f"{label}: choose a server.")
             if kind == "webhook" and not v:
                 raise ValueError(f"{label}: choose a Discord webhook (add one under DISCORD first).")
@@ -300,7 +302,7 @@ def validate(rule):
     servers = rule.get("servers", "all")
     if servers != "all":
         if not isinstance(servers, list) or not servers or len(servers) > 64 or not all(
-                isinstance(s, str) and re.fullmatch(r"h3-\d{2,3}|server-\d{1,3}", s) for s in servers):
+                isinstance(s, str) and SERVER.fullmatch(s) for s in servers):
             raise ValueError("Servers: choose all, or a list of this VPS's servers.")
         servers = sorted(set(servers))
     out["servers"] = servers
@@ -410,10 +412,10 @@ class RuleStore:
             roles = [r for r in p.get("roles", []) if r in ROLES]
             servers = p.get("servers", "all")
             if servers != "all" and not (isinstance(servers, list) and all(
-                    isinstance(s, str) and re.fullmatch(r"h3-\d{2,3}|server-\d{1,3}", s) for s in servers)):
+                    isinstance(s, str) and SERVER.fullmatch(s) for s in servers)):
                 servers = "all"
             out[pid] = {"name": clean(str(p.get("name", "")))[:40], "roles": roles, "servers": servers}
-        votes = {k: v for k, v in votes.items() if re.fullmatch(r"h3-\d{2,3}|server-\d{1,3}", str(k))
+        votes = {k: v for k, v in votes.items() if SERVER.fullmatch(str(k))
                  and isinstance(v, bool)}
         return out, votes
 

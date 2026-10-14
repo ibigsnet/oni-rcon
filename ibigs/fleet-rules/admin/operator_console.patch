@@ -1,0 +1,31 @@
+--- operator_console.py.orig	2026-10-14 03:06:40.935839614 -0400
++++ reclaimer_control/operator_console.py	2026-10-14 03:06:40.946700279 -0400
+@@ -310,6 +310,9 @@
+                 return self.reply(200, console.player_directory())
+             if self.path == '/api/findings':
+                 return self.reply(200, console.findings())
++            if self.path == '/api/rules':
++                from .fleet_rules_admin import view
++                return self.reply(200, view(console))
+             if self.path == '/api/forge':
+                 from .forge_console import view
+                 return self.reply(200, view(console.fleet))
+@@ -319,7 +322,7 @@
+             actor = self.actor()
+             if not actor or self.headers.get('Origin') != console.config['origin'] or not valid_csrf(console.secret, actor, self.headers.get('X-CSRF-Token', ''), time.time()):
+                 return self.reply(403, {'error': 'operator identity, same-origin request and fresh CSRF token required'})
+-            if self.path not in ('/api/action', '/api/console-read'):
++            if self.path not in ('/api/action', '/api/console-read', '/api/rules'):
+                 return self.reply(404, {'error': 'not found'})
+             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json' or self.headers.get('Transfer-Encoding'):
+                 return self.reply(415, {'error': 'JSON with Content-Length required'})
+@@ -328,6 +331,9 @@
+                 if not 0 < length <= 65536:
+                     raise ValueError('request body exceeds limit')
+                 body = json.loads(self.rfile.read(length))
++                if self.path == '/api/rules':
++                    from .fleet_rules_admin import save
++                    return self.reply(200, save(console, actor, body))
+                 result = console.console_read(body) if self.path == '/api/console-read' else console.submit(actor, body)
+             except (ValueError, TypeError) as exc:
+                 return self.reply(400, {'error': str(exc)[:250]})
