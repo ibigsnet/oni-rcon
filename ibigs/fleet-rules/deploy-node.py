@@ -44,9 +44,10 @@ code = root / 'code' / 'reclaimer_control'
 agent = docker.inspect('reclaimer-agent')
 if any(NAME == n.lstrip('/') for c in docker.containers() for n in c.get('Names', [])):
     raise SystemExit('reclaimer-rules already exists; inspect before replacing')
-for rel in FILES:
-    if (code / rel).exists():
-        raise SystemExit(f'{rel} already exists; inspect before replacing')
+for rel, b64 in FILES.items():
+    # identical leftovers (an earlier rollback keeps the code) are fine; anything different is not
+    if (code / rel).exists() and (code / rel).read_bytes() != base64.b64decode(b64):
+        raise SystemExit(f'{rel} already exists and differs; inspect before replacing')
 agent_py = code / 'agent.py'
 before = agent_py.read_text()
 if 'configure_rules' in before:
