@@ -204,8 +204,20 @@ def test_the_per_minute_history_and_its_chart():
     assert len(hist) == 30
     assert hist[-2]["fps"] == 30 and hist[-2]["longest"] == 140 and hist[-2]["main"] == 95
     assert hist[-1]["fps"] == 60 and hist[0]["fps"] == 60  # read and fine, back to the first report's 30 min
-    assert pf.per_minute(None, None, T0, n=3) == [dict(fps=None, frame=None, longest=None, main=None, wine=None)] * 3
+    assert pf.per_minute(None, None, T0, n=3) == [dict(fps=None, frame=None, longest=None, main=None, wine=None, players=None)] * 3
     text = chart("Mega", hist).plain
     assert "FRAME TIME · Mega" in text and "← 60 fps" in text and "╸" in text and "GAME" in text and "now" in text
     assert "150" in text  # room for the 140 ms frame
     assert "no frame-rate reports" in chart("Quiet", pf.per_minute(None, None, T0)).plain
+
+
+def test_advice_is_in_plain_words():
+    r = pf.Reading(35, 40, 30, 120, 70, 5, T0)
+    hist = [dict(fps=35.0, frame=28.0, longest=120, main=95.0, wine=50.0, players=64)]
+    head, fix = pf.advice(r, pf.Load(T0, 95, 0, 50, None), "ONE CORE MAXED", hist)
+    assert "35 of 60 frames" in head and "as few as 64 players" in head and "More cores won't help" in fix
+    assert "Running smoothly" in pf.advice(pf.Reading(60, 60, None, None, None, 0, None), pf.Load(T0, 30, 0, 10, None),
+                                           "70% HEADROOM", [])[0]
+    assert "Not measured" in pf.advice(None, None, "", [])[0]
+    for verdict in ("HOST BUSY", "CPU CAP", "NOT CPU", ""):
+        assert pf.advice(r, None, verdict, hist)[1]

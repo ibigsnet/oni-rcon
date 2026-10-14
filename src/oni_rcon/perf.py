@@ -229,11 +229,11 @@ def per_minute(p: Perf | None, t: Threads | None, now: float, n: int = 30) -> li
     for i in range(n - 1, -1, -1):
         hi = now - i * 60
         lo = hi - 60
-        b = {"fps": None, "frame": None, "longest": None, "main": None, "wine": None}
+        b = {"fps": None, "frame": None, "longest": None, "main": None, "wine": None, "players": None}
         if p:
             m = next((m for m in reversed(p.minutes) if lo < m.ts <= hi), None)
             if m:
-                b.update(fps=m.fps, frame=1000 / m.fps, longest=m.frame_ms)
+                b.update(fps=m.fps, frame=1000 / m.fps, longest=m.frame_ms, players=m.players)
             elif since is not None and lo >= since and p.read_at is not None and lo <= p.read_at:
                 b.update(fps=float(TARGET), frame=1000 / TARGET)
         if t:
@@ -244,3 +244,32 @@ def per_minute(p: Perf | None, t: Threads | None, now: float, n: int = 30) -> li
                 b["wine"] = sum(wines) / len(wines) if wines else None
         out.append(b)
     return out
+
+
+# --- in plain words ---------------------------------------------------------------------------------------------
+def advice(r: Reading | None, load: Load | None, verdict: str, history: list[dict]) -> tuple[str, str]:
+    """(what's happening, what to do), for someone who doesn't need to know what a thread is."""
+    slow_crowds = [b.get("players") for b in history if b.get("players") and b["fps"] is not None and b["fps"] < SLOW]
+    crowd = f" It has fallen behind with as few as {min(slow_crowds)} players in the last 30 minutes." if slow_crowds else ""
+    if r is None:
+        return ("Not measured yet.", "Frame rate comes from the server's log. Customer servers: update with F9. "
+                                     "Your own servers: set health_cmd (see ? help).")
+    if not r.behind and r.slow_minutes == 0:
+        spare = f" and has {100 - load.main:.0f}% of a core to spare" if load else ""
+        return (f"Running smoothly: 60 frames a second{spare}.", "Nothing to do.")
+    head = (f"Running at {r.fps:.0f} of 60 frames a second, so players see lag and rubber-banding."
+            if r.behind else f"Smooth now, but it dipped to {r.worst} frames a second in the last 5 minutes.") + crowd
+    fix = {
+        "ONE CORE MAXED": "The game can only use one processor core, and that core is flat out. More cores won't help: "
+                          "lower the player limit, or move this server to a machine with faster cores.",
+        "GAME+WINE ONE CORE": "The game and Wine (which lets this Windows game run on Linux) take turns on one core, "
+                              "and together they've used it up. More cores won't help: lower the player limit, or move "
+                              "this server to a machine with faster cores.",
+        "HOST BUSY": "Other things on this machine are using the processor, so the game waits its turn. Move a busy "
+                     "server to another machine, or stop something you don't need.",
+        "CPU CAP": "This server's processor limit is holding it back. Raise its CPU limit.",
+        "NOT CPU": "The processor isn't the problem. Check the host's memory (below), the network, or a heavy map "
+                   "or mod in the rotation.",
+    }.get(verdict, "Lower the player limit or give it a faster machine. The BOTTLENECK column says which, once "
+                   "the game-thread readings arrive.")
+    return head, fix

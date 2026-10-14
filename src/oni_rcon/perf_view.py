@@ -52,9 +52,15 @@ def strip(values: list[float | None], width: int, maxed: float) -> Text:
     return out
 
 
+def explain(head: str, fix: str) -> Text:
+    """The plain-words lines under the chart."""
+    return Text.assemble(("WHAT'S HAPPENING  ", CYAN), (head + "\n", WHITE),
+                         ("WHAT TO DO        ", CYAN), (fix + "\n", AMBER))
+
+
 def chart(label: str, hist: list[dict], height: int = 7, col: int = 2) -> Text:
     """The chart, as Rich Text. `hist` is perf.per_minute's, oldest first."""
-    out = Text.assemble(("FRAME TIME", CYAN), (f" · {label} · ms, a column a minute   ", DIM),
+    out = Text.assemble(("\nFRAME TIME", CYAN), (f" · {label} · ms, a column a minute   ", DIM),
                         ("█", WHITE), (" average frame  ", DIM), ("╸", AMBER), (" longest frame\n", DIM))
     if not any(b["frame"] is not None for b in hist):
         return out + Text("  no frame-rate reports read for this server yet\n", DIM)

@@ -42,7 +42,7 @@ from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, 
                   pixels, spark, split_bar)
 from . import health as hc
 from . import perf as pf
-from .perf_view import chart as frame_chart
+from .perf_view import chart as frame_chart, explain as frame_advice
 from .config import Server, remember_forge_key
 from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClient, ForgeError, ForgeSetup, Secret,
                     Unverified, author_of, authors_of, before, blurb_of, change_key, change_listing, compat_of,
@@ -859,7 +859,8 @@ GUIDE = [
                        "core; they wait on each other, so it's the same limit. HOST BUSY: the game thread waits for a "
                        "free CPU (10%+ of the time), so other work on the box is crowding it. CPU CAP: the container's "
                        "CPU limit holds it back. NOT CPU: slow, with none of those: look elsewhere. A server keeping "
-                       "up shows its game thread's HEADROOM."),
+                       "up shows its game thread's HEADROOM. WHAT'S HAPPENING and WHAT TO DO under the table say it "
+                       "in plain words; the full guide is docs/SERVER-PERFORMANCE.md on GitHub."),
         ("Host", "Free memory (amber under twice health_min_free_mb, red under it), swap, the kernel's oom_kill "
                  "counter, CPU load, and each container's start time and OOMKilled flag."),
         ("Workaround", "Whether the named systemd service is running, when it last moved a tag, and any warning that "
@@ -1900,7 +1901,11 @@ class OniApp(App):
         if key is None:
             graph.update("")
             return
-        graph.update(frame_chart(self.stations[int(key)].label, self.mon.history(key, now)))
+        hist = self.mon.history(key, now)
+        load, verdict, _ = self.mon.cpu_verdict(key, now)
+        # the plain words first: they're what most people need, and the chart is cut first when room runs out
+        graph.update(frame_advice(*pf.advice(self.mon.frame_rate(key, now), load, verdict, hist))
+                     + frame_chart(self.stations[int(key)].label, hist, height=6))
 
     @on(DataTable.RowHighlighted, "#perf")
     def _perf_row(self, _e: DataTable.RowHighlighted) -> None:
