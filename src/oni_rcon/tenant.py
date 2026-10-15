@@ -67,11 +67,12 @@ class PowerPanel(Dialog):
                 *[Binding(str(n), f'pick({n})', show=False, priority=True) for n in range(10)],
                 Binding('s', "act('start')", show=False, priority=True),
                 Binding('r', "act('restart')", show=False, priority=True),
-                Binding('x', "act('stop')", show=False, priority=True)]
+                Binding('x', "act('stop')", show=False, priority=True),
+                Binding('d', "act('remove')", show=False, priority=True)]
 
-    def __init__(self, lobs):
+    def __init__(self, lobs, removed=None):
         super().__init__()
-        self.lobs = lobs
+        self.lobs, self.removed = lobs, removed or []
 
     def action_pick(self, n: int) -> None:
         sel = self.query_one('#power-target', Select)
@@ -86,7 +87,8 @@ class PowerPanel(Dialog):
         sel.focus()
 
     def action_act(self, what: str) -> None:
-        self.query_one(f'#{what}', Button).press()
+        for b in self.query(f'#{what}').results(Button):
+            b.press()
 
     def compose(self) -> ComposeResult:
         with Vertical(classes='dialog power'):
@@ -103,8 +105,13 @@ class PowerPanel(Dialog):
                 yield Button('START  S', id='start', variant='success')
                 yield Button('RESTART  R', id='restart', variant='warning')
                 yield Button('STOP  X', id='stop', variant='error')
-            yield self.keys('0-9 pick a lobby', 'S start · R restart · X stop', '← → or Tab move', 'Esc close',
-                            'players are always shown before anything happens')
+            # 2026-10-15: lobbies nobody uses can go (kept 7 days), and come back
+            with Horizontal(classes='dialog-buttons'):
+                yield Button('REMOVE LOBBY  D', id='remove', variant='error')
+                if self.removed:
+                    yield Button(f'RESTORE A REMOVED LOBBY ({len(self.removed)})', id='restore', variant='primary')
+            yield self.keys('0-9 pick a lobby', 'S start · R restart · X stop · D remove', '← → or Tab move',
+                            'Esc close', 'players are always shown before anything happens')
 
     def on_mount(self) -> None:
         super().on_mount()
@@ -114,6 +121,9 @@ class PowerPanel(Dialog):
         e.stop()
         if e.button.id == 'no':
             self.dismiss(None)
+            return
+        if e.button.id == 'restore':
+            self.dismiss(('restore', []))
             return
         target = self.query_one('#power-target', Select).value
         chosen = [l['service'] for l in self.lobs] if target == '*' else [target]
@@ -356,6 +366,48 @@ class TenantApp(OniApp):
             return 127, 'Start/stop needs the IBIGS oni command: leave and type  oni servers'
         return await self.tool_run(*args, timeout=POWER_TIMEOUT)
 
+    async def remove_or_restore(self, action, chosen, lobs, removed) -> None:
+        """REMOVE one lobby (stopped, out of the list, kept 7 days) or RESTORE one removed before."""
+        if action == 'restore':
+            if not removed:
+                return
+            pick = await self.push_screen_wait(Pick('RESTORE WHICH LOBBY?', [
+                (f"{clean(str(g['lobby']))}  {clean(str(g.get('name', '')))}  ({g.get('days_left', '?')} day(s) left)",
+                 g['folder']) for g in removed]))
+            if not pick:
+                return
+            rc, out = await self.power_run('restore', pick, '--json')
+        else:
+            if len(chosen) != 1:
+                self.notify('Pick ONE lobby to remove (not ALL SERVERS).', title='Remove', severity='warning')
+                return
+            lob = chosen[0]
+            if len(lobs) <= 1:
+                self.notify("That's your only lobby, so it stays. Use STOP instead.", title='Remove',
+                            severity='warning', timeout=8)
+                return
+            hot = busy(lob)
+            body = (f"{lob['service']}  {clean(str(lob.get('name', '')))}\n\nIt stops and disappears from your list. "
+                    "Its settings, stats and bans are kept for 7 days: F7 → RESTORE brings it back as it was. "
+                    "Your game files, maps and other lobbies are not touched.")
+            if hot:
+                who = ', '.join(clean(p) for p in (lob.get('players') or [])) or 'people MAY be playing'
+                body += f"\n\n!! Players on it: {who}. They will be DISCONNECTED."
+            if not await self.push_screen_wait(Confirm(f"REMOVE {lob['service'].upper()}", body,
+                                                       verb='DISCONNECT + REMOVE' if hot else 'REMOVE')):
+                return
+            rc, out = await self.power_run('remove', lob['service'], '--yes', *(['--force'] if hot else []), '--json')
+        try:
+            r = json.loads(out.strip().splitlines()[-1])
+            text, ok = clean(str(r.get('text', ''))), r.get('state') in ('removed', 'restored')
+        except (ValueError, IndexError):
+            text, ok = clean_block(out), rc == 0
+        if ok:
+            self.notify(text, title=action.capitalize(), timeout=15)
+        else:
+            await self.push_screen_wait(Notice(f'{action.upper()}: NOT DONE', text, warn=True))
+        self.action_refresh()
+
     @work(exclusive=True, group='dialog')
     async def action_power(self) -> None:
         rc, out = await self.power_run('status', '--json')
@@ -367,11 +419,19 @@ class TenantApp(OniApp):
             self.notify(out.strip() or 'Could not read the server list.', title='Start/Stop', severity='warning',
                         timeout=10)
             return
-        choice = await self.push_screen_wait(PowerPanel(lobs))
+        rc2, out2 = await self.power_run('restore', '--json')
+        try:
+            removed = json.loads(out2.strip().splitlines()[-1]) if rc2 == 0 else []
+        except (ValueError, IndexError):
+            removed = []
+        choice = await self.push_screen_wait(PowerPanel(lobs, removed if isinstance(removed, list) else []))
         if not choice:
             return
         action, services = choice
         chosen = [l for l in lobs if l['service'] in services]
+        if action in ('remove', 'restore'):
+            await self.remove_or_restore(action, chosen, lobs, removed)
+            return
         if action == 'start':
             todo = [l for l in chosen if not l.get('running')]
         elif action == 'stop':

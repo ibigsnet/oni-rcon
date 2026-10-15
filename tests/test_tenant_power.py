@@ -54,7 +54,7 @@ def test_f7_stop_one_with_players_needs_two_confirmations(tmp_path, monkeypatch)
             assert await wait_for(pilot, lambda: isinstance(app.screen, Confirm) and "PLAYERS ARE ONLINE" in app.screen.t)
             await pilot.click("#yes")
             assert await wait_for(pilot, lambda: log.exists() and "stop" in log.read_text())
-        calls = [c for c in log.read_text().splitlines() if not c.startswith("checklist")]
+        calls = [c for c in log.read_text().splitlines() if not c.startswith(("checklist", "restore --json"))]
         assert calls == ["status --json", "stop h3-01 --yes --force"]
 
     asyncio.run(go())
@@ -75,7 +75,7 @@ def test_f7_abort_changes_nothing_and_stop_all_skips_stopped(tmp_path, monkeypat
             assert "h3-03" not in str(app.screen.b)  # already stopped: not listed
             await pilot.click("#no")
             await pilot.pause(0.3)
-        assert [c for c in log.read_text().splitlines() if not c.startswith("checklist")] == ["status --json"]
+        assert [c for c in log.read_text().splitlines() if not c.startswith(("checklist", "restore --json"))] == ["status --json"]
 
     asyncio.run(go())
 
@@ -104,7 +104,7 @@ def test_empty_lobby_rechecks_players_without_force(tmp_path, monkeypatch):
             assert await wait_for(pilot, lambda: isinstance(app.screen, Confirm))
             await pilot.click("#yes")
             assert await wait_for(pilot, lambda: any('occupancy changed' in n for n in notices))
-        assert [c for c in log.read_text().splitlines() if not c.startswith("checklist")] == ["status --json", "restart h3-02 --yes"]
+        assert [c for c in log.read_text().splitlines() if not c.startswith(("checklist", "restore --json"))] == ["status --json", "restart h3-02 --yes"]
         assert any('Nothing was stopped' in n and 'Open F7 again' in n for n in notices)
 
     asyncio.run(go())
@@ -131,7 +131,7 @@ def test_f7_buttons_fit_80_columns_and_large_lobby_list(tmp_path, monkeypatch):
                 assert 0 <= button.region.x < button.region.right <= 80
                 assert 0 <= button.region.y < button.region.bottom <= 32
             assert await pilot.click('#no')
-        assert [c for c in log.read_text().splitlines() if not c.startswith("checklist")] == ['status --json']
+        assert [c for c in log.read_text().splitlines() if not c.startswith(("checklist", "restore --json"))] == ['status --json']
 
     asyncio.run(go())
 
@@ -160,7 +160,7 @@ def test_f7_number_and_letter_keys_pick_and_act(tmp_path, monkeypatch):
             assert "h3-02" in str(app.screen.b) and "h3-01" not in str(app.screen.b)
             await pilot.click("#yes")
             assert await wait_for(pilot, lambda: log.exists() and "stop" in log.read_text())
-        assert [c for c in log.read_text().splitlines() if not c.startswith("checklist")][-1].startswith("stop h3-02")
+        assert [c for c in log.read_text().splitlines() if not c.startswith(("checklist", "restore --json"))][-1].startswith("stop h3-02")
 
     asyncio.run(go())
 

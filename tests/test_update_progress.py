@@ -114,3 +114,26 @@ def test_start_only_waits_for_lobbies(tmp_path, monkeypatch):
             assert dlg.done and dlg.STEPS == 1 and dlg.lines == []
             assert "h3-01  ONLINE" in dlg.lobby_lines
     asyncio.run(go())
+
+
+def test_power_panel_remove_and_restore_buttons():
+    from oni_rcon.tenant import PowerPanel
+    lobs = [{"service": "h3-01", "name": "A", "running": True, "players": []},
+            {"service": "h3-02", "name": "B", "running": False, "players": None}]
+
+    async def go():
+        for removed, want in (([], ("remove", ["h3-02"])),
+                              ([{"lobby": "h3-03", "folder": "h3-03-x", "days_left": 7}], ("restore", []))):
+            panel = PowerPanel(lobs, removed)
+            app = Host(panel)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.pause(0.1)
+                assert bool(panel.query("#restore")) == bool(removed)
+                if removed:
+                    panel.query_one("#restore").press()
+                else:
+                    await pilot.press("2")
+                    await pilot.press("d")
+                await pilot.pause(0.2)
+                assert app.result == want
+    asyncio.run(go())

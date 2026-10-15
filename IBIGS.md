@@ -1,5 +1,11 @@
 # IBIGS Reclaimer terminal
 
+## Remove a lobby (0.9.0+ibigs.23)
+
+F7 → REMOVE LOBBY (D) / `oni remove h3-02`: stops the lobby, takes it out of compose.yaml and moves its folder (settings,
+stats, bans, cache) to `.removed/<lobby>-<time>`, kept 7 days. F7 → RESTORE / `oni restore h3-02` puts it back,
+stopped. Refuses the last lobby and a running lobby with players (or unknown players) unless forced after a warning.
+
 ## Progress you can see, lobbies that get the whole VM (0.9.0+ibigs.22)
 
 - **Update progress (F9):** a game update shows step N of 5 (check, download, built-in modes, restart, back online),
