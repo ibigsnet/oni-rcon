@@ -31,7 +31,7 @@ def players_of(lob):
     if not lob.get('running'):
         return '-'
     if lob.get('players') is None:
-        return '?'
+        return '-' if lob.get('phase') in ('waiting', 'starting') else '?'
     return f"{len(lob['players'])}/{lob.get('max') or '?'}"
 
 
@@ -44,10 +44,18 @@ def table(lobs):
     t.append(f"{'LOBBY':<8} {'STATE':<9} {'PLAYERS':<8} NAME IN THE SERVER LIST\n", style='bold')
     for lob in lobs:
         t.append(f"{clean(lob['service']):<8} ")
-        t.append(f"{'RUNNING' if lob.get('running') else 'STOPPED':<9} ",
-                 style='bold green' if lob.get('running') else 'yellow')
+        phase = lob.get('phase') or ''
+        label = {'waiting': 'WAITING', 'starting': 'STARTING'}.get(phase, 'RUNNING') if lob.get('running') else 'STOPPED'
+        t.append(f"{label:<9} ", style={'WAITING': 'bold red', 'STARTING': 'bold cyan', 'RUNNING': 'bold green'}
+                 .get(label, 'yellow'))
         t.append(f"{players_of(lob):<8} ", style='bold red' if busy(lob) else '')
         t.append(clean(str(lob.get('name', ''))) + '\n')
+        # 2026-10-15: a game server that never reported in used to read RUNNING ? for hours
+        if phase == 'waiting':
+            t.append(f"         └ waiting on: {clean(str(lob.get('why') or 'its start-up check'))}. "
+                     "It retries every 15 s; RESTART shows the full message.\n", style='red')
+        elif phase == 'starting':
+            t.append("         └ starting up: usually 1-3 minutes, longer right after an update.\n", style='dim')
     return t
 
 
@@ -408,6 +416,12 @@ class TenantApp(OniApp):
         if rc != 0 or 'NOT ' in out or 'did not stay up' in out:
             # the helper says exactly what's wrong (a typo with its line, a missing mod, the lobby's last log lines)
             await self.push_screen_wait(Notice(f"{action.upper()}: PROBLEM", clean_block(out), warn=True))
+        elif action in ('start', 'restart') and self.playlist_tool():
+            # 2026-10-15: follow the lobbies until they're online (or say what they wait on), instead of leaving
+            # "RUNNING ?" for the customer to puzzle over
+            from .jobs_ui import UpdateProgress
+            await self.push_screen_wait(UpdateProgress(f"{action.upper()}: {', '.join(l['service'] for l in todo)}",
+                                                       self.playlist_tool(), None, wait_minutes=20))
         else:
             done = [ln.strip() for ln in out.splitlines() if 'done.' in ln or 'already' in ln or 'left stopped' in ln]
             self.notify('\n'.join(done) or out.strip()[-400:], title=f"{action.capitalize()}: done", timeout=15)

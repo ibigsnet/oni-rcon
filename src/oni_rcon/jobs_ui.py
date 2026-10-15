@@ -1,13 +1,16 @@
 """Tenant schedule and update dialogs."""
+import asyncio
+import re
 import time
 import uuid
 import json
 
 from rich.text import Text
 from textual import on
+from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.widgets import Button, Input, Label, Select, Static
+from textual.widgets import Button, Input, Label, ProgressBar, Select, Static
 
 from .app import Confirm, Dialog, Form
 from .jobs import Store, validate
@@ -217,9 +220,151 @@ async def updates_dialog(app):
                 'Game updates restart only empty lobbies. Busy or unknown lobbies defer the update.\n'
                 'Oni uses the signed IBIGS channel and keeps a rollback copy.', verb='UPDATE', danger=False)):
             return
+        tool = app.playlist_tool() if hasattr(app, 'playlist_tool') else ''
+        if verb == 'update' and tool:
+            # 2026-10-15: show the update as it happens (stages, elapsed time, lobbies coming back) instead of a
+            # silent wait of several minutes.
+            await app.push_screen_wait(UpdateProgress(f'UPDATING {kind.upper()}', tool, ['updates', choice],
+                                                      wait_online=kind == 'game'))
+            return
         app.notify('Checking updates…' if verb == 'check' else 'Updating… This may take several minutes.', title='Updates', timeout=10)
         rc, output = await app.power_run('updates', choice)
         app.notify(clean(output.strip()[-1400:]) or ('Completed.' if rc == 0 else f'Failed (exit {rc}).'),
                    title='Updates', severity='information' if rc == 0 else 'warning', timeout=20)
     except (OSError, ValueError) as exc:
         app.notify(clean(str(exc)), title='Updates', severity='error')
+
+
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+# What the game updater (ibigs-reclaimer-update) prints at each stage -> (step, words for the step line).
+GAME_STEPS = [(re.compile(r"server version|Couldn't check online"), 1, "Checking for the newest Project Reclaimer"),
+              (re.compile(r"^Downloading "), 2, "Downloading the new version (1-3 GB the first time, less after)"),
+              (re.compile(r"built-in game modes"), 3, "Installing the built-in game modes"),
+              (re.compile(r"^Restarting "), 4, "Restarting the lobbies that were running"),
+              (re.compile(r"^(Updated to|Up to date)"), 5, "Waiting for the lobbies to come back online")]
+
+
+class UpdateProgress(Dialog):
+    """2026-10-15: a progress view for updates and starts. Runs the oni command, follows its stage lines on a bar
+    (step N of 5, with the elapsed time and what it is doing now), then waits until every running lobby reports in,
+    showing each one as STARTING, WAITING (with the server's reason) or ONLINE. Nothing is guessed: steps move only
+    when the updater or the lobbies say so; within a step the bar pulses."""
+    BINDINGS = [Binding('escape', 'close', show=False), Binding('enter', 'close', show=False)]
+    STEPS = 5
+
+    def __init__(self, title: str, tool: str, args: list[str] | None, wait_online: bool = True,
+                 wait_minutes: float = 15):
+        super().__init__()
+        self.t, self.tool, self.args, self.wait_online = title, tool, args, wait_online
+        self.wait_s = wait_minutes * 60
+        self.start = time.monotonic()
+        self.step, self.words, self.done, self.rc = 0, 'Starting…', False, 0
+        self.lines: list[str] = []
+        self.lobby_lines = ''
+        if not args:  # only waiting for lobbies to come online (F7 START / RESTART)
+            self.STEPS = 1
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes='dialog'):
+            yield Static(Text(self.t), classes='dialog-title')
+            yield Static('', id='up-step', classes='dialog-body')
+            yield ProgressBar(total=None, show_eta=False, id='up-bar')
+            yield Static('', id='up-lobbies', classes='dialog-body')
+            with VerticalScroll(classes='notice-body'):
+                yield Static('', id='up-log', classes='dialog-body')
+            with Horizontal(classes='dialog-buttons'):
+                yield Button('WORKING…', id='no', disabled=True)
+            yield self.keys('The window closes when you choose CLOSE; the work keeps going if you leave oni')
+
+    def on_mount(self) -> None:
+        self.set_interval(1, self.paint)
+        self.run_worker(self.go(), exclusive=False)
+
+    def set_step(self, step: int, words: str) -> None:
+        if step >= self.step:
+            self.step, self.words = step, words
+
+    def paint(self) -> None:
+        secs = int(time.monotonic() - self.start)
+        bar = self.query_one('#up-bar', ProgressBar)
+        if self.done:
+            bar.update(total=self.STEPS, progress=self.STEPS)
+        elif self.STEPS == 1:
+            running = self.lobby_lines.count('\n') + 1 if self.lobby_lines else 0
+            ready = self.lobby_lines.count('ONLINE')
+            bar.update(total=max(running, 1), progress=ready) if running else bar.update(total=None)
+        elif self.step:
+            bar.update(total=self.STEPS, progress=self.step - 1 + 0.5)
+        head = (f'DONE in {secs // 60}:{secs % 60:02}' if self.done else
+                f'Step {max(self.step, 1)} of {self.STEPS} · {secs // 60}:{secs % 60:02} · {self.words}')
+        self.query_one('#up-step', Static).update(Text(head, 'bold'))
+        self.query_one('#up-lobbies', Static).update(Text(self.lobby_lines))
+        self.query_one('#up-log', Static).update(Text('\n'.join(self.lines[-12:]), 'dim'))
+
+    async def go(self) -> None:
+        if self.args:
+            try:
+                proc = await asyncio.create_subprocess_exec(self.tool, *self.args, stdout=asyncio.subprocess.PIPE,
+                                                            stderr=asyncio.subprocess.STDOUT,
+                                                            stdin=asyncio.subprocess.DEVNULL)
+                assert proc.stdout
+                async for raw in proc.stdout:
+                    line = clean(ANSI.sub('', raw.decode(errors='replace')).strip())
+                    if not line:
+                        continue
+                    self.lines.append(line)
+                    for pat, step, words in GAME_STEPS:
+                        if pat.search(line):
+                            self.set_step(step, words)
+                self.rc = await proc.wait()
+            except OSError as e:
+                self.lines.append(f'Could not run it: {e}')
+                self.rc = 127
+        if self.wait_online and self.rc == 0:
+            self.set_step(self.STEPS, 'Waiting for the lobbies to come online')
+            await self.follow_lobbies()
+        self.done = True
+        self.paint()
+        b = self.query_one('#no', Button)
+        b.label, b.disabled, b.variant = 'CLOSE', False, 'primary'
+        b.focus()
+
+    async def follow_lobbies(self) -> None:
+        """Until every running lobby reports players (or the time is up): STARTING / WAITING (why) / ONLINE."""
+        end = time.monotonic() + self.wait_s
+        while time.monotonic() < end:
+            try:
+                proc = await asyncio.create_subprocess_exec(self.tool, 'status', '--json',
+                                                            stdout=asyncio.subprocess.PIPE,
+                                                            stderr=asyncio.subprocess.DEVNULL)
+                out, _ = await asyncio.wait_for(proc.communicate(), 60)
+                lobs = json.loads(out.decode().strip().splitlines()[-1])
+            except (OSError, ValueError, IndexError, asyncio.TimeoutError):
+                await asyncio.sleep(5)
+                continue
+            running = [l for l in lobs if l.get('running')]
+            rows, ready = [], 0
+            for l in running:
+                phase = l.get('phase') or ''
+                if not phase and l.get('players') is not None:
+                    ready += 1
+                    rows.append(f"  ✓ {clean(l['service'])}  ONLINE")
+                elif phase == 'waiting':
+                    rows.append(f"  ! {clean(l['service'])}  WAITING: {clean(str(l.get('why') or ''))}")
+                else:
+                    rows.append(f"  … {clean(l['service'])}  STARTING")
+            self.lobby_lines = '\n'.join(rows) or '  No lobby is running.'
+            if running:
+                self.words = f'Waiting for the lobbies to come back online ({ready} of {len(running)} ready)'
+            if ready == len(running):
+                return
+            await asyncio.sleep(5)
+        self.lines.append('Still not online after the wait. F7 shows each lobby and why it is waiting.')
+
+    def action_close(self) -> None:
+        if self.done:
+            self.dismiss(self.rc)
+
+    @on(Button.Pressed, '#no')
+    def _close(self) -> None:
+        self.action_close()

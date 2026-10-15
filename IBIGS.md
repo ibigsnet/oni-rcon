@@ -1,5 +1,16 @@
 # IBIGS Reclaimer terminal
 
+## Progress you can see, lobbies that get the whole VM (0.9.0+ibigs.22)
+
+- **Update progress (F9):** a game update shows step N of 5 (check, download, built-in modes, restart, back online),
+  the elapsed time, the updater's own lines and each lobby coming back as STARTING / WAITING (with the server's
+  reason) / ONLINE. F7 START/RESTART follows the lobbies the same way.
+- **F7 tells the truth:** a lobby whose container runs but whose game server hasn't reported in is STARTING or
+  WAITING (its start-up check failed; the reason is shown) instead of RUNNING ?.
+- **Whole-VM lobbies:** older templates hard-capped every lobby at 0.85 x cores / lobbies and 2 GB (a Best VM's one
+  running lobby got 0.85 of 6 cores). The wrapper rewrites compose.yaml once and lifts the caps on running lobbies
+  live (docker update): every lobby may use all cores and all but 1.5 GiB of RAM.
+
 ## Project Reclaimer 0.9.18: changes apply live (0.9.0+ibigs.21)
 
 Reclaimer 0.9.18 applies `dedicated.toml`, playlists and content while the servers run. On lobbies running 0.9.18+
