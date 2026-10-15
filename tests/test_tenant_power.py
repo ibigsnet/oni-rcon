@@ -134,3 +134,48 @@ def test_f7_buttons_fit_80_columns_and_large_lobby_list(tmp_path, monkeypatch):
         assert log.read_text().splitlines() == ['status --json']
 
     asyncio.run(go())
+
+
+def test_f7_number_and_letter_keys_pick_and_act(tmp_path, monkeypatch):
+    """0-9 pick the lobby (0 = all), S / R / X press START / RESTART / STOP: no counting Tab presses."""
+    tool, log = fake_tool(tmp_path)
+    monkeypatch.setenv("IBIGS_ONI_POWER", str(tool))
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = TenantApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(120, 32)) as pilot:
+            await pilot.press("f7")
+            assert await wait_for(pilot, lambda: isinstance(app.screen, PowerPanel))
+            sel = app.screen.query_one("#power-target")
+            await pilot.press("3")
+            assert sel.value == "h3-03"
+            await pilot.press("9")              # no such lobby: unchanged
+            assert sel.value == "h3-03"
+            await pilot.press("0")
+            assert sel.value == "*"
+            await pilot.press("2")
+            await pilot.press("x")              # STOP h3-02: nobody on it, one confirmation
+            assert await wait_for(pilot, lambda: isinstance(app.screen, Confirm))
+            assert "h3-02" in str(app.screen.b) and "h3-01" not in str(app.screen.b)
+            await pilot.click("#yes")
+            assert await wait_for(pilot, lambda: log.exists() and "stop" in log.read_text())
+        assert log.read_text().splitlines()[-1].startswith("stop h3-02")
+
+    asyncio.run(go())
+
+
+def test_confirm_arrow_keys_move_between_buttons():
+    """The confirm box says "← → choose": the arrows really move between ABORT and the action."""
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = TenantApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(120, 32)) as pilot:
+            app.push_screen(Confirm("CONFIRM STOP", "STOP 1 server(s)", "STOP"))
+            assert await wait_for(pilot, lambda: isinstance(app.screen, Confirm))
+            assert app.screen.focused.id == "no"
+            await pilot.press("right")
+            assert app.screen.focused.id == "yes"
+            await pilot.press("left")
+            assert app.screen.focused.id == "no"
+    asyncio.run(go())

@@ -46,25 +46,48 @@ def table(lobs):
 
 class PowerPanel(Dialog):
     """Pick ALL or one lobby, then STOP / START / RESTART. Returns (action, [services]) or None."""
-    BINDINGS = [Binding('escape', 'dismiss(None)', show=False)]
+    # Keys so nobody has to count Tab presses: 0 = all lobbies, 1-9 = that lobby; S start, R restart, X stop.
+    BINDINGS = [Binding('escape', 'dismiss(None)', show=False),
+                Binding('left', 'app.focus_previous', show=False), Binding('right', 'app.focus_next', show=False),
+                *[Binding(str(n), f'pick({n})', show=False, priority=True) for n in range(10)],
+                Binding('s', "act('start')", show=False, priority=True),
+                Binding('r', "act('restart')", show=False, priority=True),
+                Binding('x', "act('stop')", show=False, priority=True)]
 
     def __init__(self, lobs):
         super().__init__()
         self.lobs = lobs
 
+    def action_pick(self, n: int) -> None:
+        sel = self.query_one('#power-target', Select)
+        if n == 0:
+            sel.value = '*'
+        elif n <= len(self.lobs):
+            sel.value = self.lobs[n - 1]['service']
+        else:
+            return
+        if sel.expanded:
+            sel.expanded = False
+        sel.focus()
+
+    def action_act(self, what: str) -> None:
+        self.query_one(f'#{what}', Button).press()
+
     def compose(self) -> ComposeResult:
         with Vertical(classes='dialog power'):
             yield Static(Text('START / STOP SERVERS'), classes='dialog-title')
             yield Static(table(self.lobs), classes='dialog-body')
-            options = [(f'ALL SERVERS ({len(self.lobs)})', '*')] + \
-                      [(f"{clean(l['service'])}  {clean(str(l.get('name', '')))}", l['service']) for l in self.lobs]
+            options = [(f'0  ALL SERVERS ({len(self.lobs)})', '*')] + \
+                      [(f"{i if i < 10 else ' '}  {clean(l['service'])}  {clean(str(l.get('name', '')))}", l['service'])
+                       for i, l in enumerate(self.lobs, 1)]
             yield Select(options, allow_blank=False, value='*', id='power-target')
             with Horizontal(classes='dialog-buttons'):
                 yield Button('CLOSE', id='no')
-                yield Button('START', id='start', variant='success')
-                yield Button('RESTART', id='restart', variant='warning')
-                yield Button('STOP', id='stop', variant='error')
-            yield self.keys('Esc close', 'Tab next', 'Enter choose', 'players are always shown before anything happens')
+                yield Button('START  S', id='start', variant='success')
+                yield Button('RESTART  R', id='restart', variant='warning')
+                yield Button('STOP  X', id='stop', variant='error')
+            yield self.keys('0-9 pick a lobby', 'S start · R restart · X stop', '← → or Tab move', 'Esc close',
+                            'players are always shown before anything happens')
 
     def on_mount(self) -> None:
         super().on_mount()

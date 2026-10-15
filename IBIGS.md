@@ -1,5 +1,12 @@
 # IBIGS Reclaimer terminal
 
+## Keyboard and focus fixes from the first customer (0.9.0+ibigs.18)
+
+- Buttons show keyboard focus as inverted colours (was bold + underline, nearly invisible in the browser Web Console).
+- Confirm boxes: ← → really move between ABORT and the action (the hint promised them; nothing was bound).
+- F7 START / STOP: 0-9 pick the lobby (0 = all, numbers shown in the picker), S / R / X press START / RESTART / STOP,
+  ← → move between the buttons.
+
 ## Fleet rules (0.9.0+ibigs.17)
 
 F12 in the fleet-console fleet console opens FLEET AUTOMATION, with SWITCH, RULES, ROLES and DISCORD. It's the same rules

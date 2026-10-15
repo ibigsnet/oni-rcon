@@ -645,7 +645,9 @@ class Dialog(ModalScreen):
 
 
 class Confirm(Dialog):
-    BINDINGS = [Binding("escape", "dismiss(False)", show=False)]
+    # ← → move between ABORT and the action, as the hint line says (it used to promise them without binding them).
+    BINDINGS = [Binding("escape", "dismiss(False)", show=False),
+                Binding("left", "app.focus_previous", show=False), Binding("right", "app.focus_next", show=False)]
 
     def __init__(self, title: str, body: str, verb: str = "EXECUTE", danger: bool = True):
         super().__init__()

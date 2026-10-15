@@ -135,7 +135,8 @@ ForgePane { height: 1fr; }
 
 /* Keep labels readable; reserve bold for keyboard focus and the active tab. */
 Button, Button:disabled { text-style: none; }
-Button:focus { text-style: bold underline; }
+/* Focus must be obvious in any terminal, including the browser Web Console: inverted colours, not just bold. */
+Button:focus { text-style: bold reverse; }
 FooterKey .footer-key--key, Toast .toast--title, Tab.-active { text-style: bold; }
 Tab { color: $text-muted; }
 Tab.-active { color: $foreground; background: $block-cursor-background; }
