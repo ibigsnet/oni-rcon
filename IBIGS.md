@@ -1,5 +1,23 @@
 # IBIGS Reclaimer terminal
 
+## Beginner-friendly: settings, Workshop mods, checklist (0.9.0+ibigs.20)
+
+From the first customer's evening, so the next one doesn't hit the same walls:
+- **F12 SETTINGS & MODS** (customer console): lobby settings (name, player limit, players to start, map, game type)
+  without touching dedicated.toml, checked first, restarted only while nobody's on; **Workshop mods**: paste a Steam
+  Workshop link and it installs (signs in to Steam in the terminal when needed, then offers to sign out again);
+  the installed mods list; and the getting-started checklist.
+- **Getting started** pops up after the boot until the basics are done: Halo installed, a lobby running, answering,
+  and named. It points at the one next step.
+- **F7**: the picker starts on the first lobby (not ALL), RESTART leaves stopped lobbies stopped, and a failed
+  start/restart shows the helper's whole explanation (a typo with its line, a missing mod, the last log lines).
+- **F3** says why its buttons are greyed out (stopped or not answering yet: press F7).
+- **Game types with host settings**: loading one whose saved "hosting" block disagrees with the server (player
+  limit) warns first, naming the file and what to change.
+- Dialogs scroll when the terminal is short, so their buttons are always reachable.
+- `oni` wrapper: `oni settings`, `oni workshop add|list|remove`, `oni checklist`; a lobby log that says a mod map
+  is missing comes with a Steam search link and the install command.
+
 ## Settings check before a lobby starts (0.9.0+ibigs.19, `oni` wrapper)
 
 - START / RESTART (F7 or `oni start`) first checks the lobby's dedicated.toml: a Windows byte-order mark is removed,

@@ -149,7 +149,7 @@ Button:disabled {
 /* dialogs */
 ModalScreen { align: center middle; background: $background 75%; }
 .dialog {
-    width: 68; height: auto; max-height: 90%; padding: 1 2; background: $surface; border: thick $primary;
+    width: 68; height: auto; max-height: 90%; overflow-y: auto; padding: 1 2; background: $surface; border: thick $primary;
 }
 .dialog-keys { color: $text-muted; margin-top: 1; text-align: right; }
 .dialog Input.-missing, .dialog Select.-missing { border: tall $error; background: $error 20%; }
@@ -224,3 +224,7 @@ WidePick .dialog { width: 130; max-width: 96%; }
 #pe-name { width: 1fr; }
 #pe-vote { width: 10; }
 #pe-games { height: 1fr; border: round $primary 35%; }
+
+/* IBIGS 2026-10-15: Notice (helper output) and the F3 'why are these off' line */
+.notice-body { height: auto; max-height: 24; }
+#ops-offline { height: auto; margin-bottom: 1; }

@@ -51,6 +51,7 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
 from .content import CATALOG_SORT, catalog_items, forge_entry, forge_index, items_for
+from .variants import clash_note
 from .install import InstallError, place, plan, size_words, target_for
 from .pings import JOIN_PING, follow_join_pings
 from .medals import Medals
@@ -1435,6 +1436,7 @@ class OniApp(App):
                     with Horizontal(id="ops-top"):
                         yield Static(id="sitrep")
                         with Vertical(id="ops-panel"):
+                            yield Static(id="ops-offline")
                             ops = {op: (label, variant) for op, label, variant in OPS}
                             for group, names in OP_GROUPS:
                                 yield Static(group, classes="ops-head")
@@ -2682,6 +2684,11 @@ class OniApp(App):
                          head, Text(), facts(rows)))
         self.query_one("#dossier-raw", Static).update(JSON.from_data(redact_data(p, self.redact)))
 
+    def offline_hint(self, st) -> str:
+        """Why the F3 buttons are greyed out, in plain words (the customer console adds how to start it)."""
+        return (f"{st.label} isn't answering, so these buttons are off until it does. It may be stopped, starting "
+                "up, or its console password may have changed; RECONNECT tries again.")
+
     def paint_ops(self) -> None:
         st = self.cur
         self.paint_match_actions()
@@ -2717,6 +2724,10 @@ class OniApp(App):
                    or op in ("passvote", "cancelvote") and voting is False or op == "startvote" and voting is True
                    or op == "playlists" and not self.playlist_tool())
             self.query_one(f"#op-{op}", Button).disabled = off
+        why = self.query_one("#ops-offline", Static)
+        why.display = not st.online
+        if not st.online:
+            why.update(Text(self.offline_hint(st), AMBER))
         self.paint_theatre()
         here = str(s.get("map") or "").lower().replace(" ", "_")
         pulled = {n: e for lid, e in self.fstate.installed(st.server.where).items() if self.fstate.pulled(lid, e)
@@ -3415,7 +3426,7 @@ class OniApp(App):
             await self.playlists()
             return
         if not st.online:
-            self.notify(f"{st.label} is not connected.", severity="warning")
+            self.notify(self.offline_hint(st), title=f"{st.label} is not connected", severity="warning", timeout=10)
             return
         if name in ("load", "map", "mode", "nextmap"):
             from .content_ui import Keep
@@ -3433,9 +3444,16 @@ class OniApp(App):
                 if md is None or (name != "nextmap" and not md):
                     return
             args = [a for a in (mp, md) if a]
-            if name != "nextmap" and not await self.push_screen_wait(Confirm(
-                    f"{name.upper()}  {' / '.join(args)}", "Ends the current game for everyone on this station; "
-                                                           "the new one starts in the next lobby.")):
+            s = st.data.get("status", {})
+            note = clash_note(st.server.content_dir, md, num(s.get("max_players")), num(s.get("min_players"))) \
+                if md else ""
+            body = ("Ends the current game for everyone on this station; the new one starts in the next lobby."
+                    + (f"\n\n{note}" if note else ""))
+            if name == "nextmap" and note:
+                if not await self.push_screen_wait(Confirm(f"QUEUE  {' / '.join(args)}", note, verb="QUEUE ANYWAY")):
+                    return
+            elif name != "nextmap" and not await self.push_screen_wait(Confirm(
+                    f"{name.upper()}  {' / '.join(args)}", body, verb=f"{name.upper()} ANYWAY" if note else "EXECUTE")):
                 return
             self.send(st, name, *args, then=("status", "nextmap"))
         elif name in ("endround", "endgame", "shuffle"):
@@ -4044,8 +4062,12 @@ class OniApp(App):
             args = [other, ref]
         if not other:
             return
+        s = st.data.get("status", {})
+        note = clash_note(st.server.content_dir, args[1], num(s.get("max_players")), num(s.get("min_players")))
         if await self.push_screen_wait(Confirm(f"LOAD  {' / '.join(args)}", "Ends the current game for everyone on "
-                                               "this station; the new one starts in the next lobby.")):
+                                               "this station; the new one starts in the next lobby."
+                                               + (f"\n\n{note}" if note else ""),
+                                               verb="LOAD ANYWAY" if note else "EXECUTE")):
             self.send(st, "load", *args, then=("status", "nextmap"))
 
     # --- forge: the update and withdrawal watcher -------------------------------------------------------------
