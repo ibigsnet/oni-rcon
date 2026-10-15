@@ -1,5 +1,14 @@
 # IBIGS Reclaimer terminal
 
+## Settings check before a lobby starts (0.9.0+ibigs.19, `oni` wrapper)
+
+- START / RESTART (F7 or `oni start`) first checks the lobby's dedicated.toml: a Windows byte-order mark is removed,
+  files a browser upload left root-only in that lobby's folder go back to the folder's owner, and a file with a
+  mistake is refused with its line number (nothing restarts on a broken file).
+- A lobby whose settings file is broken stays listed in F7, with the reason.
+- About 10 seconds after a start, a lobby that already stopped or keeps restarting shows its last log lines.
+- (The console code is unchanged from ibigs.18; this release carries the new wrapper.)
+
 ## Keyboard and focus fixes from the first customer (0.9.0+ibigs.18)
 
 - Buttons show keyboard focus as inverted colours (was bold + underline, nearly invisible in the browser Web Console).
