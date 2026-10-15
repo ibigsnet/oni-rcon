@@ -99,7 +99,8 @@ def full_app(ports, tmp_path, **kw):
     return app
 
 
-def test_full_plays_the_archive_then_the_clearance_check(tmp_path, monkeypatch):
+def test_full_plays_the_archive_alone_then_the_console(tmp_path, monkeypatch):
+    """ibigs.24: one animation, not two. The archive's natural end goes straight into the console."""
     async def go():
         ports, keep = await serve_fakes(tick=False)
         monkeypatch.setattr(appmod, "TOTAL", 1.5)
@@ -111,11 +112,9 @@ def test_full_plays_the_archive_then_the_clearance_check(tmp_path, monkeypatch):
             assert json.loads((tmp_path / "prefs.json").read_text())["intro_seen"] is True
             for _ in range(40):
                 await pilot.pause(0.1)
-                if isinstance(app.screen, Boot):
+                if not isinstance(app.screen, Archive):
                     break
-            assert isinstance(app.screen, Boot)  # the last act
-            await pilot.press("escape")
-            assert not isinstance(app.screen, (Archive, Boot))
+            assert not isinstance(app.screen, (Archive, Boot))  # never the second animation after the first
 
     asyncio.run(go())
 
@@ -209,18 +208,21 @@ def test_a_click_skips_the_whole_sequence(tmp_path):
     asyncio.run(go())
 
 
-def test_the_palette_toggle_is_remembered(tmp_path):
+def test_the_palette_choice_is_remembered(tmp_path):
+    """ibigs.24: the palette switches WHICH single animation plays (long archive or short splash)."""
     async def go():
         ports, keep = await serve_fakes(tick=False)
         app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro="off",
                      prefs=Prefs(tmp_path / "prefs.json"))
         async with app.run_test(size=(160, 48)) as pilot:
             titles = lambda: [c.title for c in app.get_system_commands(app.screen) if c.title.startswith("Boot")]
-            assert titles() == ["Boot sequence: full every time"]
-            app.action_full_intro()
-            assert Prefs.load(tmp_path / "prefs.json").full_intro and Prefs.load(tmp_path / "prefs.json").intro_mode() == "full"
-            assert titles() == ["Boot sequence: quick after the first run"]
-            app.action_full_intro()
-            assert not Prefs.load(tmp_path / "prefs.json").full_intro
+            app.prefs.intro_seen = True
+            assert titles() == ["Boot animation: switch to the long Halo archive"]  # short plays now
+            app.action_intro_choice()
+            p2 = Prefs.load(tmp_path / "prefs.json")
+            assert p2.intro_choice == "full" and p2.intro_mode() == "full"
+            assert titles() == ["Boot animation: switch to the short splash"]
+            app.action_intro_choice()
+            assert Prefs.load(tmp_path / "prefs.json").intro_mode() == "quick"
 
     asyncio.run(go())

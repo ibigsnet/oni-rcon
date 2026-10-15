@@ -32,7 +32,7 @@ def main() -> None:
     ap.add_argument("--demo", action="store_true", help="run against three simulated servers, no setup needed")
     ap.add_argument("--setup", action="store_true", help="add servers with the setup screen")
     ap.add_argument("--intro", choices=["full", "quick", "off"],
-                    help="the boot sequence this time: full (the Halo archive, then clearance), quick, or off "
+                    help="the boot animation this time: full (the long Halo archive), quick (the short splash), or off "
                          "(default: full the first time, quick after; Ctrl+P changes that)")
     ap.add_argument("--no-intro", action="store_true", help="skip the boot sequence (--intro off)")
     ap.add_argument("-V", "--version", action="version", version=f"oni-rcon {__version__}")

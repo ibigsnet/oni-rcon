@@ -175,6 +175,8 @@ TIPS = {
     "add-server": "Add another server with the setup screen.",
     "f-all": "Show what happens on every server, not only the selected one.  Key: F2 again",
     "fg-install": "Put the selected version on this server, every file checked against Forge's manifest.  Key: i",
+    "fg-deploy": "One click: install it if needed, wait for the server to pick it up, end the game and put the "
+                 "players on it. A map keeps the current game rules; a game type keeps the map.  Key: p",
     "fg-load": "Load the installed map or gametype now, once the server lists it. Ends the current game. A playlist: "
                "choose the lobbies that play it.  Key: l",
     "fg-ack": "Say you've seen that it was withdrawn: CONDITION goes back to GREEN. It stays flagged.  Key: a",
@@ -942,8 +944,8 @@ class Archive(Screen):
 
     def tick(self) -> None:
         el = time.monotonic() - self.t0
-        if el >= TOTAL:
-            self.app.switch_screen(Boot())
+        if el >= TOTAL:  # 2026-10-15: one animation, not two: the archive ends and the console appears
+            self.action_skip()
             return
         f = archive_frame(el)
         rows, cols = min(24, self.app.size.height - 9 - len(FILES) - 1), self.app.size.width - 4
@@ -1078,6 +1080,7 @@ class Blacklist(Vertical):
 
 class ForgePane(Vertical):
     BINDINGS = [Binding("i", "app.forge('install')", "Install"), Binding("l", "app.forge('load')", "Load now"),
+                Binding("p", "app.forge('deploy')", "Deploy"),
                 Binding("a", "app.forge('ack')", "Acknowledge"),
                 Binding("s", "app.forge('sort')", "Sort"), Binding("w", "app.forge('window')", "Window"),
                 Binding("n", "app.forge('more')", "More"), Binding("y", "app.forge('copy')", "Copy ID"),
@@ -1344,6 +1347,8 @@ class OniApp(App):
         self.fstate = ForgeState(self.fsetup.state_dir / "forge-state.json" if self.fsetup.state_dir else None)
         self.rounds = Rounds(self.fsetup.state_dir / "rounds.jsonl" if self.fsetup.state_dir else None)
         self.forge: ForgeClient | None = None
+        self.busy: dict[int, str] = {}  # live feedback under the Superintendent: {token: "Installing X on Y"}
+        self._busy_n = 0
         self.listings: list[dict] = []  # the catalog as fetched, in its order
         self.listing_rows: dict[str, dict] = {}
         self.browse_order = ("name", False)  # the map and game type browser's column, remembered between opens
@@ -1474,6 +1479,7 @@ class OniApp(App):
                                 yield Roster(id="versions", cursor_type="row", zebra_stripes=True)
                                 with Grid(id="forge-actions"):
                                     yield Button("INSTALL  i", id="fg-install", variant="primary", compact=True)
+                                    yield Button("DEPLOY  p", id="fg-deploy", variant="success", compact=True)
                                     yield Button("LOAD NOW  l", id="fg-load", compact=True)
                                     yield Button("ACKNOWLEDGE  a", id="fg-ack", variant="warning", compact=True)
                                     yield Button("KEY  k", id="fg-key", compact=True)
@@ -2035,16 +2041,29 @@ class OniApp(App):
     def fit_sidebar(self) -> None:
         """Reserve a fixed face inside the docked footer; only the server list scrolls."""
         self.query_one("#super").styles.height = self.sup_rows()
+    def working(self, text: str) -> int:
+        """Show what the console is doing right now ("Installing X", "Deploying Y") under the Superintendent,
+        live with a quiet pulse, until working_done is called with the returned token. The newest words win."""
+        self._busy_n += 1
+        self.busy[self._busy_n] = text
+        return self._busy_n
+
+    def working_done(self, token: int) -> None:
+        self.busy.pop(token, None)
+
     def tick_super(self) -> None:
         """Redraw the Superintendent when its face or words changed: a blink, an easing expression, a new reaction."""
         if not self.is_running:  # the timer can fire once more while quitting
             return
         latest = next((r for r in self.findings.recent() if r.at > self.findings.acknowledged_at), None)
-        if latest and time.time() - latest.at <= 300:
+        if self.busy:  # an operation under way: its words win over everything else
+            self.sup.last = redact_text(list(self.busy.values())[-1] + " " + "·" * (1 + int(time.monotonic() * 2) % 3),
+                                        self.redact)
+        elif latest and time.time() - latest.at <= 300:
             station = next((st for st in self.stations if str(st.index) == latest.server), None)
             label = station.label if station else latest.server
             self.sup.last = redact_text(f"{label}: {latest.title} · F11", self.redact)
-        elif self.sup.last.endswith(" · F11"):
+        elif self.sup.last.endswith((" · F11", "·", "· ", "·· ", "··· ")) or self.sup.last.endswith("···"):
             self.sup.last = ""
         self.sup.motion = self.animation_level != "none"
         box, n = self.query_one("#super", Static), self.sup_size()
@@ -2857,6 +2876,10 @@ class OniApp(App):
             self.query_one("#players", Roster).show_cursor = True
             self.cur.alerts = 0  # looked at now
             for t in self.query(Roster):
+                # 2026-10-15: the Forge catalog isn't the station's own list. Keeping its pick means "choose a
+                # map, then choose the server to put it on" survives the switch. Station tables start at the top.
+                if t.id in ("listings", "versions"):
+                    continue
                 if t.row_count:
                     t.move_cursor(row=0)  # another station's lists: start at the top
             self.paint_all(feed=self.local_only)
@@ -3053,10 +3076,10 @@ class OniApp(App):
         for op, label, _ in BAN_OPS:
             yield SystemCommand(f"Blacklist: {label.split('  ')[0].title()}", op, lambda op=op: self.bl(op))
         yield SystemCommand("Toggle address redaction", "hide or show player IPs", self.action_redact)
-        yield SystemCommand("Boot sequence: " + ("quick after the first run" if self.prefs.full_intro
-                                                 else "full every time"),
-                            "now: full the first time, quick after" if not self.prefs.full_intro
-                            else "now: the full sequence plays every time", self.action_full_intro)
+        yield SystemCommand("Boot animation: switch to " + ("the short splash" if self.intro_pick() == "full"
+                                                              else "the long Halo archive"),
+                            "one plays at start - long archive or short splash, your pick; any key skips it",
+                            self.action_intro_choice)
         yield SystemCommand("Health: read the reports now", "crashes, memory and the workaround service  (F10, Ctrl+R)",
                             lambda: (setattr(self, "service_at", {h: 0.0 for h in self.service_at}),
                                      [setattr(st, "check_at", 0.0) for st in self.stations]))
@@ -3065,13 +3088,16 @@ class OniApp(App):
         yield SystemCommand("Forge: Load API key", "your own ReclaimerForge key, for F6", lambda: self.action_forge("key"))
         yield SystemCommand("Forge: Refresh catalog", "fetch the catalog again", lambda: self.forge_load(fresh=True))
 
-    def action_full_intro(self) -> None:
-        """Switch between the full boot sequence every time and only the first time."""
-        self.prefs.full_intro = not self.prefs.full_intro
+    def intro_pick(self) -> str:
+        return self.prefs.intro_choice or ("full" if self.prefs.full_intro else "quick")
+
+    def action_intro_choice(self) -> None:
+        """One boot animation plays at start, never both: switch between the long one and the short one."""
+        self.prefs.intro_choice = "quick" if self.intro_pick() == "full" else "full"
         self.prefs.save()
-        self.notify("The full boot sequence plays every time you start." if self.prefs.full_intro else
-                    "The full boot sequence plays on the first run only; after that the boot is quick.",
-                    title="BOOT SEQUENCE")
+        self.notify("The long one: the Halo archive decrypts, then the console." if self.prefs.intro_choice == "full"
+                    else "The short one: the clearance splash, then the console.",
+                    title="BOOT ANIMATION · " + ("LONG" if self.prefs.intro_choice == "full" else "SHORT"))
 
     # --- actions with dialogs (workers, so they can await the dialog) -----------------------------------------
     @work(exclusive=True, group="dialog")
@@ -3734,6 +3760,7 @@ class OniApp(App):
                                                           if self.forge and self.fsetup.source else "")
         versions.display = self.query_one("#forge-raw-box").display = bool(self.forge and x)
         self.query_one("#fg-install").display = self.query_one("#fg-load").display = bool(self.forge and x)
+        self.query_one("#fg-deploy").display = bool(self.forge and x)
         self.query_one("#fg-ack").display = False
         if not self.forge:
             box.update(self.no_key_text())
@@ -3790,6 +3817,8 @@ class OniApp(App):
         box.update(Group(*parts))
         have = self.fstate.installed(self.cur.server.where).get(lid)
         self.query_one("#fg-install", Button).disabled = is_withdrawn(x) or self.fstate.blocks(lid)
+        self.query_one("#fg-deploy", Button).disabled = (is_withdrawn(x) or self.fstate.blocks(lid)
+                                                         or (kind_of(x) == "playlist" and not self.playlist_tool()))
         self.query_one("#fg-ack").display = lid in self.fstate.alarms()
         self.query_one("#fg-load", Button).disabled = not have or kind_of(have) == "playlist" and not self.playlist_tool()
         vs = versions_of(x)
@@ -3866,6 +3895,8 @@ class OniApp(App):
             await self.forge_install()
         elif what == "load":
             await self.forge_play()
+        elif what == "deploy":
+            await self.forge_deploy()
         elif what == "more":
             self.forge_load(more=True)
         elif what in ("column", "flip"):
@@ -4001,8 +4032,10 @@ class OniApp(App):
         self.log_cmd(stamp + Text(f"» forge install {title} v{label}  ({lid} {vid})", WHITE))
         self.notify(f"Downloading {len(files)} file{'s' * (len(files) != 1)} and checking each one…",
                     title=f"FORGE · {title}")
+        tok = self.working(f"Installing {title} on {st.label}")
         try:
             local = [await self.forge.download(f.url, f.size, f.sha256) for f in files]  # all checked, then copied
+            self.busy[tok] = f"Deploying {title} to {st.label}"
             for f, path in zip(files, local):
                 await target.put(path, f)
         except (ForgeError, Unverified, InstallError, OSError) as e:
@@ -4012,6 +4045,8 @@ class OniApp(App):
             self.log_cmd(Text("  ✕ " + words, RED))
             self.notify(words, title="FORGE · NOT INSTALLED", severity="error", timeout=20)
             return None
+        finally:
+            self.working_done(tok)
         entry = {"listing_id": lid, "version_id": vid, "version": label, "title": title, "kind": kind_of(x)
                  or kind_of(manifest), "author": author_of(x), "owner_id": owner_of(x),
                  "reference": str(pick(manifest, "reference", "map_reference", "name", default="")),
@@ -4031,12 +4066,73 @@ class OniApp(App):
         if kind_of(entry) == "playlist":
             after = ("l, or F3 PLAYLISTS, puts it on your lobbies." if self.playlist_tool() else
                      "Point the server's playlist setting at it to use it: oni-rcon doesn't edit dedicated.toml.")
-        elif self.listed(st, entry):
-            after = "The server lists it now: l loads it."
+        elif self.listed(st, entry) or await self.wait_listed(st, entry, seconds=20):
+            after = "The server lists it now: l loads it, p deploys it."
         else:
-            after = "The server doesn't list it yet: it may need a restart to pick new content up."
+            after = ("The server doesn't list it yet. Reclaimer 0.9.18+ picks new content up by itself within "
+                     "seconds; an older server needs a lobby restart (F7 on the server's VM).")
         self.notify(f"{title} v{label} is on {st.label}. {after}", title="FORGE · INSTALLED", timeout=15)
         return entry
+
+    async def wait_listed(self, st: Station, entry: dict, seconds: float = 45) -> tuple | None:
+        """Until the server lists the new content, or the time is up. Reclaimer 0.9.18 takes new files up by
+        itself a couple of seconds after they land, so this is usually one or two polls."""
+        title = entry.get("title") or "it"
+        tok = self.working(f"Waiting for {st.label} to pick {title} up")
+        try:
+            t0 = time.monotonic()
+            while self.is_running and st.online and time.monotonic() - t0 < seconds:
+                await self._fetch(st, ("maps", "modes"))
+                found = self.listed(st, entry)
+                if found:
+                    return found
+                await asyncio.sleep(3)
+            return None
+        finally:
+            self.working_done(tok)
+
+    async def forge_deploy(self) -> None:
+        """One click from the catalog to the players: install the selected version if it isn't on the server yet,
+        wait for the server to list it, then end the game and put everyone on it. A map keeps the current game
+        rules; a game type keeps the current map; a playlist goes through the F3 deploy (which checks every game)."""
+        st, x = self.cur, self.cur_listing()
+        if not x:
+            return
+        entry = self.fstate.installed(st.server.where).get(listing_id(x))
+        if not entry:
+            entry = await self.forge_install(wait=True)  # its own confirm; downloads with live words
+            if not entry:
+                return
+        if kind_of(entry) == "playlist":
+            await self.forge_play()  # the playlist path already goes straight to: which lobbies, and when
+            return
+        if not st.online:
+            self.notify(f"{st.label} is not connected.", severity="warning")
+            return
+        title = entry.get("title") or "it"
+        found = self.listed(st, entry) or await self.wait_listed(st, entry)
+        if not found:
+            self.notify(f"{st.label} still doesn't list {title}. Reclaimer 0.9.18+ picks new content up by "
+                        "itself; an older server needs a lobby restart (F7 on the server's VM), then p again.",
+                        title=f"DEPLOY · {title}", severity="warning", timeout=15)
+            return
+        what, ref = found
+        keeps = "the current game rules" if what == "maps" else "the map it is on"
+        if not await self.push_screen_wait(Confirm(f"DEPLOY  {title}",
+                f"Ends the current game for everyone on {st.label} and starts {title}, keeping {keeps}.",
+                verb="END GAME + DEPLOY")):
+            return
+        tok = self.working(f"Starting {title} on {st.label}")
+        try:
+            r = await self.cmd(st, "map" if what == "maps" else "mode", ref, toast=False)
+            if not r.get("ok"):
+                self.notify(self.reply_text(r), title=f"DEPLOY · {title}", severity="error", timeout=15)
+                return
+            self.notify(f"{title} is queued: the game ends and every player's copy gets it ready, then the lobby "
+                        "switches. The feed (F2) reports when it has.", title=f"DEPLOY · {title}", timeout=12)
+            await self._fetch(st, ("status", "nextmap"))
+        finally:
+            self.working_done(tok)
 
     async def forge_play(self) -> None:
         """Load an installed map or gametype now: the same as LOAD MAP+MODE on F3, with this half filled in."""
@@ -4058,11 +4154,11 @@ class OniApp(App):
             self.notify(f"{st.label} is not connected.", severity="warning")
             return
         await self._fetch(st, ("maps", "modes"))
-        found = self.listed(st, entry)
+        found = self.listed(st, entry) or await self.wait_listed(st, entry)
         if not found:
-            self.notify("The server doesn't list it yet. It may need a restart to pick new content up, which oni-rcon "
-                        "can't do for you.", title=f"LOAD NOW · {entry.get('title', '')}", severity="warning",
-                        timeout=15)
+            self.notify("The server still doesn't list it. Reclaimer 0.9.18+ picks new content up by itself "
+                        "within seconds; an older server needs a lobby restart (F7 on the server's VM).",
+                        title=f"LOAD NOW · {entry.get('title', '')}", severity="warning", timeout=15)
             return
         what, ref = found
         title = entry.get("title") or ref

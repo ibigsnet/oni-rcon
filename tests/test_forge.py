@@ -1012,3 +1012,49 @@ def test_the_browser_installs_from_the_catalog_then_loads_it(fake, tmp_path):
             app.screen.query_one("#yes").press()
             assert await until(pilot, lambda: keep[0].status["map"] == entry["reference"])
     asyncio.run(go())
+
+
+def test_one_click_deploy_from_f6(fake, tmp_path):
+    """ibigs.24: p installs the pick if needed, waits for the server to list it, confirms once, ends the game
+    and puts the players on it, with the Superintendent narrating each stage."""
+    from oni_rcon.app import Confirm
+    from oni_rcon.config import Server
+    from oni_rcon.demo import SERVERS, serve_fakes
+
+    async def go():
+        shared = tmp_path / "shared"
+        ports, keep = await serve_fakes(tick=False, specs=SERVERS[:1], content_dirs=[shared])
+        app = forge_app(ports, fake, tmp_path, servers=[Server(port=ports[0], password="demo",
+                                                               content_dir=str(shared))])
+        async with app.run_test(size=(170, 50)) as pilot:
+            assert await until(pilot, lambda: all(st.online and "maps" in st.data for st in app.stations))
+            await pilot.press("f6")
+            t = app.query_one("#listings")
+            assert await until(pilot, lambda: t.row_count == 25)
+            row = next(i for i, lid in enumerate(t.ids) if app.listing_rows[lid]["kind"] == "map")
+            t.focus()
+            t.move_cursor(row=row)
+            lid = t.selected
+            assert await until(pilot, lambda: lid in app.details)
+            seen = []
+            orig = app.working
+            app.working = lambda text: (seen.append(text), orig(text))[1]
+            await pilot.press("p")                     # not installed yet: the install confirm comes first
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            assert app.screen.verb == "INSTALL"
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm)
+                               and app.screen.verb == "END GAME + DEPLOY", 300)
+            entry = app.fstate.installed(app.stations[0].server.where)[lid]
+            app.screen.query_one("#yes").press()
+            fake_rcon = keep[0]
+            assert await until(pilot, lambda: fake_rcon.status["map"] == entry["reference"], 200)
+            assert any(x.startswith("Installing") for x in seen)
+            assert any(x.startswith("Starting") for x in seen)
+            assert not app.busy                         # every token returned
+
+            await pilot.press("p")                      # already installed and listed: straight to the confirm
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm)
+                               and app.screen.verb == "END GAME + DEPLOY")
+            await pilot.press("escape")
+    asyncio.run(go())

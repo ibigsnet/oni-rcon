@@ -93,7 +93,9 @@ class PowerPanel(Dialog):
     def compose(self) -> ComposeResult:
         with Vertical(classes='dialog power'):
             yield Static(Text('START / STOP SERVERS'), classes='dialog-title')
-            yield Static(table(self.lobs), classes='dialog-body')
+            # 2026-10-15: six lobbies plus their STARTING/WAITING lines outgrow a small window: this part scrolls
+            with VerticalScroll(classes='dialog-body power-lobbies'):
+                yield Static(table(self.lobs))
             options = [(f'0  ALL SERVERS ({len(self.lobs)})', '*')] + \
                       [(f"{i if i < 10 else ' '}  {clean(l['service'])}  {clean(str(l.get('name', '')))}", l['service'])
                        for i, l in enumerate(self.lobs, 1)]

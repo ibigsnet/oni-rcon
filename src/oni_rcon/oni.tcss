@@ -155,6 +155,8 @@ ModalScreen { align: center middle; background: $background 75%; }
 .dialog Input.-missing, .dialog Select.-missing { border: tall $error; background: $error 20%; }
 .dialog.power { width: 96; max-width: 100%; }
 .power .dialog-body { max-height: 10; overflow-y: auto; scrollbar-gutter: stable; }
+.power .power-lobbies { height: auto; max-height: 30vh; min-height: 5; }
+.power-lobbies Static { width: 1fr; }
 .power .dialog-buttons Button { width: 1fr; min-width: 10; }
 .dialog.help { width: 96; height: 90%; }
 #help-body { height: 1fr; scrollbar-size-vertical: 1; }

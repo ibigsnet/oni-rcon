@@ -1,5 +1,22 @@
 # IBIGS Reclaimer terminal
 
+## One-click deploy, live status words, one boot animation (0.9.0+ibigs.24)
+
+- **DEPLOY (p) on F6:** install the selected Forge map or game type if needed, wait for the server to list it
+  (0.9.18 picks new files up within seconds), end the game and put the players on it: a map keeps the current
+  game rules, a game type keeps the map. LOAD NOW and the post-install words now wait for the live pickup too,
+  instead of telling the operator a restart is needed.
+- **The Superintendent narrates:** while anything runs, its words say so, live: "Installing X on h3-01 ·",
+  "Deploying…", "Waiting for h3-01 to pick X up…", "Starting…". `working()` / `working_done()` are there for any
+  flow to use.
+- **The pick survives a server switch:** choosing another station no longer resets the Forge catalog's selected
+  row, so "pick a map, pick the server, press p" works in that order.
+- **One boot animation, the user's pick:** "full" now plays the Halo archive alone and "quick" the clearance
+  splash alone, never both in a row. The palette command switches between them (first run still shows the long
+  one once); any key or click skips either, as before.
+- **F7 fits small windows:** the lobby table scrolls (its own box, 30% of the window at most) instead of pushing
+  the buttons off a 24-row terminal.
+
 ## Remove a lobby (0.9.0+ibigs.23)
 
 F7 → REMOVE LOBBY (D) / `oni remove h3-02`: stops the lobby, takes it out of compose.yaml and moves its folder (settings,
