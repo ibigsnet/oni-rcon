@@ -2348,6 +2348,8 @@ class OniApp(App):
             self.fetch(st, "vote")
         if kind == "control":
             self.fetch(st, "nextmap")
+            if ev.get("action") == "reload":  # 0.9.18+: settings, playlist or content changed while it runs
+                self.fetch(st, "maps", "modes", "vote")
 
     def unmatched(self, st: Station, ids: list) -> None:
         """Once per station: kills name players by an ID the roster has no field for. Field names only, never values:
@@ -3342,18 +3344,25 @@ class OniApp(App):
                     change, args = f"{mp} / {md}", ["playlist", "single", *services, "--map", mp, "--game", md]
                 else:
                     change, args = f"playlist {path}", ["playlist", "use", path, *services]
-                busy = [lob for lob in chosen if lob.get("running") and (lob.get("players") is None or lob["players"])]
-                running = [lob for lob in chosen if lob.get("running")]
-                options = [("Next time it starts: change it now, restart later (F7)", "later")]
+                # Reclaimer 0.9.18+ ("live") takes a saved playlist up by itself from the next vote: no restart.
+                old_ver = [lob for lob in chosen if not lob.get("live")]
+                busy = [lob for lob in old_ver if lob.get("running") and (lob.get("players") is None or lob["players"])]
+                running = [lob for lob in old_ver if lob.get("running")]
+                when_ = "later"
                 if running:
-                    options.append(("Restart now if nobody is playing (a lobby with players waits)", "restart"))
-                if busy:
-                    options.append(("Restart now, disconnecting players", "force"))
-                when_ = await self.push_screen_wait(Pick(f"{change.upper()} · WHEN?", options))
-                if not when_:
-                    continue
+                    options = [("Next time it starts: change it now, restart later (F7)", "later"),
+                               ("Restart now if nobody is playing (a lobby with players waits)", "restart")]
+                    if busy:
+                        options.append(("Restart now, disconnecting players", "force"))
+                    when_ = await self.push_screen_wait(Pick(f"{change.upper()} · WHEN?", options))
+                    if not when_:
+                        continue
                 body = (f"{change}\n\n{describe_lobbies(chosen)}\n\nThe server checks every game first and nothing "
                         f"changes if one can't be played. dedicated.toml is backed up before it's changed.")
+                if len(old_ver) < len(chosen):
+                    body += ("\n\nLobbies on Reclaimer 0.9.18 or later switch over by themselves, with players staying "
+                             "on: a new playlist from its next vote; a change between a playlist and one map once "
+                             "nobody is playing.")
                 if when_ == "force":
                     body += "\n\nPlayers on these lobbies are DISCONNECTED for about a minute."
                 if not await self.push_screen_wait(Confirm(f"USE ON {', '.join(services).upper()}", body,
@@ -3370,6 +3379,8 @@ class OniApp(App):
                     continue
                 if rc == 4:
                     note = "Changed; not restarted, because players are on. It takes effect at the next restart (F7)."
+                    if len(old_ver) < len(chosen):
+                        note = "Changed. " + text[-400:]
                 else:
                     note = ("Done. " if rc == 0 else "PROBLEM: ") + text[-400:]
                 self.action_refresh()
@@ -3401,8 +3412,9 @@ class OniApp(App):
             return None
         found = self.listed(st, entry)
         if not found:
-            self.notify(f"{entry.get('title', 'It')} is installed, but {st.label} doesn't list it yet: it may need a "
-                        "restart to pick new content up (F7).", title="INSTALLED · NOT LISTED YET", severity="warning",
+            self.notify(f"{entry.get('title', 'It')} is installed, but {st.label} doesn't list it yet. Reclaimer "
+                        "0.9.18 and later pick new content up within a few seconds: try again shortly. Older "
+                        "versions need a restart (F7).", title="INSTALLED · NOT LISTED YET", severity="warning",
                         timeout=15)
             return None
         return found[1]

@@ -240,11 +240,14 @@ class TenantApp(OniApp):
                   ('min_players', 'Players needed to start a game', show(cur.get('min_players'))),
                   ('map', 'Map it starts on', show(cur.get('map'))),
                   ('game', 'Game type it starts on', show(cur.get('game')))]
-        if cur.get('running'):
+        if cur.get('running') and not cur.get('live'):
             fields.append(('restart', 'Apply', [('Restart it now if nobody is playing', 'yes'),
                                                ('Save only: applies at the next restart', 'no')]))
         note = ('Map and game type must be names the server lists (F3 > CHANGE MAP shows them). Workshop maps: '
                 'install the mod first (F12 > Install a Workshop mod).')
+        if cur.get('live'):  # Reclaimer 0.9.18+: the server applies a saved change by itself, players stay on
+            note += (' Saving applies it straight away: players stay on. A new name or starting map makes the '
+                     'lobby restart by itself once nobody is playing.')
         got = await self.push_screen_wait(Form(f'SETTINGS · {lobby}', fields, verb='SAVE', note=note))
         if not got:
             return
@@ -258,6 +261,8 @@ class TenantApp(OniApp):
         try:
             r = json.loads(out.strip().splitlines()[-1])
             text, ok = clean(str(r.get('text', ''))), r.get('state') in ('saved', 'applied')
+            if r.get('state') == 'refused':
+                text = 'The server checked it and said no, so nothing changed: ' + text
         except (ValueError, IndexError):
             text, ok = clean_block(out), rc == 0
         if ok:

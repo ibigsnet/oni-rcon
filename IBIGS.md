@@ -1,5 +1,14 @@
 # IBIGS Reclaimer terminal
 
+## Project Reclaimer 0.9.18: changes apply live (0.9.0+ibigs.21)
+
+Reclaimer 0.9.18 applies `dedicated.toml`, playlists and content while the servers run. On lobbies running 0.9.18+
+(with `auto_reload` on) the `oni` wrapper no longer restarts anything to apply settings (F12), playlists (F3) or
+roles (F8): it saves and reports the server's own answer ("applied now", "restarts by itself once nobody is on it",
+or the refusal, after which the file is put back). After a Workshop install it triggers a reload so the mod is
+picked up without a restart. `oni status --json` reports each lobby's `version` and `live`. Older lobbies keep the
+restart behaviour. A `reload` control event refreshes the console's maps, modes and ballot.
+
 ## Beginner-friendly: settings, Workshop mods, checklist (0.9.0+ibigs.20)
 
 From the first customer's evening, so the next one doesn't hit the same walls:
