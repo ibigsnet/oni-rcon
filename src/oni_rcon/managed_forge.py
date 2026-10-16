@@ -2,6 +2,7 @@
 import asyncio
 import threading
 import time
+from . import fuzzy
 from .forge import ForgeError, active_now, author_of, is_withdrawn, listing_id, recent_of, title_of, votes_of
 from .safety import clean
 
@@ -29,8 +30,8 @@ class ManagedForgeClient:
 
     async def listings(self, sort='trending', window='7d', query='', page_size=50, more=None, fresh=False):
         data = await self.snapshot(fresh)
-        rows = [x for x in data.get('items', []) if not is_withdrawn(x) and query.casefold() in
-                (title_of(x) + ' ' + author_of(x) + ' ' + ' '.join(x.get('tags', []))).casefold()]
+        rows = [x for x in data.get('items', []) if not is_withdrawn(x) and fuzzy.matches(
+                query, title_of(x), author_of(x), ' '.join(map(str, x.get('tags', []))))]
         if sort == 'unrated':
             rows = [x for x in rows if votes_of(x)[2] == 0]
         if sort == 'rising' and window != '7d':

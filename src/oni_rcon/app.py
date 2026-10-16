@@ -40,6 +40,7 @@ from textual.worker import WorkerState
 from .archive import FILES, TOTAL, frame as archive_frame
 from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, fit, gauge, hbar,
                   pixels, spark, split_bar)
+from . import fuzzy
 from . import health as hc
 from . import perf as pf
 from .perf_view import chart as frame_chart, explain as frame_advice
@@ -748,9 +749,7 @@ class Pick(Dialog):
         self.query("#pick-filter, #pick-list").first().focus()
 
     def fill(self, text: str) -> None:
-        text = text.lower()
-        self.shown = [(l, v) for l, v in self.opts
-                      if text in (l.plain if isinstance(l, Text) else str(l)).lower() or text in str(v).lower()]
+        self.shown = fuzzy.rank(text, self.opts, lambda o: ((o[0].plain if isinstance(o[0], Text) else str(o[0])), str(o[1])))
         ol = self.query_one(OptionList)
         ol.clear_options()
         ol.add_options([Option(l if isinstance(l, Text) else Text(str(l)), id=str(i)) for i, (l, _) in enumerate(self.shown)])
@@ -3605,8 +3604,8 @@ class OniApp(App):
         self.forge_note = "Fetching more of the catalog…" if more else "Fetching the catalog…"
         self.paint_forge()
         try:
-            items, nxt, reply = await self.forge.listings(sort, window, self.query_one("#forge-q", Input).value,
-                                                          more=self.forge_next if more else None, fresh=fresh)
+            items, nxt, reply = await self.forge.search(sort, window, self.query_one("#forge-q", Input).value,
+                                                        more=self.forge_next if more else None, fresh=fresh)
         except ForgeError as e:
             self.forge_note = e.text
             if not more:
@@ -3667,8 +3666,7 @@ class OniApp(App):
         rows, self.listing_rows = [], {}
         for x in self.listings:
             lid, kind, author, recent = listing_id(x), kind_of(x), author_of(x), recent_of(x, window)
-            if not lid or lid in self.listing_rows or query and not any(
-                    query in t.lower() for t in (title_of(x), author, kind)):
+            if not lid or lid in self.listing_rows or query and not fuzzy.matches(query, title_of(x), author, kind):
                 continue
             self.listing_rows[lid] = x
             rows.append((lid, [self.forge_mark(x), Text(kind.upper() or "—", KIND_COLOR.get(kind, DIM)),

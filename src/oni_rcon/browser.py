@@ -6,6 +6,7 @@ import re
 
 from textual.binding import Binding
 from textual.widgets import Input, ListItem
+from . import fuzzy
 from .app import Stations
 
 SORTS = [
@@ -108,7 +109,7 @@ def matching_rows(rows, *, search='', node='all', state='all', sort='players', s
         tags=server_tags(row)
         haystack = (' '.join(str(row.get(key) or '') for key in
                             ('id', 'name', 'node', 'port', 'map', 'mode', 'container'))+' '+' '.join(tags)).casefold()
-        if all((term[1:] in tags if term.startswith('@') else term in haystack) for term in terms):
+        if all((term[1:] in tags if term.startswith('@') else fuzzy.term_score(term, haystack) is not None) for term in terms):
             found.append(row)
 
     def key(row):

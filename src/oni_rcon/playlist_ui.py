@@ -16,6 +16,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, DataTable, Input, Static
 
+from . import fuzzy
 from .app import Dialog, Form
 from .art import AMBER, CYAN, DIM, GOLD, GREEN, RED, WHITE
 from .content import PlaylistError, check_playlist, game_label, new_playlist
@@ -52,7 +53,7 @@ class SortedTable(DataTable):
             self.text = text.lower()
         keep = self.selected
         words = self.text.split()
-        rows = [r for r in self.rows_in if all(w in " ".join(map(str, r[2].values())).lower() for w in words)]
+        rows = [r for r in self.rows_in if not words or fuzzy.matches(self.text, *map(str, r[2].values()))]
         if self.order:
             key, flip = self.order
             high = next(h for k, _, h in self.spec if k == key)

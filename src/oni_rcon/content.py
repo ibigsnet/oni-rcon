@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 
+from . import fuzzy
 from .forge import (author_of, kind_of, latest_of, listing_id, metrics_of, num, pick, recent_of, title_of,
                     version_label, votes_of)
 from .state import norm, refs_of
@@ -199,7 +200,7 @@ def arrange(items: list[Item], what: str, how: str = "name", text: str = "",
     groups = MAP_GROUPS if what == "maps" else MODE_GROUPS
     out = []
     for key, title in groups:
-        rows = ordered([i for i in items if i.group == key and all(w in i.words() for w in words)], how, flip)
+        rows = ordered([i for i in items if i.group == key and (not words or fuzzy.matches(text, i.words()))], how, flip)
         if rows:
             out.append((key, title, rows))
     return out

@@ -772,6 +772,32 @@ class ForgeClient:
                                max_age=0 if fresh else 60)
         return items_of(reply), next_page(reply), reply
 
+    async def search(self, sort: str = "trending", window: str = "7d", query: str = "", more: dict | None = None,
+                     fresh: bool = False, sweep_pages: int = 10) -> tuple[list, dict | None, dict]:
+        """listings() with typo tolerance (IBIGS 2026-10-16): Forge's own search first; when it finds fewer than 10,
+        the catalog is swept (up to sweep_pages pages, kept 5 minutes) and ranked by closeness, so "gluch" still
+        finds "Gulch". Exact hits from Forge stay first."""
+        from . import fuzzy
+        items, nxt, reply = await self.listings(sort, window, query, more=more, fresh=fresh)
+        if more or not query.strip() or len(items) >= 10:
+            return items, nxt, reply
+        pool, cursor = [], None
+        for _ in range(sweep_pages):
+            try:
+                page = await self.get("/api/listings", {"page_size": 50, "sort": sort,
+                                                        "window": window if sort in WINDOWED else None,
+                                                        **(cursor or {})}, max_age=0 if fresh else 300)
+            except ForgeError:
+                break
+            pool += items_of(page)
+            cursor = next_page(page)
+            if not cursor:
+                break
+        have = {listing_id(x) for x in items}
+        extra = fuzzy.rank(query, [x for x in pool if listing_id(x) not in have],
+                           lambda x: (title_of(x), author_of(x), kind_of(x), " ".join(map(str, x.get("tags") or []))))
+        return items + extra, nxt, reply
+
     async def favourites(self, fresh: bool = False) -> tuple[list[dict], dict]:
         """(the collections on now, the reply itself). The feed lists active collections, but a copy served from the
         cache while Forge is down may be old, so the dates are checked here too. It's read apart from the listings'

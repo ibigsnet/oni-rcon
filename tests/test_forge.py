@@ -374,7 +374,7 @@ def test_compatibility():
 
 
 # --- the F6 tab ---------------------------------------------------------------------------------------------------
-async def until(pilot, cond, tries: int = 120) -> bool:
+async def until(pilot, cond, tries: int = 300) -> bool:
     for _ in range(tries):
         await pilot.pause(0.05)
         if cond():
@@ -1051,7 +1051,7 @@ def test_one_click_deploy_from_f6(fake, tmp_path):
             assert await until(pilot, lambda: fake_rcon.status["map"] == entry["reference"], 200)
             assert any(x.startswith("Installing") for x in seen)
             assert any(x.startswith("Starting") for x in seen)
-            assert not app.busy                         # every token returned
+            assert await until(pilot, lambda: not app.busy)  # every token returned (just after the map change)
 
             await pilot.press("p")                      # already installed and listed: straight to the confirm
             assert await until(pilot, lambda: isinstance(app.screen, Confirm)

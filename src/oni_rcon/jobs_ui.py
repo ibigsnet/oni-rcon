@@ -169,7 +169,8 @@ class UpdatesPanel(Dialog):
             yield Select([('Check game version', 'game-check'), ('Update game now (when empty)', 'game-update'),
                           ('Check Oni update channel', 'console-check'), ('Update Oni now', 'console-update'),
                           ('Turn automatic game updates ' + ('OFF' if game else 'ON'), 'game-auto'),
-                          ('Turn automatic Oni updates ' + ('OFF' if console else 'ON'), 'console-auto')],
+                          ('Turn automatic Oni updates ' + ('OFF' if console else 'ON'), 'console-auto'),
+                          ('Check & fix this server (oni doctor)', 'doctor-run')],
                          allow_blank=False, id='update-choice')
             with Horizontal(classes='dialog-buttons'):
                 yield Button('CLOSE', id='update-close')
@@ -193,6 +194,16 @@ async def updates_dialog(app):
         if not choice:
             return
         kind, verb = choice.split('-')
+        if kind == 'doctor':
+            # IBIGS 2026-10-16: the wrapper's self-repair (file access, RCON password drift, web console, Forge key,
+            # Upload sorter, leftover containers); never kicks players
+            app.notify('Checking this server…', title='Check & fix', timeout=8)
+            rc, output = await app.power_run('doctor')
+            lines = [ANSI.sub('', l).strip() for l in output.splitlines() if l.strip()]
+            shown = [l for l in lines if not l.startswith('[ OK ]') and l != 'oni doctor'] or lines[-1:]
+            app.notify(clean('\n'.join(shown)[-1400:]) or ('All good.' if rc == 0 else f'Failed (exit {rc}).'),
+                       title='Check & fix', severity='information' if rc == 0 else 'warning', timeout=25)
+            return
         if verb == 'auto':
             identity = 'auto-' + kind
             old = next((j for j in jobs if j['id'] == identity), None)
