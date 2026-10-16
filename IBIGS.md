@@ -1,5 +1,12 @@
 # IBIGS Reclaimer terminal
 
+## Big Workshop mods install again (0.9.0+ibigs.25)
+
+`oni workshop add` of a large item (a customer VPS hit it with a 9.6 GB mod) died mid-install: the wrapper's `priv()`
+ran every privileged command with a 30-second timeout, which the `cp -a` of a many-GB tree can't meet. `priv()`
+now takes a per-call timeout (still 30 s by default) and the workshop install steps get 3600 s, matching the
+console's own workshop budget. Wrapper-only change; no console behaviour changes.
+
 ## One-click deploy, live status words, one boot animation (0.9.0+ibigs.24)
 
 - **DEPLOY (p) on F6:** install the selected Forge map or game type if needed, wait for the server to list it
