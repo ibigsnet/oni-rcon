@@ -651,14 +651,16 @@ def test_only_safe_files_are_written():
                 "trailing.", "a/b/c/d/e.map"):
         with pytest.raises(InstallError):
             safe_path(bad)
-    good = {"path": "a.map", "url": "/assets/x", "size": 3, "sha256": "ab" * 32}
+    good = {"path": "a.json", "url": "/assets/x", "size": 3, "sha256": "ab" * 32}
+    with pytest.raises(InstallError, match="isn't a Forge map"):   # only Forge's own file types are planned
+        plan({"assets": [{**good, "path": "tool.exe"}]})
     assert plan({"assets": [good]})[0].sha256 == "ab" * 32
     for broken, words in [({**good, "sha256": "md5:1"}, "no SHA-256"), ({**good, "size": -1}, "no size"),
                           ({**good, "url": ""}, "no link")]:
         with pytest.raises(InstallError, match=words):
             plan({"assets": [broken]})
     with pytest.raises(InstallError, match="twice"):
-        plan({"assets": [good, {**good, "path": "A.map"}]})
+        plan({"assets": [good, {**good, "path": "A.json"}]})
     with pytest.raises(InstallError, match="no files"):
         plan({"assets": []})
 

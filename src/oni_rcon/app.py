@@ -53,7 +53,7 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
 from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
 from .content import CATALOG_SORT, catalog_items, forge_entry, forge_index, items_for
 from .variants import clash_note
-from .install import InstallError, place, plan, size_words, target_for
+from .install import InstallError, place, plan, size_words, target_for, vet as install_vet
 from .pings import JOIN_PING, follow_join_pings
 from .medals import Medals
 from .findings import Findings, public_roster, quiet_kill_mode
@@ -4033,6 +4033,7 @@ class OniApp(App):
         tok = self.working(f"Installing {title} on {st.label}")
         try:
             local = [await self.forge.download(f.url, f.size, f.sha256) for f in files]  # all checked, then copied
+            install_vet(files, local, lid, vid)  # not held, strictly Halo 3 content, before anything is written
             self.busy[tok] = f"Deploying {title} to {st.label}"
             for f, path in zip(files, local):
                 await target.put(path, f)
