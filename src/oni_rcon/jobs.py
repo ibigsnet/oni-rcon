@@ -352,7 +352,8 @@ class Worker:
             host = '[::1]' if info['host'] == '::1' else info['host']
             client = Rcon(f"ws://{host}:{info['port']}", info['password'], 'Scheduled job',
                           lambda c, e, n=name: self.event(n, e),
-                          lambda c, s, d, n=name: self.connection(n, s,))
+                          lambda c, s, d, n=name: self.connection(n, s,),
+                          host_key_dir=str(info.get('host_key_dir') or ''))
             self.clients[name] = client
             self.tasks[name] = asyncio.create_task(client.run())
         return [s['name'] for s in found]

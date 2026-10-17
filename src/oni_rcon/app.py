@@ -221,6 +221,8 @@ EXPLAIN = [
      "Something answered, but it isn't RCON. RCON listens on the game port."),
     (("isn't a valid uri", "invalid uri", "scheme isn't"), "BAD LINK", "That isn't a valid ws:// or wss:// link."),
     (("connection closed", "connection lost", "no close frame"), "CONNECTION DROPPED", "The connection dropped."),
+    (("console full", "tools connected"), "CONSOLE FULL",
+     "The server already has 4 tools connected (its limit). oni keeps trying and gets in as soon as one leaves."),
 ]
 
 
@@ -1561,8 +1563,11 @@ class OniApp(App):
                 url, ready = f"ws://127.0.0.1:{tun.local[(s.host, s.port)]}", tun.ready
             else:
                 url = f"ws://[{s.host}]:{s.port}" if ":" in s.host else f"ws://{s.host}:{s.port}"
+            extra = {}
+            if self.rcon_factory is Rcon and s.host_key_dir and not s.url and not s.ssh:
+                extra["host_key_dir"] = s.host_key_dir  # on the server's machine: use the spot it keeps free
             st.rcon = self.rcon_factory(url, s.password, self.by, self.on_rcon_event, self.on_rcon_state, ready,
-                                       gate=gate, on_late=self.on_late_reply)
+                                       gate=gate, on_late=self.on_late_reply, **extra)
             self.by_rcon[st.rcon] = st
             st.worker = self.run_worker(st.rcon.run(), group="rcon", exit_on_error=False)
             if s.ping_log:

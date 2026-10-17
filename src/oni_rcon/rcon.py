@@ -20,13 +20,32 @@ from websockets.exceptions import WebSocketException
 from .safety import clean
 
 
+class ConsoleFull(Exception):
+    """The password was right but the server's tool spots are all in use."""
+
+
+def host_key(folder: str) -> str | None:
+    """The newest rcon-host.key below a server's data folder (the server writes a fresh one each start; renamed
+    servers leave old folders behind, so the newest is the live one). None when there is none or it can't be read."""
+    if not folder:
+        return None
+    from pathlib import Path
+    try:
+        keys = sorted(Path(folder).expanduser().glob("**/rcon-host.key"), key=lambda p: p.stat().st_mtime)
+        key = keys[-1].read_text().strip() if keys else ""
+    except OSError:
+        return None
+    return key if 16 <= len(key) <= 256 and key.isalnum() else None
+
+
 class Rcon:
     """One signed-in connection per server, shared by commands and the event stream: servers admit only 4 tools."""
 
     def __init__(self, url: str, password: str, by: str, on_event: Callable, on_state: Callable,
                  ready: asyncio.Event | None = None, gate: asyncio.Semaphore | None = None,
-                 on_late: Callable | None = None):
+                 on_late: Callable | None = None, host_key_dir: str = ""):
         self.url, self.password, self.by = url, password, by
+        self.host_key_dir = host_key_dir
         self.on_event, self.on_state, self.ready, self.on_late = on_event, on_state, ready, on_late
         self.gate = gate or contextlib.nullcontext()  # shared by a fleet: how many may sign in at once
         self.state, self.detail, self.info = "connecting", "", {}
@@ -51,10 +70,16 @@ class Rcon:
             try:
                 async with self.gate:  # only the sign-in: a fleet connects a few at a time, not all at once
                     ws = await connect(self.url, proxy=None, open_timeout=10, max_size=1024 * 1024)
-                    await ws.send(json.dumps({"type": "auth", "password": self.password}))
+                    auth = {"type": "auth", "password": self.password}
+                    if key := host_key(self.host_key_dir):
+                        auth["host_key"] = key  # the server's own spot, kept free for a console on its machine
+                    await ws.send(json.dumps(auth))
                     reply = clean(json.loads(await asyncio.wait_for(ws.recv(), 10)))
                 if not isinstance(reply, dict) or reply.get("type") != "auth":
                     raise ValueError("that port doesn't speak RCON")
+                if not reply.get("ok") and reply.get("full"):
+                    # Right password, but every spot is taken (servers admit 4 tools): wait for one to free up.
+                    raise ConsoleFull("server console full (4 tools connected)")
                 if not reply.get("ok"):
                     # Never retry a refused sign-in: 5 wrong passwords in 10 min lock the address out.
                     self._set("denied", reply.get("error") or reply.get("text") or "sign-in refused")
@@ -66,6 +91,9 @@ class Rcon:
                         if isinstance(msg := clean(json.loads(raw)), dict):
                             self._dispatch(msg)
                     detail = "connection closed"
+            except ConsoleFull as e:
+                detail = str(e)
+                delay = max(delay, 15)
             except (OSError, TimeoutError, WebSocketException, ValueError) as e:
                 detail = str(e) or type(e).__name__
             except Exception as e:  # a fault handling a message: drop the link and come back, rather than die online

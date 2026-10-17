@@ -23,6 +23,9 @@ class Server:
     password_env: str = ""
     password_command: str | list[str] = ""
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
+    # IBIGS 2026-10-17: the server's data folder on this machine. Its newest rcon-host.key lets oni take the spot
+    # Reclaimer keeps for a console on the server's own machine, so it gets in even when 4 tools fill the rest.
+    host_key_dir: str = ""
     # not a [[server]] key (older versions refuse unknown ones): set from the top-level ping_log by load_config
     ping_log: list[str] = field(default_factory=list, init=False)
     health_cmd: list[str] = field(default_factory=list, init=False)
