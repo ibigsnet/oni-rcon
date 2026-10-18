@@ -51,7 +51,7 @@ duplicate names retain their identities, and opening a result checks the full pl
 Current health conditions and report history remain. **F11** or the Superintendent opens recent findings:
 repeated kick votes, reciprocal vote fights, kill bursts, explicit native medals and reports requiring review.
 Suspicion never triggers automatic moderation. Perfection requires an explicit native medal event.
-Customer findings observe the connected event feed while the console is open. fleet-console reads findings from
+Customer findings observe the connected event feed while the console is open. The fleet console reads findings from
 independent private node observers; it does not stream the full native feed into F2.
 
 Customer VMs launch `oni`, which discovers only their own local lobbies. **F6** opens ReclaimerForge;
@@ -59,11 +59,11 @@ provisioning supplies a private customer catalog/download credential, and person
 **F7** controls lobbies, **F8** is AUTOMATION (rules such as spree announcers, `!admin` calls and server-down alerts; schedules; ADMIN/VIP/MOD roles; the votes switch; Discord; see [docs/AUTOMATION.md](docs/AUTOMATION.md)), and **F9** checks updates and manages automatic
 updates. New-client images enable Oni and guarded game updates by default; existing choices are preserved.
 Verified Forge downloads are staged with content hashes, without silently loading a map or restarting a game.
-On fleet-console, **F9** browses the controller's shared Forge catalog and **F6** retains guarded container operations.
+In the fleet console, **F9** browses the controller's shared Forge catalog and **F6** retains guarded container operations.
 **F10** reports health. The fixed sidebar and bounded polling preserve the selected command target.
 
 The IBIGS deployment target is Linux: customer scheduling uses POSIX file locks and the VPS system service,
-and fleet-console runs the terminal in a Linux container. CI runs the complete suite on Linux with Python 3.11, 3.12
+and the fleet console runs the terminal in a Linux container. CI runs the complete suite on Linux with Python 3.11, 3.12
 and 3.13. Native Windows hosting helpers are not supported by this maintained fork.
 
 API mappings were checked against ReclaimerForge's real catalog, manifest and OpenAPI schema. Credentials stay on
@@ -71,7 +71,7 @@ the API origin, asset fetches are restricted to Forge/its CDN, paths cannot esca
 and server/catalog terminal control characters are removed. Shell-string password/key commands stay disabled.
 Self-updating binaries remain disabled: reviewed, pinned IBIGS source is packaged with its license and source.
 
-> **IBIGS maintained copy:** On fleet-console run `oni-rcon`. See [IBIGS setup and limitations](IBIGS.md) and [source review](SECURITY-REVIEW.md). Startup update checks are disabled.
+> **IBIGS maintained copy:** On the fleet console host, run `oni-rcon`. See [IBIGS setup and limitations](IBIGS.md) and [source review](SECURITY-REVIEW.md). Startup update checks are disabled.
 
 # oni-rcon
 
@@ -83,7 +83,7 @@ allowances and a raw command console, wrapped in Office of Naval Intelligence, S
 
 ![Assets tab: players table and personnel dossier](docs/assets.png)
 
-On fleet-console, run `oni-rcon`. From a clone: `uv sync`, then `uv run oni-rcon`. A direct connection opens a setup screen:
+On the fleet console host, run `oni-rcon`. From a clone: `uv sync`, then `uv run oni-rcon`. A direct connection opens a setup screen:
 type the server address and RCON password, and it tests them. **Try the demo** looks around three simulated servers.
 
 ## What it does
@@ -156,7 +156,7 @@ Also:
 
 ## Install
 
-On fleet-console, run `oni-rcon`. The launcher and the fleet limits are in [IBIGS.md](IBIGS.md).
+On the fleet console host, run `oni-rcon`. The launcher and the fleet limits are in [IBIGS.md](IBIGS.md).
 
 From a clone, with Python 3.11+:
 
@@ -264,7 +264,7 @@ IDs and join-time milliseconds are kept in memory. Raw log text and addresses ar
 
 Without a matching log record the column shows `—`, including players who joined before the available log window.
 That means **unknown**, not zero latency. The dossier labels the value JOIN PING; it is not ongoing packet loss or
-latency monitoring. WebSocket-URL and fleet-console fleet connections never start log readers, and RCON connection latency
+latency monitoring. WebSocket-URL and fleet connections never start log readers, and RCON connection latency
 is never substituted for player ping.
 
 The customer `oni` wrapper's automatically generated lobby list does not enable a log reader. For an optional

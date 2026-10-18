@@ -325,7 +325,7 @@ class FleetApp(FleetHealthMixin, OniApp):
         self.query_one('#forge-sort').tooltip = 'Controller catalog. INSTALLED HERE does not track managed fleet installs.'
 
     async def forge_key(self):
-        self.notify('fleet-console uses the controller catalog. No Forge key is needed in this terminal.')
+        self.notify('The fleet console uses the controller catalog. No Forge key is needed in this terminal.')
 
     async def forge_install(self):
         self.notify('Fleet content goes through the controller validation and empty-lobby deployment queues. Direct copies are disabled.')
@@ -649,13 +649,13 @@ class FleetApp(FleetHealthMixin, OniApp):
 
 
 def main():
-    parser=argparse.ArgumentParser(description='IBIGS private Reclaimer fleet terminal on fleet-console')
+    parser=argparse.ArgumentParser(description='IBIGS private Reclaimer fleet terminal in the fleet console')
     parser.add_argument('--list',action='store_true',help='list registered lobbies without opening the TUI')
     parser.add_argument('--probe',metavar='LOBBY_ID',help='read native status for one registered lobby')
     parser.add_argument('--tags',action='store_true',help='list broadcast/search tags and running-server counts')
     parser.add_argument('--find-player',metavar='FILTER',help='filter all players by name, tag, clan, team, ID or server; all terms must match')
     parser.add_argument('--search',default='',help='filter by name, node, map, mode or port; quotes group phrases')
-    parser.add_argument('--node',default='all',type=str.casefold,help='filter to one node, e.g. node-c or node-d')
+    parser.add_argument('--node',default='all',type=str.casefold,help='filter to one node, e.g. node-a')
     parser.add_argument('--state',choices=[v for _,v in STATES],default='all',help='filter servers by state')
     parser.add_argument('--sort',choices=[v for _,v in SORTS],default='players',help='sort servers (default: most players first)')
     parser.add_argument('--intro',choices=['full','quick','off'],help='upstream boot sequence; full animation needs TEXTUAL_ANIMATIONS=full')

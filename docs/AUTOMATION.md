@@ -176,7 +176,7 @@ From a shell, `oni roles apply --check` shows which servers are waiting for a ro
 
 ## On the IBIGS fleet (operators)
 
-The fleet-console fleet console has the same rules under **F12**, in **FLEET AUTOMATION**:
+The IBIGS fleet console has the same rules under **F12**, in **FLEET AUTOMATION**:
 - **SWITCH**: rules run only while it's ON, and it starts OFF.
 - **RULES**, **ROLES** (VIP protection and roles for rules) and **DISCORD**.
 

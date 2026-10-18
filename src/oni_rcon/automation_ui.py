@@ -88,7 +88,7 @@ def lobby_id(st) -> str:
 
 
 class FleetRuleStore:
-    """The same interface as rules.RuleStore, kept by the fleet-console admin console (/api/rules) and run by every node.
+    """The same interface as rules.RuleStore, kept by the fleet admin console (/api/rules) and run by every node.
     Changes apply here at once and are pushed in the background, so the screen never waits on the nodes."""
     fleet_mode = True
 
@@ -158,7 +158,7 @@ class FleetRuleStore:
         raise ValueError("Fleet votes are managed by vote guard on each node.")
 
     def webhooks(self):
-        return dict(self.doc.get("webhooks") or {})  # masked: the full URLs stay on fleet-console and the nodes
+        return dict(self.doc.get("webhooks") or {})  # masked: the full URLs stay in the fleet console and the nodes
 
     def save_webhook(self, name, url=None):
         if url is not None and not R.webhook_ok(url):
@@ -634,7 +634,7 @@ async def discord_dialog(app, store):
                     await send_test(app, store, got["name"], url=got["url"])
         elif action == "test" and name:
             if getattr(store, "fleet_mode", False):
-                app.notify("Saved fleet webhooks are kept on fleet-console only. Test one with a rule's TEST, or remove and "
+                app.notify("Saved fleet webhooks are kept on the fleet console host only. Test one with a rule's TEST, or remove and "
                            "add it again.", title="Discord", timeout=8)
             else:
                 await send_test(app, store, name)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 import json
+import os
 import math
 import time
 import urllib.request
@@ -21,7 +22,8 @@ from .art import AMBER, CYAN, DIM, GREEN, RED, WHITE
 from .health import HealthError
 from . import perf as pf
 
-SNAPSHOT = 'http://192.0.2.10:9188/snapshot'
+# The controller's private snapshot URL; the fleet launcher sets it. Unset: fleet health reports itself unavailable.
+SNAPSHOT = os.environ.get('ONI_RCON_FLEET_SNAPSHOT', '')
 MAX_BYTES = 8 * 1024 * 1024
 
 
@@ -68,6 +70,8 @@ def project(snapshot, now=None):
 def read_snapshot(opener):
     # Fixed private controller destination and no Authorization header: never forward the
     # private console credential to a second endpoint or an HTTP redirect.
+    if not SNAPSHOT:
+        raise HealthError('fleet health is not configured (ONI_RCON_FLEET_SNAPSHOT)')
     request = urllib.request.Request(SNAPSHOT, headers={'Accept': 'application/json'})
     with opener.open(request, timeout=8) as response:
         data = response.read(MAX_BYTES + 1)

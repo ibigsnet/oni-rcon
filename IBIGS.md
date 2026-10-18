@@ -27,7 +27,7 @@ alerted. Held releases can't be installed until they are reviewed and released.
 
 ## Big Workshop mods install again (0.9.0+ibigs.25)
 
-`oni workshop add` of a large item (a customer VPS hit it with a 9.6 GB mod) died mid-install: the wrapper's `priv()`
+`oni workshop add` of a very large item (many GB) died mid-install: the wrapper's `priv()`
 ran every privileged command with a 30-second timeout, which the `cp -a` of a many-GB tree can't meet. `priv()`
 now takes a per-call timeout (still 30 s by default) and the workshop install steps get 3600 s, matching the
 console's own workshop budget. Wrapper-only change; no console behaviour changes.
@@ -111,7 +111,7 @@ From the first customer's evening, so the next one doesn't hit the same walls:
 
 ## Fleet rules (0.9.0+ibigs.17)
 
-F12 in the fleet-console fleet console opens FLEET AUTOMATION, with SWITCH, RULES, ROLES and DISCORD. It's the same rules
+F12 in the IBIGS fleet console opens FLEET AUTOMATION, with SWITCH, RULES, ROLES and DISCORD. It's the same rules
 sandbox as the customers' F8, kept by the admin console (`/api/rules`) and run on every node by a `reclaimer-rules`
 worker that uses oni-rcon's own engine, copied unchanged into `reclaimer_control/oni_rules/`.
 
@@ -202,7 +202,7 @@ F3's SITREP adds GAME THREAD.
 
 The game simulates on one thread (Wine names it MAIN_THREAD), and most of its system calls are round trips to
 wineserver64, which is also single-threaded. A lobby therefore runs out of one core's speed long before the box runs
-out of cores. On 2026-10-14, Mega Fat Kid on NODE-A fell behind with its game thread at 79% of a core, wineserver at
+out of cores. On 2026-10-14, a busy fleet lobby fell behind with its game thread at 79% of a core, wineserver at
 59% (about 36,000 round trips a second) and 0.1% waiting for a CPU. That is the two threads waiting on each other, not
 host contention.
 
@@ -271,7 +271,7 @@ Customers run `oni` in their VPS. F6 opens ReclaimerForge with provisioned acces
 F8 edits persistent jobs; F9 checks updates and enables or pauses automatic updates. The console opens even when
 every lobby is stopped. Fleet mode keeps its existing controls and never enables the tenant scheduler.
 
-From 0.9.0+ibigs.10 customer consoles open with the same full boot sequence as the fleet-console fleet console every time
+From 0.9.0+ibigs.10 customer consoles open with the same full boot sequence as the IBIGS fleet console every time
 (`oni --intro quick` or `oni --no-intro` opt out). Enter, any other key or a click skips it.
 
 Jobs support five-field numeric cron with an explicit IANA timezone, UTC-aligned intervals in minutes, and observed
@@ -292,7 +292,7 @@ Install `hosting/template/addons/oni-jobs` from the IBIGS provisioning kit once 
 alone does not install that system service. After a console release changes, the idle worker reopens itself on the new
 release. Existing jobs, Forge preferences and stopped lobbies remain intact.
 
-On fleet-console, run `oni-rcon` (alias: `reclaimer-console`). `oni-rcon --list` prints the inventory. The launcher is in `/srv/appdata/reclaimer/terminal/bin/oni-rcon`; Unraid's boot script restores the command links after reboot.
+On the fleet console host, run `oni-rcon` (alias: `reclaimer-console`). `oni-rcon --list` prints the inventory.
 
 The IBIGS palette keeps Oni's amber/cyan theme with brighter labels, team colours and status text. Selected rows use a dark blue background so names and values remain readable. Disabled controls retain legible grey labels; they remain disabled. The active tab and keyboard focus also use weight or underlining, so colour is not the only cue. Reopen the terminal after an update to load the new palette.
 
@@ -302,17 +302,17 @@ The terminal retains 1,000 recent event entries, at most 1,000 rendered lines pe
 
 An offline 200-lobby/32-player benchmark compared the initial 0.7 integration with this optimization: idle process CPU over 20 seconds fell from 1.230 to 0.389 seconds; fetch workers from 4,000 to 206; native player reads stayed at seven. After 5,000 synthetic hidden chat events and opening the log, RSS fell from 108.1 to 87.4 MiB. These are synthetic measurements, not a live capacity guarantee. Reduced retained history and disabled decorative motion contribute to the savings. The former pre-layout log queue grew beyond the visible line limit; both raw and deferred retention are now bounded.
 
-The private fleet mode discovers NODE-A, NODE-C, NODE-B, NODE-E and NODE-D from the existing controller. It refreshes the registry every 15 seconds, includes dynamic lobbies, and marks retired entries. Search names, maps, modes, ports or `@tags` with Ctrl+F. Sort by player count (default: most first), fullness, capacity, name, node or attention needed. Filter by node and state; F7 focuses sorting and F8 focuses state. Filtering never silently changes the selected command target. Ctrl+P opens the lobby palette. F1 shows players, F3 game operations, F4 bans, F5 RCON, F6 container operations, and Ctrl+B selects a broadcast scope. In F2 chat, type `@swat Hello everyone` or `@swat @snipers Hello everyone`. In F5 use `@swat say Hello everyone`. Multiple tags target the union once per lobby; tags match the complete rotation, not only the current mode. `@all` sends to every fresh running lobby. Unknown tags and stopped/stale targets receive no messages. `oni-rcon --tags` lists available tags.
+The private fleet mode discovers the fleet's nodes from the existing controller. It refreshes the registry every 15 seconds, includes dynamic lobbies, and marks retired entries. Search names, maps, modes, ports or `@tags` with Ctrl+F. Sort by player count (default: most first), fullness, capacity, name, node or attention needed. Filter by node and state; F7 focuses sorting and F8 focuses state. Filtering never silently changes the selected command target. Ctrl+P opens the lobby palette. F1 shows players, F3 game operations, F4 bans, F5 RCON, F6 container operations, and Ctrl+B selects a broadcast scope. In F2 chat, type `@swat Hello everyone` or `@swat @snipers Hello everyone`. In F5 use `@swat say Hello everyone`. Multiple tags target the union once per lobby; tags match the complete rotation, not only the current mode. `@all` sends to every fresh running lobby. Unknown tags and stopped/stale targets receive no messages. `oni-rcon --tags` lists available tags.
 
-An empty running lobby remains online, including when native RCON reports `no_game`. `Standby spare — intentionally stopped` means optional dynamic capacity that the controller currently wants stopped. An operator hold, an unexpectedly stopped server, a retired registry entry, and stale or unavailable telemetry have separate messages. The 2026-10-09 inventory contains 82 running lobbies across five nodes; use the live inventory for current counts. Restart the terminal UI to pick up a new terminal image; game servers are unaffected.
+An empty running lobby remains online, including when native RCON reports `no_game`. `Standby spare — intentionally stopped` means optional dynamic capacity that the controller currently wants stopped. An operator hold, an unexpectedly stopped server, a retired registry entry, and stale or unavailable telemetry have separate messages. Use the live inventory for current counts. Restart the terminal UI to pick up a new terminal image; game servers are unaffected.
 
 **ReclaimerForge:** F9 opens the authenticated, cached fleet catalog, including thumbs-up/down votes, coauthors, recent download history, release notes, and the timed collections under FAVOURITES. Missing collection support is reported explicitly; an empty current collection is not inferred from an unavailable feed. The fleet view shows the provider's reviewed catalog without exposing its API key or permitting downloads or live playlist changes from the terminal. The managed controller owns those operations. In customer VPS mode, run `oni` and use F6 for Forge. Provisioning supplies a private customer key command; a customer may save a personal key override in their persistent Forge configuration. Releases and assets are pinned; downloads must pass size and SHA-256 checks. New content is staged without overwriting earlier versions. Shell-string credential commands and unrestricted download hosts are disabled; an approved argument array can read the provisioned local credential. Customer mode supports local round recording; fleet recording remains disabled until native event delivery is available.
 
-**Superintendent:** the sidebar includes the upstream status face. Customer/direct RCON mode reacts to the real event feed, with redacted addresses and reduced-motion support. fleet-console receives bounded findings from independent, read-only node observers through the private authenticated operator API. F11 shows findings and observer coverage; the managed adapter still does not stream the full native feed into F2.
+**Superintendent:** the sidebar includes the upstream status face. Customer/direct RCON mode reacts to the real event feed, with redacted addresses and reduced-motion support. The fleet console receives bounded findings from independent, read-only node observers through the private authenticated operator API. F11 shows findings and observer coverage; the managed adapter still does not stream the full native feed into F2.
 
-**Join-time ping:** the player table and dossier can show the latency recorded when a player joined, using an optional direct/SSH log reader. It is not live ping or packet-loss monitoring. fleet-console has no game-log access and shows `—` for unknown ping. The automatic customer lobby configuration does not enable it; an operator can supply a private manual configuration with `ping_log = ["tail", "-F", "/srv/reclaimer/logs/{port}.log"]`, existing log-read permission and their server entries. Run `oni --config /absolute/path/to/oni-rcon.toml`; do not edit the generated lobby list. Shell strings and shell expansion are disabled. SSH readers require a trusted host key and POSIX host with `setsid`. See the [configuration examples](README.md#player-ping).
+**Join-time ping:** the player table and dossier can show the latency recorded when a player joined, using an optional direct/SSH log reader. It is not live ping or packet-loss monitoring. The fleet console has no game-log access and shows `—` for unknown ping. The automatic customer lobby configuration does not enable it; an operator can supply a private manual configuration with `ping_log = ["tail", "-F", "/srv/reclaimer/logs/{port}.log"]`, existing log-read permission and their server entries. Run `oni --config /absolute/path/to/oni-rcon.toml`; do not edit the generated lobby list. Shell strings and shell expansion are disabled. SSH readers require a trusted host key and POSIX host with `setsid`. See the [configuration examples](README.md#player-ping).
 
-**Filter players:** press **Ctrl+G**, or run `oni-rcon --find-player "Player Z74"`. Every term must match the same player row, across name, service tag, clan tag, team, ID, server, node and port. Matching is partial, Unicode-normalized and case-insensitive; quotes keep phrases together. Use `name:Player tag:Z74`, `node:node-d`, or `@Z74` for an exact service-tag match. Results show Player, TAG, Clan, Team, Server, Node, Port, Player ID and Seen. Missing native details display `—`; coverage reports how many occupied rosters have current tags. The filter includes every current server regardless of the main list's filters. Duplicate names remain separate. Selecting a result verifies its full player ID before opening the server; filtering never moves, messages or moderates players.
+**Filter players:** press **Ctrl+G**, or run `oni-rcon --find-player "Player Z74"`. Every term must match the same player row, across name, service tag, clan tag, team, ID, server, node and port. Matching is partial, Unicode-normalized and case-insensitive; quotes keep phrases together. Use `name:Player tag:Z74`, `node:node-a`, or `@Z74` for an exact service-tag match. Results show Player, TAG, Clan, Team, Server, Node, Port, Player ID and Seen. Missing native details display `—`; coverage reports how many occupied rosters have current tags. The filter includes every current server regardless of the main list's filters. Duplicate names remain separate. Selecting a result verifies its full player ID before opening the server; filtering never moves, messages or moderates players.
 
 **All servers:** RESET clears server/node/state filters and shows all current registered lobbies, including empty games, dynamic copies, Forge workspaces and stopped spares. Retired entries are available through the Retired filter instead of cluttering the default list. Registry changes refresh every 15 seconds; Ctrl+R refreshes immediately. The count distinguishes visible current servers from the complete current inventory.
 
@@ -328,11 +328,8 @@ The 0.8.1 integration includes the upstream Halo archive and larger Superintende
 
 ## Source and maintenance
 
-Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.10` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Private repository: https://github.com/ibigsnet/oni-rcon.
+Based on [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) through release [0.9.0](https://github.com/viik2k/oni-rcon/releases/tag/v0.9.0), upstream main commit `10fe552c81e48e2a4c41d377a07e566ef0edc564`. Runtime `0.9.0+ibigs.10` is packaged as a hash-pinned patch over maintained merge `2b8e1dc92389ff9fd873d8753a664ea72ef2d18c`. It builds on the reviewed 0.6 integration and retained fixes at `47410c1286fe1a95a158073230d762c00d3127ff`. Signed manifests identify the immutable deployment artifact. Copyright (c) 2026 ibigs, LLC. GPL-3.0-or-later. The upstream MIT notice is in NOTICE. Customer bundles include full corresponding source and licenses. Repository: https://github.com/ibigsnet/oni-rcon.
 
-Local source: `/home/user/Projects/ibigs-reclaimer-console`.
-fleet-console source: `/srv/appdata/reclaimer/terminal/source`.
-Management adapter: `/home/user/Games/ProjectReclaimer/dashboard/reclaimer_control/console_read.py` and `operator_console.py`.
 
 Upstream self-updating binaries are disabled in code. Updates require source review, the test suite, a pinned dependency audit, a new image tag, and a launcher update. Build using `Dockerfile.ibigs`; `requirements.lock` pins all runtime dependencies and hashes. Keep one prior image for rollback. Do not copy an upstream release executable over the maintained build.
 
@@ -346,13 +343,13 @@ The 0.7 integration limits sidebar redraws to visible cards, fixes Operations at
 
 ## Customer lobby controls
 
-The customer console includes F7 and a sidebar button to start, stop or restart this VM’s lobbies through the local `oni` wrapper. It shows players before confirmation and defaults to abort. Occupied or unreadable lobbies require a second explicit disconnect confirmation. If an empty lobby gains players before the helper’s final check, the operation stops and asks you to reopen F7 to review occupancy. The panel fits 80-column terminals. This local customer helper does not add Docker access or power controls to the fleet-console fleet adapter.
+The customer console includes F7 and a sidebar button to start, stop or restart this VM’s lobbies through the local `oni` wrapper. It shows players before confirmation and defaults to abort. Occupied or unreadable lobbies require a second explicit disconnect confirmation. If an empty lobby gains players before the helper’s final check, the operation stops and asks you to reopen F7 to review occupancy. The panel fits 80-column terminals. This local customer helper does not add Docker access or power controls to the fleet adapter.
 
 ## 0.9 Health and startup
 
-fleet-console: `oni-rcon` opens the boot sequence and fleet. `oni-rcon --no-intro` skips it; `TEXTUAL_ANIMATIONS=full oni-rcon --intro full` shows the upstream Halo archive. Ctrl+P exposes the boot preference. Preferences persist under the terminal's dedicated `state` directory; existing sessions retain their installed image until closed.
+Fleet console: `oni-rcon` opens the boot sequence and fleet. `oni-rcon --no-intro` skips it; `TEXTUAL_ANIMATIONS=full oni-rcon --intro full` shows the upstream Halo archive. Ctrl+P exposes the boot preference. Preferences persist under the terminal's dedicated `state` directory; existing sessions retain their installed image until closed.
 
-F10 on fleet-console shows all five nodes' cached host CPU, free RAM, RX/TX throughput, telemetry age, container start/restart counters and Docker OOM flags. One shared read covers the fleet every 15 seconds. It does not read native worker crash logs or report a blue-flame workaround as installed. The event list covers container changes observed while the console is open, not a historical incident archive. CPU is the host fraction, and network rates are host measurements, not a game tick-rate measurement. Stale readings are marked explicitly. Health refresh and appearance cannot change the selected command target.
+F10 in the fleet console shows every node's cached host CPU, free RAM, RX/TX throughput, telemetry age, container start/restart counters and Docker OOM flags. One shared read covers the fleet every 15 seconds. It does not read native worker crash logs or report a blue-flame workaround as installed. The event list covers container changes observed while the console is open, not a historical incident archive. CPU is the host fraction, and network rates are host measurements, not a game tick-rate measurement. Stale readings are marked explicitly. Health refresh and appearance cannot change the selected command target.
 
 Customers use `oni`, with F10 for the local upstream crash-log reader; F7 power, F8 jobs and F9 updates remain available. An alert occupies a reserved line so showing and dismissing it cannot shift panels. Exit 137 without Docker OOMKilled is retained as an exit code, not labeled a proven memory kill. The separate source patch and its SHA-256 accompany the customer bundle and are applied by the provider build script before offline packaging.
 
@@ -360,7 +357,7 @@ Customers use `oni`, with F10 for the local upstream crash-log reader; F7 power,
 
 The Superintendent and connection status are docked at the bottom of the sidebar. The server list has its own bounded scroll area; filtering, sorting, adding dynamic lobbies and moving between tabs cannot push the footer off screen. Customer F7/F8/F9 controls are included in the space budget. This changes layout only, without additional polling.
 
-The fleet-console display label is `IBIGS Admin`. Direct/customer RCON defaults to `Administrator`, preserving explicit `--by` or private configuration overrides. fleet-console sends actions through the authenticated management API and node-local Source RCON; it does not send the terminal label with moderation commands. The controller retains its authenticated actor in private audit records.
+The fleet display label is `IBIGS Admin`. Direct/customer RCON defaults to `Administrator`, preserving explicit `--by` or private configuration overrides. The fleet console sends actions through the authenticated management API and node-local Source RCON; it does not send the terminal label with moderation commands. The controller retains its authenticated actor in private audit records.
 
 
 ### Superintendent findings and alert acknowledgement (0.9.0+ibigs.7)
@@ -380,7 +377,7 @@ issues moderation commands. Perfection requires an explicit native medal event;
 partial-match kills/deaths are insufficient. Windows reset on disconnects, feed
 gaps and phase changes. Replayed or stale timestamped events do not count.
 
-Customer observations run while the console is open. fleet-console uses independent,
+Customer observations run while the console is open. The fleet console uses independent,
 read-only node observers and the authenticated /api/findings operator route.
 Coverage distinguishes connected occupied lobbies from unavailable observers.
 The observers keep only bounded findings, not player addresses or fingerprints.

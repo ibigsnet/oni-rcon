@@ -8,8 +8,10 @@ oni-rcon's rules sandbox for the IBIGS fleet. The engine is `src/oni_rcon/rules.
 |---|---|---|
 | `agent/fleet_rules.py` | each node, `reclaimer_control/` | `configure` / `status` (RPC) and the `reclaimer-rules` worker |
 | `deploy-node.py` | run inside each node's agent | adds the files, two RPC actions in `agent.py` and the worker container, with the switch OFF; rolls back if unhealthy |
-| `admin/fleet_rules_admin.py`, `admin/operator_console.patch` | fleet-console `reclaimer-admin` | `GET/POST /api/rules`: saves, then pushes to every node with the journaled `configure_rules` |
-| `deploy-nodes.sh`, `deploy-admin.sh` (+ `rollback-*.sh`) | run from the workstation | steps 1 and 2; step 3 is the fleet-console console image with F12 |
+| `admin/fleet_rules_admin.py`, `admin/operator_console.patch` | fleet admin console (`reclaimer-admin`) | `GET/POST /api/rules`: saves, then pushes to every node with the journaled `configure_rules` |
 
 The tests run against copies of the live `reclaimer_control` package (not in this repo):
 `test_fleet_rules.py` (worker, end to end), `test_agent_rpc.py` (the patched RPC) and `test_admin_rules.py`.
+
+The scripts that roll these files out (and back) depend on IBIGS's own hosts, so they live in IBIGS's private tooling,
+not here. `deploy-node.py` is the part that runs inside a node's agent.

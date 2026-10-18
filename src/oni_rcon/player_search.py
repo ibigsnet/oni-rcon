@@ -130,7 +130,7 @@ class PlayerSearch(Dialog):
     def compose(self):
         with Vertical(classes='dialog'):
             yield Static(Text('FILTER PLAYERS · ALL NODES'), classes='dialog-title')
-            yield Input(placeholder='Name + tag, e.g. Player Z74 · tag:Z74 · node:node-b · quotes for phrases', id='player-search', max_length=128)
+            yield Input(placeholder='Name + tag, e.g. Player Z74 · tag:Z74 · node:node-a · quotes for phrases', id='player-search', max_length=128)
             yield Static(Text('Reading player locations…'), id='player-coverage')
             yield DataTable(id='player-results', cursor_type='row', zebra_stripes=True)
             yield Static(Text('All terms match one player. Names tolerate small typos (4+ characters); approximate matches follow exact matches. Filters: name:, tag:, clan:, team:, id:, server:, node:, port:. Tags/IDs are never fuzzy. @Z74 is an exact tag. Enter opens the server.'), id='player-search-note')

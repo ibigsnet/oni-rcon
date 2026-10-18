@@ -4,11 +4,11 @@ Reviewed upstream v0.9.0 and main through `10fe552c81e48e2a4c41d377a07e566ef0edc
 
 The maintained health command accepts explicit arguments, bounds output to 2 MiB, has a timeout, cleans up helper process groups, and keeps strict SSH host verification. Customer helpers read local log/container/host data. F10 avoids the existing customer F7–F9 shortcuts. Upstream binary self-updating remains disabled; customer publication requires the existing signed IBIGS channel.
 
-fleet-console reads one bounded shared snapshot from the existing private fleet-console controller endpoint `192.0.2.10:9188` every 15 seconds, with redirects and environment proxies disabled and no authorization header. Only node resource readings and container metadata survive projection. It adds no game polling, socket mount, SSH key, raw log access or runtime privileges. Unknown/stale metrics remain unknown/stale. Worker crash-log and workaround-service coverage is explicitly unavailable in fleet mode. OOM flag transitions and observed container generations are events, not proof of player disconnections.
+The fleet console reads one bounded shared snapshot from the private controller endpoint (`ONI_RCON_FLEET_SNAPSHOT`, set by the fleet launcher) every 15 seconds, with redirects and environment proxies disabled and no authorization header. Only node resource readings and container metadata survive projection. It adds no game polling, socket mount, SSH key, raw log access or runtime privileges. Unknown/stale metrics remain unknown/stale. Worker crash-log and workaround-service coverage is explicitly unavailable in fleet mode. OOM flag transitions and observed container generations are events, not proof of player disconnections.
 
 Corrected an upstream diagnostic ambiguity: exit 137 alone does not prove an OOM; require Docker's OOMKilled flag. Reserved the health alert line so appearing/dismissing alerts do not shift terminal panels. Halo startup options now work in the managed fleet launcher; persistent boot preferences contain no credentials. Existing bright colors, reduced motion, bounded logs, selected-only native detail polling and safe command targets are retained.
 
-No runtime dependency declarations, pins or base-image digest changed in this pass. Source tests and live read-only canary evidence are recorded in `/home/user/outputs/reclaimer-oni-090-20261010`. No live game action is used to test terminal controls.
+No runtime dependency declarations, pins or base-image digest changed in this pass. Source tests and live read-only canary evidence are kept in IBIGS's internal records. No live game action is used to test terminal controls.
 
 # Source review — 2026-10-10, upstream 0.8.1
 
@@ -40,7 +40,7 @@ IBIGS integration decisions:
   station. It neither persists raw logs nor displays source addresses. It is a last observed join-time sample,
   not live latency, loss telemetry or a moderation signal. No matching record displays unknown (`—`).
 - The new subprocess path is only for an operator-configured direct or SSH station. URL connections, including
-  `fleet://`, never start it. fleet-console gets no Docker socket, logs, SSH credentials or extra privileges, and cached
+  `fleet://`, never start it. The fleet console gets no Docker socket, logs, SSH credentials or extra privileges, and cached
   RCON response latency is never presented as player ping. Existing customer automatic discovery does not enable
   log readers; manual configuration and existing read permission are required.
 - Adapted upstream's visible-card optimization to IBIGS sorted/filtered stable station identities. Added proper
@@ -56,7 +56,7 @@ helper descendants, log-source exit, dynamic discovery, stable filtered viewport
 80×32. All 24 focused checks passed with Python 3.12 on 2026-10-09. No production broadcasts, moderation, game loads, stops or restarts are source tests. Final combined-suite
 and image canary results are recorded separately during release promotion.
 
-The customer-only F7 panel uses an argument array to the existing local `oni` wrapper. It requires explicit occupied-lobby confirmation before passing `--force`; an earlier empty snapshot cannot bypass the helper’s final occupancy refusal. Narrow-terminal layout and this join-during-confirmation path have separate offline regression coverage. It does not grant the fleet-console fleet adapter Docker or shell access.
+The customer-only F7 panel uses an argument array to the existing local `oni` wrapper. It requires explicit occupied-lobby confirmation before passing `--force`; an earlier empty snapshot cannot bypass the helper’s final occupancy refusal. Narrow-terminal layout and this join-during-confirmation path have separate offline regression coverage. It does not grant the fleet adapter Docker or shell access.
 
 ## Historical source review — upstream 0.6.0
 
@@ -70,8 +70,8 @@ IBIGS integration decisions and checks:
 - Retained owner-only atomic credential files, shell-string credential command rejection, strict SSH host verification, bounded RCON transport, key redaction, and terminal control-character cleaning. Forge presentation now additionally strips bidirectional overrides from author/title/description/release-note fields.
 - Retained pinned manifest identity, size and SHA-256 checks, approved Forge/CDN origins, no credential forwarding on redirects, content-root containment, and content-addressed installation paths. Withdrawn or draft manifests are refused. Known listing/release withdrawals cannot be bypassed with a stale catalog or the install hotkey.
 - Preserved live-schema aliases (`owner_username`, `last_7d`, asset fields) and sequence ordering. Upstream's single withdrawn-version record was extended compatibly so separate customer lobbies on several withdrawn releases remain correctly flagged. A warning never removes files, loads content, or restarts a game.
-- fleet-console continues to read only `/api/forge` through the private controller, without a Forge key or direct downloads. Curated favourites are read-only, locally time-filtered, and explicitly unavailable when the cache lacks that feed. Withdrawn entries remain retrievable for details but do not appear as active catalog recommendations. Vote sorting does not use the deprecated star rating.
-- Fleet search, tags, player lookup, target identity, F6 guarded lifecycle controls, F9 catalog, and customer F6 remain intact. Cached fleet counts do not imply native-event or round-recording coverage. The Superintendent explicitly says that the native event feed is not connected on fleet-console.
+- The fleet console continues to read only `/api/forge` through the private controller, without a Forge key or direct downloads. Curated favourites are read-only, locally time-filtered, and explicitly unavailable when the cache lacks that feed. Withdrawn entries remain retrievable for details but do not appear as active catalog recommendations. Vote sorting does not use the deprecated star rating.
+- Fleet search, tags, player lookup, target identity, F6 guarded lifecycle controls, F9 catalog, and customer F6 remain intact. Cached fleet counts do not imply native-event or round-recording coverage. The Superintendent explicitly says that the native event feed is not connected in the fleet console.
 - Production mutations were not used for source tests. Tests use temporary files, offline Forge/RCON fixtures and a mock controller. Deployment still requires the normal unprivileged read-only image canary and launcher promotion.
 
 ## Historical baseline review — 2026-10-08
@@ -96,4 +96,4 @@ The runtime lock contains Textual 8.2.8, websockets 17.2, Rich 15.0.0 and their 
 
 Live validation used reads only. Native chat/kill streaming remains pending in fleet mode; the current adapter should not be represented as a complete replacement for the upstream event stream.
 
-The 0.9.0+ibigs.4 sidebar change adds no network destinations, dependencies or privileges. It includes the concurrently reviewed client public-identity default from ibigs.3; fleet-console uses a neutral display label while its authenticated controller identity remains available in private audit records. Native event coverage is unchanged.
+The 0.9.0+ibigs.4 sidebar change adds no network destinations, dependencies or privileges. It includes the concurrently reviewed client public-identity default from ibigs.3; the fleet console uses a neutral display label while its authenticated controller identity remains available in private audit records. Native event coverage is unchanged.

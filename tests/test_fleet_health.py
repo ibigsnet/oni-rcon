@@ -9,7 +9,8 @@ import pytest
 from textual.widgets import TabbedContent
 
 from oni_rcon import fleet as cli
-from oni_rcon.fleet_health import MAX_BYTES, SNAPSHOT, project, read_snapshot
+from oni_rcon import fleet_health
+from oni_rcon.fleet_health import MAX_BYTES, project, read_snapshot
 from oni_rcon.health import HealthError
 from oni_rcon.prefs import Prefs
 from test_terminal_performance import FixtureFleet
@@ -35,16 +36,23 @@ def test_projection_keeps_duplicate_ports_separate_and_unknown_or_stale_readings
     assert not project(data, now=999)['nodes']['node-b']['fresh']
 
 
-def test_fixed_health_destination_has_no_console_token_and_bounds_the_read():
+def test_fixed_health_destination_has_no_console_token_and_bounds_the_read(monkeypatch):
+    monkeypatch.setattr(fleet_health, 'SNAPSHOT', 'http://controller.test:9188/snapshot')
     opener = Mock()
     opener.open.return_value = io.BytesIO(json.dumps(snapshot(time.time())).encode())
     assert read_snapshot(opener)['nodes']
     request = opener.open.call_args.args[0]
-    assert request.full_url == SNAPSHOT
+    assert request.full_url == 'http://controller.test:9188/snapshot'
     assert request.get_header('Authorization') is None
     opener.open.return_value = io.BytesIO(b' ' * (MAX_BYTES + 1))
     with pytest.raises(HealthError, match='8 MiB'):
         read_snapshot(opener)
+
+
+def test_unconfigured_health_destination_is_reported_not_guessed(monkeypatch):
+    monkeypatch.setattr(fleet_health, 'SNAPSHOT', '')
+    with pytest.raises(HealthError, match='not configured'):
+        read_snapshot(Mock())
 
 
 @pytest.mark.parametrize('size', [(80, 32), (160, 48)])

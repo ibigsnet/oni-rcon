@@ -11,7 +11,7 @@
    - 128 MiB memory, 0.25 CPU, read-only root, no capabilities
 4. It must publish a fresh /state/rules/health.json within 30 s; otherwise everything above is undone.
 
-With the switch off the worker opens no game connection. The fleet-console admin console turns it on with
+With the switch off the worker opens no game connection. The fleet admin console turns it on with
 configure_rules. The FILES dict is filled in by deploy-nodes.sh.
 """
 import ast
@@ -29,7 +29,7 @@ RPC = '''    if request.get('action') == 'rules_status':
         from .fleet_rules import status
         return status(STATE)
     if request.get('action') == 'configure_rules':
-        # Fleet rules (2026-10-14): the fleet-console admin console's rules document, validated and stored; journaled.
+        # Fleet rules (2026-10-14): the fleet admin console's rules document, validated and stored; journaled.
         from .fleet_rules import configure
         with (STATE/'rules.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)

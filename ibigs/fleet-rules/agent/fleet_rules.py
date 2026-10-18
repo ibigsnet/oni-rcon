@@ -1,7 +1,7 @@
 """Fleet rules: oni-rcon's rules sandbox (WHEN / IF / THEN) for this node's lobbies (2026-10-14).
 
 The engine is oni-rcon's own, copied unchanged into oni_rules/ (rules.py, rules_run.py, schedule.py, safety.py, from
-ibigsnet/oni-rcon). The fleet-console admin console pushes the fleet's rules here with the `configure_rules` RPC, through the
+ibigsnet/oni-rcon). The fleet admin console pushes the fleet's rules here with the `configure_rules` RPC, through the
 forced-SSH transport and the journal like every other change. They're kept in /state/rules/ with an on/off switch,
 and the switch is OFF until someone turns it on.
 

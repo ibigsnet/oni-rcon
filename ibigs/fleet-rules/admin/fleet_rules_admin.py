@@ -1,4 +1,4 @@
-"""/api/rules for the fleet-console admin console (2026-10-14): the fleet's rules, roles and Discord webhooks.
+"""/api/rules for the fleet admin console (2026-10-14): the fleet's rules, roles and Discord webhooks.
 
 GET  /api/rules  -> {enabled, rules, roles, webhooks: {name: masked}, nodes: {node: last push}, history: [...]}
 POST /api/rules  -> {enabled?, rules?, roles?, webhooks?: {name: url | null (remove) | "keep"}}
