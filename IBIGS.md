@@ -1,5 +1,30 @@
 # IBIGS Reclaimer terminal
 
+## Host key sign-in, CONSOLE FULL (0.9.0+ibigs.28)
+
+A Reclaimer server takes 4 RCON tools plus one spot kept for its own machine. On a busy server the 4 fill up
+(bots, automation, a second console) and oni was turned away with what looked like a wrong password.
+
+- **Host key:** the server writes `rcon-host.key` into its data folder at each start. When oni runs beside the
+  server (customer VPS), the `oni` wrapper tells it where that folder is (`host_key_dir`) and oni signs in with the
+  newest key, taking the machine's own spot. A stale or missing key just means a normal sign-in.
+- **CONSOLE FULL:** a full server now shows "CONSOLE FULL: the server already has 4 tools connected" and oni retries
+  every 15 seconds or more until a spot frees up.
+
+## Halo 3 file check and the IBIGS hold list (0.9.0+ibigs.27)
+
+Every ReclaimerForge download, Steam Workshop item and file in the Upload folder is checked before it is installed:
+only Halo 3 maps, game types, map variants, playlists and their known companion files pass (`h3check`). A Forge
+release that fails is reported to IBIGS, which downloads it again and runs the same check; if it fails there too,
+the release goes on the public hold list that every console reads before installing, and IBIGS operations are
+alerted. Held releases can't be installed until they are reviewed and released.
+
+## Fuzzy search, Check & fix (0.9.0+ibigs.26)
+
+- Every search box tolerates typos and swapped letters; the Forge catalog sweep finds near matches too.
+- **F9 → Check & fix** runs `oni doctor`: settings, permissions, the Upload sorter, the Forge key and the tenant's
+  expired-password trap, with fixes where it can make them.
+
 ## Big Workshop mods install again (0.9.0+ibigs.25)
 
 `oni workshop add` of a large item (a customer VPS hit it with a 9.6 GB mod) died mid-install: the wrapper's `priv()`

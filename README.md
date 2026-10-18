@@ -1,12 +1,25 @@
-## IBIGS 0.9.0+ibigs.10 (13 October 2026)
+## IBIGS fork: current release 0.9.0+ibigs.28 (17 October 2026)
 
-Customer consoles get the fleet console's full boot sequence on every start; Enter, any key or a click skips it.
+This is IBIGS's public fork of [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 (GPL-3.0), the console
+behind the IBIGS fleet and every IBIGS customer server. `main` is the maintained source. Customer servers don't
+pull from GitHub: they get signed releases through IBIGS's update channel (**F9** → update now, or the nightly run).
 
-## IBIGS 0.9.0+ibigs.9 (11 October 2026)
+### Latest releases
 
-This private fork incorporates upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 and
-the IBIGS customer and fleet controls. `main` and `ibigs/fleet` carry the maintained source;
-customer updates use the separately signed private channel.
+- **0.9.0+ibigs.28** (17 Oct): when oni runs on the same machine as the server, it signs in with the server's host
+  key and uses the spot the server keeps for its own machine, so it is never turned away when 4 tools are already
+  connected. A full console now reads **CONSOLE FULL** and oni keeps retrying, instead of looking like a wrong password.
+- **0.9.0+ibigs.27** (17 Oct): every ReclaimerForge download, Workshop item and upload is checked to be Halo 3
+  content before it is installed (`h3check`); a release that fails goes on the IBIGS hold list and can't be installed
+  anywhere until it is reviewed.
+- **0.9.0+ibigs.26** (16 Oct): fuzzy search in every search box ("gluch" finds Gulch); **F9 → Check & fix**
+  (`oni doctor`) finds and repairs common setup problems.
+- **0.9.0+ibigs.25** (16 Oct): big Workshop mods install again (no 30-second cut-off).
+- **0.9.0+ibigs.24** (15 Oct): one-click Forge deploy, live status words, one boot animation of your choice.
+
+Full release notes, newest first: [IBIGS.md](IBIGS.md).
+
+### What the IBIGS fork adds
 
 **END ROUND / END MATCH** are available directly above the player roster, with more controls under **F3**.
 Confirmation names the target server, map, mode and player count. End match keeps the server process running.
