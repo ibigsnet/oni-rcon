@@ -1,4 +1,4 @@
-"""oni-rcon [targets...] [-c CONFIG] [--ssh DEST] [--by NAME] [--demo] [--setup]"""
+"""oni-rcon [targets...] [-c CONFIG] [--ssh DEST] [--by NAME] [--demo] [--setup] [--chat]"""
 from __future__ import annotations
 
 import argparse
@@ -31,6 +31,8 @@ def main() -> None:
     ap.add_argument("--by", help="public administrator name shown to players (default: config `by`, then Administrator)")
     ap.add_argument("--demo", action="store_true", help="run against three simulated servers, no setup needed")
     ap.add_argument("--setup", action="store_true", help="add servers with the setup screen")
+    ap.add_argument("--chat", action="store_true",
+                    help="chat and server events from every server in a window of their own (keep it beside the console)")
     ap.add_argument("--intro", choices=["full", "quick", "off"],
                     help="the boot animation this time: full (the long Halo archive), quick (the short splash), or off "
                          "(default: full the first time, quick after; Ctrl+P changes that)")
@@ -87,6 +89,10 @@ def main() -> None:
         else:
             forge, health = forge_setup(path), health_setup(path)
 
+        if a.chat:
+            from .chat import ChatApp
+            ChatApp(servers, by=a.by or cfg_by or login()).run()
+            return
         from .app import OniApp
         if os.environ.get('IBIGS_ONI_TENANT') == '1':
             from .tenant import TenantApp
