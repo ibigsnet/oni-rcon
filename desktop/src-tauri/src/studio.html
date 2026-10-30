@@ -1,0 +1,3429 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Automation Studio</title>
+<style>
+:root{--ink:#0d0f12;--surface:#12151a;--panel:#171b21;--panel-2:#1d222a;--line:#2a313b;--amber:#ffb000;--cyan:#38d6e8;--red:#ff5d5d;--green:#4ade80;--warn:#f5b942;--white:#e6ebf0;--grey:#9aa4b0;--dim:#66707c;
+  --mono:"JetBrains Mono","Cascadia Mono",Consolas,ui-monospace,monospace;--side:230px;--bottom:230px;--gw:48px}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{display:flex;flex-direction:column;background:var(--ink);color:var(--white);font:12px/1.5 var(--mono);overflow:hidden;user-select:none}
+button{font:inherit;color:inherit;background:none;border:1px solid transparent;border-radius:3px;padding:2px 8px;cursor:pointer;letter-spacing:.04em}
+button:hover{background:var(--panel-2);border-color:var(--line)}
+button:disabled{opacity:.4;cursor:default;background:none;border-color:transparent}
+button.pri{color:var(--ink);background:var(--amber);border-color:var(--amber);font-weight:700}
+button.danger{color:var(--red)}
+input,select,textarea{font:inherit;color:var(--white);background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:3px 6px;outline:0}
+input:focus,select:focus,textarea:focus{border-color:var(--amber)}
+select{padding:2px 4px}
+.grow{flex:1}
+.dim{color:var(--dim)}.grey{color:var(--grey)}.ok{color:var(--green)}.bad{color:var(--red)}.warn{color:var(--warn)}.amber{color:var(--amber)}.cyan{color:var(--cyan)}
+#bar{display:flex;align-items:center;gap:4px;height:34px;padding:0 8px;background:var(--panel);border-bottom:1px solid var(--line);flex:none;white-space:nowrap;overflow:hidden}
+#bar .sep{width:1px;height:18px;background:var(--line);margin:0 4px;flex:none}
+#bar .title{color:var(--amber);font-weight:700;letter-spacing:.12em;margin-right:8px}
+#run{color:var(--green)}#test{color:var(--cyan)}#stop{color:var(--red)}
+#main{flex:1;display:flex;min-height:0}
+#side{width:var(--side);min-width:150px;max-width:50vw;display:flex;flex-direction:column;background:var(--panel);flex:none;min-height:0}
+.hd{display:flex;align-items:center;gap:6px;padding:6px 10px 4px;color:var(--grey);font-size:11px;letter-spacing:.12em;flex:none}
+.hd button{padding:0 6px}
+#files{overflow:auto;flex:1 1 55%;min-height:60px}
+.file{display:flex;align-items:center;gap:6px;padding:2px 8px 2px 10px;cursor:pointer;white-space:nowrap}
+.file:hover{background:var(--panel-2)}
+.file.on{background:color-mix(in srgb,var(--amber) 12%,transparent)}
+.file .nm{overflow:hidden;text-overflow:ellipsis;flex:1}
+.light{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
+.light.running{background:var(--green);box-shadow:0 0 6px var(--green)}
+.light.starting{background:var(--amber)}
+.light.failed{background:var(--red);box-shadow:0 0 6px var(--red)}
+.light.finished{background:var(--grey)}
+.dot{color:var(--amber)}
+.tb{font-size:10px;color:var(--ink);background:var(--cyan);border-radius:2px;padding:0 3px;line-height:14px}
+.acts{display:none;gap:1px}.file:hover .acts{display:flex}
+.acts button{padding:0 3px;border:0;color:var(--grey)}
+.acts button:hover{color:var(--white)}
+.sw{width:30px;height:14px;border-radius:7px;background:var(--line);position:relative;flex:none;border:0;padding:0}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:10px;height:10px;border-radius:50%;background:var(--grey);transition:left .12s}
+.sw:hover{background:var(--dim)}
+.sw.on{background:color-mix(in srgb,var(--green) 55%,var(--line))}
+.sw.on::after{left:18px;background:var(--white)}
+#outline{overflow:auto;flex:1 1 45%;min-height:40px}
+.sym{padding:1px 10px 1px 16px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sym:hover{background:var(--panel-2)}
+.sym i{font-style:normal;color:var(--cyan);margin-right:6px}
+.sym .dim{margin-left:6px}
+#dir{padding:4px 10px;font-size:10px;color:var(--dim);border-top:1px solid var(--line);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none;user-select:text}
+.split{flex:none;background:var(--line);touch-action:none}
+#sp-side{width:3px;cursor:col-resize}
+#sp-bottom{height:3px;cursor:row-resize}
+.split:hover,.split.drag{background:var(--amber)}
+#work{flex:1;display:flex;flex-direction:column;min-width:0}
+#center{flex:1;display:flex;flex-direction:column;min-height:0}
+#tabs{display:flex;background:var(--panel);overflow-x:auto;overflow-y:hidden;flex:none;height:30px;scrollbar-width:none}
+.tab{display:flex;align-items:center;gap:4px;padding:0 4px 0 12px;border-right:1px solid var(--line);color:var(--grey);cursor:pointer;white-space:nowrap;border-top:2px solid transparent;flex:none}
+.tab.on{background:var(--ink);color:var(--white);border-top-color:var(--amber)}
+.tab .x{padding:0 4px;border:0;visibility:hidden;color:var(--grey)}
+.tab:hover .x,.tab.on .x{visibility:visible}
+.tab .light{width:6px;height:6px}
+#banner{display:flex;gap:8px;align-items:center;padding:4px 10px;background:color-mix(in srgb,var(--warn) 16%,var(--panel));border-bottom:1px solid var(--line);flex:none}
+#ed{position:relative;flex:1;display:flex;min-height:0;background:var(--ink)}
+#gut{width:var(--gw);flex:none;position:relative;overflow:hidden;border-right:1px solid var(--line)}
+#gutin{position:absolute;left:0;right:0;top:0}
+.ln{position:absolute;right:10px;left:14px;height:20px;line-height:20px;color:var(--dim);font-size:12px;text-align:right}
+.ln.cur{color:var(--white)}
+.mk{position:absolute;left:5px;width:7px;height:7px;border-radius:50%;margin-top:7px}
+.mk.e{background:var(--red)}.mk.w{background:var(--warn)}
+#sc{position:relative;flex:1;overflow:auto;min-width:0}
+#sizer{position:relative}
+.code{font:13px/20px var(--mono);font-variant-ligatures:none;font-feature-settings:"liga" 0,"calt" 0;tab-size:2;white-space:pre;letter-spacing:0}
+#hl,#deco,#sq{position:absolute;left:0;top:0;right:0;bottom:0;pointer-events:none}
+#hl>div{position:absolute;left:8px;height:20px}
+#ta{position:absolute;left:0;top:0;margin:0;border:0;border-radius:0;padding:4px 8px;resize:none;overflow:hidden;background:transparent;color:transparent;caret-color:var(--amber);outline:0;z-index:2;user-select:text}
+#ta::selection{background:color-mix(in srgb,var(--cyan) 28%,transparent);color:transparent}
+.cl{position:absolute;left:0;right:0;height:20px;background:color-mix(in srgb,var(--white) 4%,transparent)}
+.fm{position:absolute;height:20px;background:color-mix(in srgb,var(--amber) 22%,transparent);border-radius:2px}
+.fm.on{background:color-mix(in srgb,var(--amber) 42%,transparent);outline:1px solid var(--amber)}
+.bm{position:absolute;height:20px;outline:1px solid var(--grey);border-radius:2px}
+.sq{position:absolute;color:transparent;text-decoration:underline wavy var(--red);text-decoration-skip-ink:none;text-underline-offset:3px}
+.sq.w{text-decoration-color:var(--warn)}
+.kw{color:var(--amber)}.str{color:var(--green)}.tpl{color:color-mix(in srgb,var(--green) 70%,var(--cyan))}.num,.con{color:var(--warn)}
+.com{color:var(--dim);font-style:italic}.re{color:var(--red)}.api{color:var(--cyan);font-weight:600}.fn{color:color-mix(in srgb,var(--cyan) 50%,var(--white))}
+.prop{color:color-mix(in srgb,var(--white) 78%,var(--grey))}.op,.br{color:var(--grey)}.pun{color:var(--dim)}.id{color:var(--white)}
+#find{position:absolute;top:6px;right:18px;z-index:5;display:flex;flex-direction:column;gap:4px;padding:6px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px #0008}
+#find .fr{display:flex;gap:4px;align-items:center}
+#find input{width:220px}
+#find .tg.on{color:var(--amber);border-color:var(--amber)}
+#fcount{min-width:76px;color:var(--grey);font-size:11px;text-align:center}
+#find.bad #fq{border-color:var(--red)}
+#ac{position:absolute;z-index:6;width:460px;max-height:250px;display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 22px #000a;overflow:hidden}
+#aclist{overflow:auto;flex:1}
+.ai{display:flex;gap:8px;align-items:center;padding:1px 8px;white-space:nowrap;cursor:pointer}
+.ai.on{background:color-mix(in srgb,var(--amber) 22%,transparent)}
+.ai .ic{width:16px;text-align:center;font-size:11px;flex:none;color:var(--cyan)}
+.ai .lb{overflow:hidden;text-overflow:ellipsis}
+.ai .lb b{color:var(--amber)}
+.ai .dt{margin-left:auto;color:var(--dim);font-size:11px;overflow:hidden;text-overflow:ellipsis;padding-left:12px}
+#acdoc{border-top:1px solid var(--line);padding:4px 8px;color:var(--grey);font-size:11px;white-space:normal;max-height:84px;overflow:auto}
+#acdoc:empty{display:none}
+#sig,#tip{position:absolute;z-index:6;max-width:540px;padding:4px 8px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px #0009;white-space:pre-wrap;font-size:12px;pointer-events:none}
+#sig b{color:var(--amber)}#sig .d{display:block;color:var(--grey);font-size:11px;margin-top:2px}
+#tip .e{color:var(--red)}#tip .w{color:var(--warn)}#tip code,#sig code{color:var(--cyan)}#tip hr{border:0;border-top:1px solid var(--line);margin:4px 0}
+#welcome{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;color:var(--grey);background:var(--ink);z-index:4;padding:20px;text-align:center}
+#welcome h1{margin:0;color:var(--amber);letter-spacing:.24em;font-size:18px}
+#welcome .keys{display:grid;grid-template-columns:auto auto;gap:3px 16px;font-size:11px;text-align:left}
+kbd{font:inherit;color:var(--white);border:1px solid var(--line);border-bottom-width:2px;border-radius:3px;padding:0 4px;background:var(--panel);white-space:nowrap}
+#measure{position:absolute;visibility:hidden;left:-99999px;top:0}
+#bottom{height:var(--bottom);min-height:90px;max-height:80vh;display:flex;flex-direction:column;background:var(--panel);flex:none}
+#btabs{display:flex;align-items:center;gap:2px;padding:0 6px;border-bottom:1px solid var(--line);flex:none;height:28px;overflow:hidden}
+#btabs>button{border:0;border-bottom:2px solid transparent;border-radius:0;padding:4px 10px;color:var(--grey);font-size:11px;letter-spacing:.1em;white-space:nowrap}
+#btabs>button.on{color:var(--white);border-bottom-color:var(--amber)}
+.badge{display:inline-block;min-width:16px;padding:0 4px;border-radius:8px;background:var(--red);color:var(--ink);font-size:10px;line-height:15px;text-align:center;margin-left:6px;letter-spacing:0}
+.badge:empty{display:none}
+.badge.w{background:var(--warn)}
+#panels{flex:1;min-height:0;position:relative}
+#panels>section{position:absolute;inset:0;display:flex;flex-direction:column}
+.tools{display:flex;align-items:center;gap:6px;padding:4px 8px;flex:none;border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden}
+.tools input[type=search],.tools input.q{width:180px}
+.list{flex:1;overflow:auto;user-select:text;padding:2px 0}
+.row{display:flex;gap:8px;padding:0 10px;white-space:pre-wrap;word-break:break-word}
+.row:hover{background:var(--panel-2)}
+.row .t{color:var(--dim);flex:none}
+.row .s{color:var(--cyan);flex:none;cursor:pointer}
+.row .m{flex:1;min-width:0}
+.row .loc{color:var(--dim);text-decoration:underline;cursor:pointer;flex:none}
+.row .loc:hover{color:var(--white)}
+.row.error .m{color:var(--red)}.row.warn .m{color:var(--warn)}.row.rcon .m{color:var(--grey)}.row.sys .m{color:var(--dim)}.row.info .m{color:var(--white)}
+.row .tag{font-size:10px;color:var(--ink);background:var(--cyan);border-radius:2px;padding:0 3px;flex:none;align-self:center;line-height:14px}
+.row .k{color:var(--amber);flex:none;min-width:96px}
+.row .srv{color:var(--cyan);flex:none}
+.row button{padding:0 6px;font-size:10px;color:var(--grey)}
+.row .btns{display:none;gap:2px;flex:none}.row:hover .btns{display:flex}
+pre.json{margin:2px 10px 6px 30px;color:var(--grey);font:inherit;white-space:pre-wrap;user-select:text}
+.prob{cursor:pointer}
+.prob .ic{flex:none}
+.empty{padding:10px 14px;color:var(--dim)}
+#p-simulate textarea,#p-store textarea{flex:1;margin:6px 8px 8px;resize:none;font:12px/1.5 var(--mono);user-select:text}
+#rlog .row .m{color:var(--white)}
+#rin{margin:4px 8px 8px;flex:none}
+.doc{padding:4px 14px 14px;user-select:text}
+.doc h3{color:var(--amber);font-size:11px;letter-spacing:.14em;margin:12px 0 4px;font-weight:700}
+.doc .it{margin:2px 0 6px}.doc .it>div{color:var(--grey);padding-left:16px}
+.doc code{color:var(--cyan)}
+.doc table{border-collapse:collapse}.doc td{padding:1px 12px 1px 0;vertical-align:top;color:var(--grey)}.doc td:first-child{color:var(--white);white-space:nowrap}
+#status{display:flex;align-items:center;gap:14px;height:22px;padding:0 10px;background:var(--panel-2);border-top:1px solid var(--line);color:var(--grey);font-size:11px;flex:none;white-space:nowrap;overflow:hidden}
+#status .it{cursor:pointer}
+#overlay{position:fixed;inset:0;background:#0009;display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;z-index:20}
+.modal{width:min(580px,92vw);background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 16px 40px #000c;display:flex;flex-direction:column;max-height:80vh}
+.modal h2{margin:0;padding:10px 14px;font-size:12px;letter-spacing:.14em;color:var(--amber);border-bottom:1px solid var(--line)}
+.modal .body{padding:12px 14px;overflow:auto;display:flex;flex-direction:column;gap:8px;color:var(--grey);white-space:pre-wrap}
+.modal .body input{width:100%}
+.modal .err{color:var(--red);min-height:1.5em}
+.modal .btns{display:flex;justify-content:flex-end;gap:6px;padding:10px 14px;border-top:1px solid var(--line)}
+.tpls{display:flex;flex-direction:column;gap:2px;max-height:300px;overflow:auto;white-space:normal}
+.tpli{padding:4px 8px;border-radius:3px;cursor:pointer;border:1px solid transparent}
+.tpli:hover{background:var(--panel-2)}
+.tpli.on{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 10%,transparent)}
+.tpli b{color:var(--white);font-weight:600}.tpli span{display:block;color:var(--dim);font-size:11px}
+#qp{position:fixed;top:40px;left:50%;transform:translateX(-50%);width:min(640px,92vw);z-index:21;background:var(--panel);border:1px solid var(--line);border-radius:6px;box-shadow:0 16px 40px #000c;display:flex;flex-direction:column;max-height:64vh}
+#qp input{margin:8px;border-color:var(--amber)}
+#qplist{overflow:auto;padding-bottom:6px}
+.qi{display:flex;gap:10px;padding:3px 12px;cursor:pointer;white-space:nowrap}
+.qi.on{background:color-mix(in srgb,var(--amber) 22%,transparent)}
+.qi .dt{margin-left:auto;color:var(--dim);overflow:hidden;text-overflow:ellipsis}
+.qi b{color:var(--amber)}
+#toast{position:fixed;right:14px;bottom:30px;z-index:30;max-width:440px;padding:8px 12px;background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:4px;box-shadow:0 8px 22px #000a;white-space:pre-wrap}
+#toast.bad{border-left-color:var(--red)}
+::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px;border:2px solid transparent;background-clip:padding-box}::-webkit-scrollbar-corner{background:transparent}
+</style>
+</head>
+<body>
+<div id="bar">
+  <span class="title">&#9670; STUDIO</span>
+  <button id="run" title="Save, turn on and (re)start this script (Ctrl+Enter)">&#9654; RUN</button>
+  <button id="test" title="Run the editor's text as a dry run: commands that change anything are only logged (Ctrl+Shift+Enter)">&#9879; TEST</button>
+  <button id="stop" title="Stop this script's test and turn it off">&#9632; STOP</button>
+  <button id="restart" title="Restart this script">&#8635; RESTART</button>
+  <span class="sep"></span>
+  <button id="save" title="Save (Ctrl+S)">SAVE</button>
+  <button id="new" title="New script (Ctrl+N)">+ NEW</button>
+  <span class="sep"></span>
+  <button id="findb" title="Find (Ctrl+F), replace (Ctrl+H)">FIND</button>
+  <button id="cmds" title="Commands (Ctrl+Shift+P)">&#8984; COMMANDS</button>
+  <span class="grow"></span>
+  <span id="runinfo" class="grey"></span>
+</div>
+<div id="main">
+  <aside id="side">
+    <div class="hd">SCRIPTS <span id="nfiles" class="dim"></span><span class="grow"></span><button id="side-new" title="New script (Ctrl+N)">+</button></div>
+    <div id="files"></div>
+    <div class="hd" style="border-top:1px solid var(--line)">OUTLINE</div>
+    <div id="outline"></div>
+    <div id="dir"></div>
+  </aside>
+  <div id="sp-side" class="split"></div>
+  <div id="work">
+    <div id="center">
+      <div id="tabs"></div>
+      <div id="banner" hidden></div>
+      <div id="ed">
+        <div id="gut"><div id="gutin"></div></div>
+        <div id="sc"><div id="sizer"><div id="deco"></div><div id="hl" class="code"></div><div id="sq" class="code"></div><textarea id="ta" class="code" wrap="off" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-label="Script editor"></textarea></div></div>
+        <div id="find" hidden>
+          <div class="fr"><input id="fq" placeholder="Find" spellcheck="false"><button id="fcase" class="tg" title="Match case">Aa</button><button id="fre" class="tg" title="Regular expression">.*</button><span id="fcount"></span><button id="fprev" title="Previous (Shift+Enter)">&#8593;</button><button id="fnext" title="Next (Enter)">&#8595;</button><button id="fx" title="Close (Escape)">&#10005;</button></div>
+          <div class="fr" id="frow"><input id="fr" placeholder="Replace" spellcheck="false"><button id="fone" title="Replace this match">Replace</button><button id="fall" title="Replace every match">All</button></div>
+        </div>
+        <div id="ac" hidden><div id="aclist"></div><div id="acdoc"></div></div>
+        <div id="sig" hidden></div>
+        <div id="tip" hidden></div>
+        <div id="welcome" hidden>
+          <h1>AUTOMATION STUDIO</h1>
+          <div>Small JavaScript automations that watch your servers and act on them.</div>
+          <div><button class="pri" id="w-new">+ NEW SCRIPT</button> <button id="w-open">OPEN&#8230;</button> <button id="w-docs">DOCS</button></div>
+          <div class="keys" id="w-keys"></div>
+        </div>
+        <span id="measure" class="code"></span>
+      </div>
+    </div>
+    <div id="sp-bottom" class="split"></div>
+    <div id="bottom">
+      <div id="btabs">
+        <button data-p="console">CONSOLE<span id="b-console" class="badge"></span></button>
+        <button data-p="problems">PROBLEMS<span id="b-problems" class="badge"></span></button>
+        <button data-p="events">EVENTS<span id="b-events" class="badge w"></span></button>
+        <button data-p="simulate">SIMULATE</button>
+        <button data-p="rcon">RCON</button>
+        <button data-p="store">STORE</button>
+        <button data-p="docs">DOCS</button>
+        <span class="grow"></span>
+        <button id="bhide" title="Hide the panel (Ctrl+J)">&#9662;</button>
+      </div>
+      <div id="panels">
+        <section id="p-console">
+          <div class="tools">
+            <select id="cf-script" title="Script"></select>
+            <select id="cf-level" title="Level"><option value="">all levels</option><option value="error">errors</option><option value="warn">warnings and errors</option><option value="rcon">RCON</option><option value="log">logs</option></select>
+            <input id="cf-text" class="q" placeholder="Filter" spellcheck="false">
+            <span class="grow"></span>
+            <span id="c-count" class="dim"></span>
+            <button id="c-clear" title="Clear the console">CLEAR</button>
+          </div>
+          <div id="clog" class="list"></div>
+        </section>
+        <section id="p-problems"><div id="plist" class="list"></div></section>
+        <section id="p-events">
+          <div class="tools">
+            <select id="ef-kind"></select>
+            <input id="ef-text" class="q" placeholder="Filter" spellcheck="false">
+            <button id="e-pause" title="Stop showing new events">PAUSE</button>
+            <span id="e-new" class="dim"></span>
+            <span class="grow"></span>
+            <button id="e-clear">CLEAR</button>
+          </div>
+          <div id="elist" class="list"></div>
+        </section>
+        <section id="p-simulate">
+          <div class="tools">
+            <select id="s-kind" title="Event kind"></select>
+            <select id="s-server" title="Server"></select>
+            <button id="s-sample" title="Put this kind's example back">EXAMPLE</button>
+            <span class="grow"></span>
+            <button id="s-test" title="Send it to the TEST run of the open script">SEND TO TEST</button>
+            <button id="s-live" class="danger" title="Send it to every running script: they act on it for real">SEND TO LIVE&#8230;</button>
+          </div>
+          <textarea id="s-json" spellcheck="false"></textarea>
+        </section>
+        <section id="p-rcon">
+          <div class="tools"><select id="r-server" title="Server"></select><span class="dim">Commands go through the same permissions as a script's. Up and Down for history.</span></div>
+          <div id="rlog" class="list"></div>
+          <input id="rin" placeholder="players" spellcheck="false">
+        </section>
+        <section id="p-store">
+          <div class="tools">
+            <select id="st-script" title="Script"></select>
+            <button id="st-reload">RELOAD</button>
+            <button id="st-save">SAVE</button>
+            <button id="st-clear" class="danger">CLEAR&#8230;</button>
+            <span id="st-info" class="dim"></span>
+          </div>
+          <textarea id="st-json" spellcheck="false"></textarea>
+        </section>
+        <section id="p-docs">
+          <div class="tools"><input id="d-q" class="q" placeholder="Search the docs" spellcheck="false"></div>
+          <div id="docs" class="list doc"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="status"></div>
+<div id="overlay" hidden></div>
+<div id="qp" hidden><input id="qpin" spellcheck="false"><div id="qplist"></div></div>
+<div id="toast" hidden></div>
+<script>
+"use strict";
+// Automation Studio: an editor for small JavaScript automations, and where they run. Each running script is a Web
+// Worker made from a blob: no network (the frame's CSP), no DOM, and nothing of Oni's but what this page answers.
+// Oni → page: {oni:"data"|"event"|"rcon-reply"|"reply"}; page → Oni: {oni:"ready"|"call"|"rcon"|"notify"|"key"|"refresh"}.
+// Never put a dotted address in this page's source: with redact on, Oni masks every one before serving it.
+
+// --- basics ------------------------------------------------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const IP = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+const S = { dir: "", redact: false, server: "", servers: [], hooks: { discord: [], telegram: [] }, booted: false };
+const mask = (s) => (S.redact ? String(s).replace(IP, (x) => x.replace(/\d/g, "•")) : String(s));
+const hms = (t) => new Date(t).toTimeString().slice(0, 8);
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const LH = 20, PADX = 8, PADY = 4, TAB = 2;
+let CW = 7.8;
+
+const KINDS = ["chat", "kill", "join", "leave", "refused", "kick", "ban", "unban", "mute", "unmute", "cheat", "pardon", "admin_added",
+  "admin_removed", "vote", "medal", "award", "lagged", "control", "admin"];
+const FIELDS = { chat: "channel name team text player_id", kill: "killer victim weapon killer_name victim_name medals", join: "name player_id address",
+  leave: "name reason", refused: "name id ip reason", kick: "name id ip by reason seconds", ban: "name id ip by reason", unban: "name id by",
+  mute: "name id by reason", unmute: "name id by", cheat: "name text", pardon: "target name by", admin_added: "name id by", admin_removed: "name id by",
+  vote: "text name action vote_type target", medal: "medal name player_id", award: "award name player_id", lagged: "name player_id",
+  control: "text action ok", admin: "text" };
+const KIND_DOC = { chat: "a chat line, the server's own included", kill: "one player killed another", join: "a player joined",
+  leave: "a player left", refused: "the server turned a player away", kick: "a player was kicked", ban: "a player was banned",
+  unban: "a ban was lifted", mute: "a player was muted", unmute: "a mute was lifted", cheat: "the anti-cheat flagged a player",
+  pardon: "a player was pardoned", admin_added: "someone was made an admin", admin_removed: "an admin was removed",
+  vote: "a vote started, passed or failed", medal: "a player earned a medal", award: "a player got an award",
+  lagged: "a player was lagging", control: "a server control action and whether it worked", admin: "an admin line from the server" };
+const FDOC = { channel: 'where it was said: "server" is the server itself', name: "the player's name", team: "their team",
+  text: "the text", player_id: "the player's id", killer: "who got the kill, as the server logged them", victim: "who died, as logged",
+  weapon: "what killed them", killer_name: "the killer's name", victim_name: "the victim's name", medals: "the medals the kill earned",
+  address: "where they connected from (blanked)", reason: "why", id: "the player's id", ip: "their address (blanked)", by: "the admin who did it",
+  seconds: "how long, in seconds", target: "who it is about", action: "what happened", vote_type: "the kind of vote", medal: "the medal",
+  award: "the award", ok: "whether it worked" };
+const EV_COMMON = [["server", "the server it came from"], ["kind", "the event kind"], ["at", "when Oni got it, ms since 1970"],
+  ["player", "who it is about: killer_name for a kill, target for a pardon, else name"]];
+const EV_HELPERS = [["reply", "reply(text)", "says text on the server it came from"], ["tell", "tell(text)", "whispers text to the player"],
+  ["kick", "kick(reason?)", "kicks the player"], ["ban", "ban(time?, reason?)", "bans the player"], ["mute", "mute(time?, reason?)", "mutes the player"],
+  ["unmute", "unmute()", "unmutes the player"]];
+const CMD_FIELDS = [["command", "the word that matched, lower-case"], ["rest", "the text after it"], ["args", "rest, split into words"]];
+const RCON = ("status players say tell kick ban banip unban bans vpn vpnallow vpnrevoke mute unmute endround endgame maps modes map mode load nextmap " +
+  "servername password maxping teamcount shuffle team vote startvote passvote cancelvote admin admins pardon reload help").split(" ");
+const READONLY = new Set("status players bans maps modes nextmap admins help".split(" "));
+const BAN_TIMES = ["", "30m", "2h", "12h", "1d", "7d", "2w", "30d"], MUTE_TIMES = ["", "10m", "1h", "12h", "1d"];
+const SERVER_ARG = new Set(["rcon", "say", "tell", "kick", "ban", "mute", "unmute", "players"]);
+const DURS = ["30s", "1m", "5m", "10m", "30m", "1h", "6h", "12h", "1d"];
+const LEVELS = ["info", "warn", "error"];
+const DOC = {
+  on: ["on(kind, filter?, handler)", 'Runs handler(ev) for each event of a kind ("chat", "kill", ...), a list of kinds, or "*" for every kind. filter is an object of fields to match (text ignores case, a list matches any of it, a RegExp tests it) or a function of ev. Returns a function that stops it.'],
+  command: ["command(name, filter?, handler)", 'Runs handler(ev) when a chat line starts with name, or one of a list, like "!rules". Case is ignored, and lines the server says itself never count. ev.command is the word, ev.rest the text after it, ev.args its words.'],
+  every: ["every(duration, fn)", 'Runs fn every duration: "30s", "10m", "2h", "1d" or milliseconds, at least 1 s. Returns an id for cancel().'],
+  after: ["after(duration, fn)", "Runs fn once, after duration. Returns an id for cancel()."],
+  cancel: ["cancel(id)", "Stops an every() or after()."],
+  sleep: ["sleep(duration)", 'A promise that resolves after duration: await sleep("5s").'],
+  log: ["log(...values)", "Writes to the console. Objects are shown in full."],
+  warn: ["warn(...values)", "Writes a warning to the console."],
+  error: ["error(...values)", "Writes an error to the console."],
+  rcon: ["rcon(server, command, ...args)", "Sends any command Oni knows to a server, through the same permissions as a plug-in. Resolves to { ok, text, data }: ok is false when it failed or was not sent."],
+  say: ["say(server, text)", 'Says text on a server, or on every online server with "*".'],
+  tell: ["tell(server, player, text)", "Whispers text to one player. player is a name, an id, or a player or event object."],
+  kick: ["kick(server, player, reason?)", "Kicks a player."],
+  ban: ["ban(server, player, time?, reason?)", 'Bans a player. time is "" (for good), "30m", "2h", "12h", "1d", "7d", "2w" or "30d".'],
+  mute: ["mute(server, player, time?, reason?)", 'Mutes a player. time is "" (until the server restarts), "10m", "1h", "12h" or "1d".'],
+  unmute: ["unmute(server, player)", "Unmutes a player."],
+  players: ["players(server)", "Resolves to the players on a server, as its players command lists them."],
+  servers: ["servers()", "The servers Oni has, as [{ name, online }]."],
+  notify: ["notify(text, level?)", 'Pops a notification up in Oni. level is "info", "warn" or "error". At most 6 a minute.'],
+  discord: ["discord(hook, text)", "Posts text to the Discord webhook with that name in F9, Automation. Resolves once it is posted."],
+  telegram: ["telegram(chat, text)", "Posts text to the Telegram chat with that name in F9, Automation. Resolves once it is posted."],
+  store: ["store", "Saved data for this script that outlives restarts: JSON values only, 256 KiB at most. A TEST run reads it but never saves."],
+  script: ["script", "script.name is the name of this script; script.dry is true during a TEST run."],
+  "store.get": ["store.get(key, fallback?)", "The value saved under key, or fallback when there is none."],
+  "store.set": ["store.set(key, value)", "Saves value under key."],
+  "store.inc": ["store.inc(key, by?)", "Adds by (1 unless given) to the number under key, and returns it."],
+  "store.del": ["store.del(key)", "Forgets key. True if it was there."],
+  "store.has": ["store.has(key)", "Whether anything is saved under key."],
+  "store.keys": ["store.keys(prefix?)", "The keys saved, or those that start with prefix."],
+  "store.all": ["store.all()", "A copy of everything saved."],
+  "store.clear": ["store.clear()", "Forgets everything."],
+};
+for (const [k, sig, d] of EV_HELPERS) DOC["ev." + k] = ["ev." + sig, d[0].toUpperCase() + d.slice(1) + "."];
+const API = Object.keys(DOC).filter((k) => !k.includes("."));
+const API_SET = new Set(API);
+const KEYS = [["Ctrl+S", "save"], ["Ctrl+Enter", "run"], ["Ctrl+Shift+Enter", "test (dry run)"], ["Ctrl+P", "open a script"],
+  ["Ctrl+Shift+P", "commands"], ["Ctrl+Shift+O", "go to a symbol"], ["Ctrl+G", "go to a line"], ["Ctrl+F / Ctrl+H", "find / replace"],
+  ["Ctrl+Space", "suggest"], ["Ctrl+Shift+Space", "signature"], ["Ctrl+/", "comment"], ["Ctrl+D", "select word, then the next match"],
+  ["Ctrl+L", "select line"], ["Alt+Up / Down", "move lines"], ["Shift+Alt+Up / Down", "copy lines"], ["Ctrl+Shift+K", "delete lines"],
+  ["Ctrl+] / Ctrl+[", "indent / outdent"], ["Ctrl+Shift+\\", "jump to bracket"], ["Ctrl+J", "show or hide the panel"],
+  ["Ctrl+`", "console"], ["Ctrl+Shift+M", "problems"], ["Ctrl+N / Ctrl+W", "new / close"], ["Ctrl+Tab", "next tab"], ["Ctrl+Z / Ctrl+Y", "undo / redo"]];
+const LIMITS = [["RCON", "120 commands a minute per script"], ["say and tell", "20 a minute per server, all scripts together"],
+  ["notify", "6 a minute per script"], ["Discord, Telegram", "one post every 2 s (Discord) or 3 s (Telegram), 20 waiting at most"],
+  ["errors", "a script with over 50 errors in a minute is stopped"], ["hangs", "a script that stops answering for 6 s is stopped"],
+  ["timers", "every() and setInterval run at most once a second"], ["log", "500 lines per 10 s per script"],
+  ["store", "256 KiB per script"], ["scripts", "200, each at most 256 KiB"]];
+
+/** Example events for SIMULATE. */
+function sample(kind) {
+  const ip = [203, 0, 113, 7].join(".");
+  return ({ chat: { channel: "all", name: "Rook", team: "red", text: "!kills", player_id: "1001" },
+    kill: { killer: "Rook", victim: "Static", weapon: "assault_rifle", killer_name: "Rook", victim_name: "Static", medals: [] },
+    join: { name: "Rook", player_id: "1001", address: "" }, leave: { name: "Rook", reason: "quit" },
+    refused: { name: "Cinder", id: "1003", ip, reason: "banned" }, kick: { name: "Static", id: "1002", ip, by: "admin", reason: "afk", seconds: 0 },
+    ban: { name: "Cinder", id: "1003", ip, by: "admin", reason: "cheating" }, unban: { name: "Cinder", id: "1003", by: "admin" },
+    mute: { name: "Static", id: "1002", by: "admin", reason: "spam" }, unmute: { name: "Static", id: "1002", by: "admin" },
+    cheat: { name: "Static", text: "speed hack" }, pardon: { target: "Static", name: "Static", by: "admin" },
+    admin_added: { name: "Rook", id: "1001", by: "owner" }, admin_removed: { name: "Rook", id: "1001", by: "owner" },
+    vote: { text: "Rook started a vote to kick Static", name: "Rook", action: "started", vote_type: "kick", target: "Static" },
+    medal: { medal: "double_kill", name: "Rook", player_id: "1001" }, award: { award: "mvp", name: "Rook", player_id: "1001" },
+    lagged: { name: "Static", player_id: "1002" }, control: { text: "map loaded", action: "map", ok: true }, admin: { text: "server restarted" } })[kind] ?? {};
+}
+
+/** A duration ("30s", "10m", "2h", "1d", "500ms", or a number of ms) in ms; NaN when it isn't one. */
+function parseDur(x) {
+  if (typeof x === "number") return x >= 0 ? x : NaN;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?\s*$/i.exec(String(x));
+  return m ? +m[1] * { ms: 1, s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[(m[2] || "ms").toLowerCase()] : NaN;
+}
+
+/** As Oni's console shows a command: an empty or spaced argument quoted. */
+const cmdLine = (c, args) => [c, ...args.map((a) => (a === "" || /\s/.test(a) ? `"${a}"` : a))].join(" ");
+const FREE_TEXT = { say: 0, tell: 1, kick: 1, servername: 0 };
+/** A typed command line, as Oni's own console reads one: words, "quoted words", and the rest of the line kept whole
+ *  where a command takes free text. */
+function parseCommand(line) {
+  const s = line.trim(), args = [];
+  let i = 0;
+  const word = () => {
+    while (s[i] === " ") i++;
+    if (i >= s.length) return null;
+    const q = s[i] === '"' || s[i] === "'" ? s[i++] : "";
+    let w = "";
+    while (i < s.length && (q ? s[i] !== q : s[i] !== " ")) w += s[i++];
+    if (q) i++;
+    return w;
+  };
+  const command = (word() || "").toLowerCase(), free = FREE_TEXT[command];
+  for (;;) {
+    if (free !== undefined && args.length === free) {
+      let rest = s.slice(i).trim();
+      if (rest.length >= 2 && (rest[0] === '"' || rest[0] === "'") && rest.endsWith(rest[0])) rest = rest.slice(1, -1);
+      if (rest) args.push(rest);
+      break;
+    }
+    const w = word();
+    if (w === null) break;
+    args.push(w);
+  }
+  return { command, args };
+}
+
+// --- talking to Oni ----------------------------------------------------------------------------------------------
+const toParent = (m) => parent.postMessage(m, "*"); // the frame's origin is opaque: "*" is the only target
+const waiting = new Map(), rconWait = new Map();
+let refs = 0;
+/** One of the Studio's own requests to Oni (studio.rs `op`): its reply's data, or a throw with its error. */
+function call(data, ms = 30000) {
+  const ref = "c" + ++refs;
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => (waiting.delete(ref), rej(new Error("Oni didn't answer"))), ms);
+    waiting.set(ref, { res, rej, t });
+    toParent({ oni: "call", ref, data });
+  });
+}
+/** RCON through Oni's permission filter, as {ok, text, data}. */
+function rconOut(server, command, args) {
+  const id = "r" + ++refs;
+  return new Promise((res) => {
+    const t = setTimeout(() => (rconWait.delete(id), res({ ok: false, text: "no answer in 30 s" })), 30000);
+    rconWait.set(id, (r) => (clearTimeout(t), res(r)));
+    toParent({ oni: "rcon", id, server, command, args });
+  });
+}
+
+let toastT = 0;
+function toast(text, bad) {
+  const t = $("toast");
+  t.textContent = mask(text);
+  t.className = bad ? "bad" : "";
+  t.hidden = false;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => (t.hidden = true), bad ? 7000 : 3000);
+}
+
+// --- the lexer ---------------------------------------------------------------------------------------------------
+const KW = new Set(("break case catch class const continue debugger default delete do else export extends finally for function if import in " +
+  "instanceof let new of return super switch throw try typeof var void while with yield async await").split(" "));
+const CON = new Set("true false null undefined this NaN Infinity".split(" "));
+const RE_AFTER = new Set("return typeof instanceof in of new delete void throw case do else yield await".split(" "));
+const NUM = /(?:0[xXoObB][\da-fA-F_]+|\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?\d+)?|\.\d[\d_]*(?:[eE][+-]?\d+)?)n?/y;
+const IDENT = /[A-Za-z_$À-￿][\w$À-￿]*/y;
+const OPS = /[=+\-*%&|^!<>?:~]+/y;
+const CALL = /\s*\(/y;
+
+/** One line's tokens ([start, end, class]) from the state the line before left, and the state it leaves. The state
+ *  is a stack: c a block comment, T a template's text, E a template's ${...}, { a brace inside one. */
+function lex(s, st) {
+  const k = [], n = s.length;
+  let i = 0, re = true, dot = false;
+  const push = (a, b, c) => b > a && k.push([a, b, c]);
+  while (i < n) {
+    const top = st[st.length - 1];
+    if (top === "c") {
+      const j = s.indexOf("*/", i);
+      if (j < 0) { push(i, n, "com"); break; }
+      push(i, j + 2, "com"); i = j + 2; st = st.slice(0, -1); continue;
+    }
+    if (top === "T") {
+      let j = i;
+      while (j < n && s[j] !== "`" && !(s[j] === "$" && s[j + 1] === "{")) j += s[j] === "\\" ? 2 : 1;
+      if (j >= n) { push(i, n, "tpl"); break; }
+      if (s[j] === "`") { push(i, j + 1, "tpl"); i = j + 1; st = st.slice(0, -1); re = false; dot = false; continue; }
+      push(i, j + 1, "tpl"); push(j + 1, j + 2, "br"); i = j + 2; st += "E"; re = true; dot = false; continue;
+    }
+    const c = s[i];
+    if (c === " " || c === "\t") { i++; continue; }
+    if (c === "/" && s[i + 1] === "/") { push(i, n, "com"); break; }
+    if (c === "/" && s[i + 1] === "*") {
+      const j = s.indexOf("*/", i + 2);
+      if (j < 0) { push(i, n, "com"); st += "c"; break; }
+      push(i, j + 2, "com"); i = j + 2; continue;
+    }
+    if (c === "`") { push(i, i + 1, "tpl"); i++; st += "T"; continue; }
+    if (c === "'" || c === '"') {
+      let j = i + 1;
+      while (j < n && s[j] !== c) j += s[j] === "\\" ? 2 : 1;
+      j = Math.min(n, j + 1);
+      push(i, j, "str"); i = j; re = false; dot = false; continue;
+    }
+    if (c === "/" && re) { // ponytail: a regex wherever one could start; a division after `)` or a name
+      let j = i + 1, cls = false;
+      while (j < n) {
+        const d = s[j];
+        if (d === "\\") { j += 2; continue; }
+        if (d === "[") cls = true;
+        else if (d === "]") cls = false;
+        else if (d === "/" && !cls) break;
+        j++;
+      }
+      if (j < n) {
+        j++;
+        while (j < n && /[a-z]/i.test(s[j])) j++;
+        push(i, j, "re"); i = j; re = false; dot = false; continue;
+      }
+    }
+    if ((c >= "0" && c <= "9") || (c === "." && s[i + 1] >= "0" && s[i + 1] <= "9")) {
+      NUM.lastIndex = i;
+      const m = NUM.exec(s);
+      if (m) { push(i, i + m[0].length, "num"); i += m[0].length; re = false; dot = false; continue; }
+    }
+    IDENT.lastIndex = i;
+    const w = IDENT.exec(s);
+    if (w) {
+      const e = i + w[0].length, word = w[0];
+      CALL.lastIndex = e;
+      const isCall = CALL.test(s);
+      const cls = dot ? (isCall ? "fn" : "prop") : KW.has(word) ? "kw" : CON.has(word) ? "con" : API_SET.has(word) ? "api" : isCall ? "fn" : "id";
+      push(i, e, cls); i = e; re = cls === "kw" && RE_AFTER.has(word); dot = false; continue;
+    }
+    if ("([{".includes(c)) {
+      push(i, i + 1, "br"); i++; re = true; dot = false;
+      if (c === "{" && /[E{]$/.test(st)) st += "{";
+      continue;
+    }
+    if (")]}".includes(c)) {
+      push(i, i + 1, "br"); i++; dot = false; re = c === "}";
+      if (c === "}" && st.endsWith("{")) st = st.slice(0, -1);
+      else if (c === "}" && st.endsWith("E")) st = st.slice(0, -1); // back in the template's text
+      continue;
+    }
+    if (c === "/") { const e = s[i + 1] === "=" ? i + 2 : i + 1; push(i, e, "op"); i = e; re = true; dot = false; continue; }
+    OPS.lastIndex = i;
+    const o = OPS.exec(s);
+    if (o) { push(i, i + o[0].length, "op"); i += o[0].length; re = true; dot = false; continue; }
+    push(i, i + 1, "pun"); dot = c === "."; re = c !== "."; i++;
+  }
+  return { k, st };
+}
+
+// --- documents ---------------------------------------------------------------------------------------------------
+/** An open script: its text, what was last saved, its own undo history, and caches of its lines and tokens. */
+function model(name, text) {
+  const m = { name, text, saved: text, undo: [], redo: [], sel: [0, 0, "none"], scroll: [0, 0], lines: [], starts: [], maxLen: 0, tok: [], tokValid: 0,
+    selBefore: null, noMerge: false, version: 0, conflict: false, gone: false, syms: [], lintT: 0, checker: null, shownDirty: false };
+  relines(m, 0);
+  m.syms = symbols(m);
+  return m;
+}
+const dirty = (m) => m.text !== m.saved;
+function relines(m, at) {
+  const changed = m.starts.length ? lineOf(m, at) : 0; // with the old lines: where the tokens stop being right
+  m.lines = m.text.split("\n");
+  m.starts = new Array(m.lines.length);
+  let p = 0, max = 0;
+  for (let i = 0; i < m.lines.length; i++) {
+    const L = m.lines[i], w = L.includes("\t") ? vcol(L, L.length) : L.length;
+    m.starts[i] = p;
+    p += L.length + 1;
+    if (w > max) max = w;
+  }
+  m.maxLen = max;
+  m.tokValid = Math.min(m.tokValid, changed);
+  m.tok.length = Math.min(m.tok.length, m.lines.length);
+}
+function lineOf(m, p) {
+  let lo = 0, hi = m.starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (m.starts[mid] <= p) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+const lineEnd = (m, l) => m.starts[l] + m.lines[l].length;
+/** The column a character is drawn at, tabs counted to their stop. */
+function vcol(s, i) {
+  if (s.indexOf("\t") < 0) return i;
+  let c = 0;
+  for (let j = 0; j < i && j < s.length; j++) c = s[j] === "\t" ? c + TAB - (c % TAB) : c + 1;
+  return c + Math.max(0, i - s.length);
+}
+/** The character nearest a drawn column. */
+function colAt(s, vc) {
+  if (s.indexOf("\t") < 0) return clamp(Math.round(vc), 0, s.length);
+  let c = 0;
+  for (let j = 0; j < s.length; j++) {
+    const w = s[j] === "\t" ? TAB - (c % TAB) : 1;
+    if (vc < c + w / 2) return j;
+    c += w;
+  }
+  return s.length;
+}
+/** Line l's tokens, lexing whatever lines before it changed. */
+function tokens(m, l) {
+  while (m.tokValid <= l) {
+    const i = m.tokValid;
+    m.tok[i] = lex(m.lines[i], i ? m.tok[i - 1].st : "");
+    m.tokValid++;
+  }
+  return m.tok[l];
+}
+/** The token at or before a token index, walking back over lines (up to 30). */
+function prevTok(m, l, i) {
+  for (let n = 0; l >= 0 && n < 30; l--, n++) {
+    const k = tokens(m, l).k;
+    if (i == null) i = k.length;
+    if (i > 0) { const t = k[i - 1]; return { l, i: i - 1, c: t[2], a: t[0], text: m.lines[l].slice(t[0], t[1]) }; }
+    i = null;
+  }
+  return null;
+}
+/** The token holding character p (p inside it, or p at its end). */
+function tokAt(m, p) {
+  const l = lineOf(m, p), c = p - m.starts[l];
+  for (const t of tokens(m, l).k) if (t[0] < c && c <= t[1]) return { l, a: t[0], b: t[1], c: t[2], text: m.lines[l].slice(t[0], t[1]) };
+  return null;
+}
+
+// --- problems ----------------------------------------------------------------------------------------------------
+/** Each script's problems by where they came from: {line, col?, end?, sev: "error"|"warn", msg}. */
+const diags = new Map();
+const diagsOf = (name) => diags.get(name) ?? diags.set(name, { syntax: [], lint: [], runtime: [] }).get(name);
+const allDiags = (name) => { const d = diags.get(name); return d ? [...d.syntax, ...d.lint, ...d.runtime] : []; };
+function lineMarks(name) {
+  const out = new Map();
+  for (const d of allDiags(name)) if (out.get(d.line) !== "e") out.set(d.line, d.sev === "error" ? "e" : "w");
+  return out;
+}
+
+// --- the editor: one textarea over a highlighted copy of the visible lines ----------------------------------------
+const ta = $("ta"), sc = $("sc"), hl = $("hl"), deco = $("deco"), sqEl = $("sq"), gutin = $("gutin"), sizer = $("sizer");
+const find = { open: false, hits: [], idx: -1, bad: false, re: null };
+let tabs = [], cur = null, raf = 0;
+const schedule = () => raf || (raf = requestAnimationFrame(render));
+const focusOf = () => (ta.selectionDirection === "backward" ? ta.selectionStart : ta.selectionEnd);
+const anchorOf = () => (ta.selectionDirection === "backward" ? ta.selectionEnd : ta.selectionStart);
+function setSel(a, f = a) {
+  ta.setSelectionRange(Math.min(a, f), Math.max(a, f), f < a ? "backward" : "forward");
+  if (cur) cur.sel = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+}
+function measure() {
+  const m = $("measure");
+  m.textContent = "x".repeat(200);
+  const w = m.getBoundingClientRect().width / 200;
+  if (w > 0 && Math.abs(w - CW) > 0.001) { CW = w; layout(); schedule(); }
+}
+/** The textarea is the whole document's size, inside the scroller: it never scrolls itself. */
+function layout() {
+  if (!cur) return;
+  const m = cur, w = Math.max(sc.clientWidth, PADX * 2 + (m.maxLen + 60) * CW);
+  const h = Math.max(sc.clientHeight, 2 * PADY + m.lines.length * LH + Math.max(0, sc.clientHeight - 3 * LH));
+  sizer.style.width = ta.style.width = w + "px";
+  sizer.style.height = ta.style.height = h + "px";
+  document.documentElement.style.setProperty("--gw", Math.ceil(Math.max(3, String(m.lines.length).length) * 7.3 + 30) + "px");
+}
+function lineHTML(s, k) {
+  s = mask(s); // the same length: digits become dots
+  let o = "", p = 0;
+  for (const [a, b, c] of k) {
+    if (a > p) o += esc(s.slice(p, a));
+    o += `<span class="${c}">${esc(s.slice(a, b))}</span>`;
+    p = b;
+  }
+  return o + esc(s.slice(p));
+}
+function render() {
+  raf = 0;
+  if (!cur) return;
+  const m = cur, top = sc.scrollTop, h = sc.clientHeight || 600;
+  const first = Math.max(0, Math.floor((top - PADY) / LH) - 2), last = Math.min(m.lines.length - 1, Math.ceil((top + h) / LH) + 2);
+  tokens(m, last);
+  let o = "";
+  for (let i = first; i <= last; i++) o += `<div style="top:${PADY + i * LH}px">${lineHTML(m.lines[i], m.tok[i].k)}</div>`;
+  hl.innerHTML = o;
+  const focus = focusOf(), cl = lineOf(m, focus), marks = lineMarks(m.name);
+  let g = "";
+  for (let i = first; i <= last; i++) {
+    const y = PADY + i * LH, mk = marks.get(i);
+    g += `<div class="ln${i === cl ? " cur" : ""}" style="top:${y}px">${i + 1}</div>`;
+    if (mk) g += `<div class="mk ${mk}" style="top:${y}px"></div>`;
+  }
+  gutin.innerHTML = g;
+  gutin.style.transform = `translateY(${-top}px)`;
+  deco.innerHTML = decorations(m, first, last, focus, cl);
+  sqEl.innerHTML = squiggles(m, first, last);
+}
+/** A highlight over characters s..e, a box per line. */
+function box(m, s, e, cls) {
+  const l0 = lineOf(m, s), l1 = lineOf(m, e);
+  let o = "";
+  for (let l = l0; l <= l1; l++) {
+    const L = m.lines[l], a = l === l0 ? s - m.starts[l] : 0, b = l === l1 ? e - m.starts[l] : L.length + 1;
+    const x = PADX + vcol(L, a) * CW, w = Math.max(2, (vcol(L, b) - vcol(L, a)) * CW);
+    o += `<div class="${cls}" style="top:${PADY + l * LH}px;left:${x}px;width:${w}px"></div>`;
+  }
+  return o;
+}
+function decorations(m, first, last, focus, cl) {
+  let o = "";
+  const empty = ta.selectionStart === ta.selectionEnd;
+  if (empty && cl >= first && cl <= last) o += `<div class="cl" style="top:${PADY + cl * LH}px"></div>`;
+  if (find.open && find.hits.length) {
+    const a = m.starts[first], b = lineEnd(m, last), H = find.hits;
+    let lo = 0, hi = H.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (H[mid][1] < a) lo = mid + 1; else hi = mid; }
+    for (let i = lo; i < H.length && H[i][0] <= b; i++) o += box(m, H[i][0], Math.max(H[i][1], H[i][0] + 1), i === find.idx ? "fm on" : "fm");
+  }
+  if (empty) {
+    const br = matchBracket(m, focus);
+    if (br) o += box(m, br[0], br[0] + 1, "bm") + box(m, br[1], br[1] + 1, "bm");
+  }
+  return o;
+}
+function squiggles(m, first, last) {
+  let o = "";
+  for (const d of allDiags(m.name)) {
+    if (d.line < first || d.line > last || d.line >= m.lines.length) continue;
+    const L = m.lines[d.line];
+    let a, b;
+    if (d.col == null) { a = L.length - L.trimStart().length; b = L.trimEnd().length; }
+    else {
+      a = clamp(d.col, 0, L.length);
+      b = d.end != null ? clamp(d.end, a, L.length) : a + ((/^[\w$]+/.exec(L.slice(a)) || /^\S+/.exec(L.slice(a)) || [""])[0].length);
+    }
+    if (b <= a) { a = Math.max(0, Math.min(a, L.length - 1)); b = a + 1; }
+    const n = Math.max(1, vcol(L, b) - vcol(L, a));
+    o += `<span class="sq${d.sev === "warn" ? " w" : ""}" style="top:${PADY + d.line * LH}px;left:${PADX + vcol(L, a) * CW}px">${" ".repeat(n)}</span>`;
+  }
+  return o;
+}
+/** The bracket at the caret (just before it, else just after) and the one that matches it, as offsets. */
+function matchBracket(m, pos) {
+  const OPEN = "([{", CLOSE = ")]}";
+  const brAt = (p) => {
+    if (p < 0 || p >= m.text.length) return null;
+    const l = lineOf(m, p), c = p - m.starts[l];
+    for (const t of tokens(m, l).k) if (t[2] === "br" && t[0] === c) return m.lines[l][c];
+    return null;
+  };
+  let p = pos - 1, ch = brAt(p);
+  if (!ch) { p = pos; ch = brAt(p); }
+  if (!ch) return null;
+  const fwd = OPEN.includes(ch), other = fwd ? CLOSE[OPEN.indexOf(ch)] : OPEN[CLOSE.indexOf(ch)];
+  let depth = 0;
+  for (let l = lineOf(m, p), n = 0; l >= 0 && l < m.lines.length && n < 3000; l += fwd ? 1 : -1, n++) {
+    const k = tokens(m, l).k;
+    for (let j = fwd ? 0 : k.length - 1; fwd ? j < k.length : j >= 0; j += fwd ? 1 : -1) {
+      const t = k[j];
+      if (t[2] !== "br") continue;
+      const off = m.starts[l] + t[0];
+      if (fwd ? off < p : off > p) continue;
+      const c = m.lines[l][t[0]];
+      if (c === ch) depth++;
+      else if (c === other && --depth === 0) return [p, off];
+    }
+  }
+  return null;
+}
+/** Scroll so the caret (or p) shows. */
+function reveal(p = focusOf()) {
+  if (!cur) return;
+  const m = cur, l = lineOf(m, p), L = m.lines[l], y = PADY + l * LH, x = PADX + vcol(L, p - m.starts[l]) * CW;
+  if (y < sc.scrollTop + PADY) sc.scrollTop = Math.max(0, y - PADY);
+  else if (y + LH > sc.scrollTop + sc.clientHeight - PADY) sc.scrollTop = y + LH - sc.clientHeight + PADY + 4;
+  if (x < sc.scrollLeft + 2 * CW) sc.scrollLeft = Math.max(0, x - 6 * CW);
+  else if (x > sc.scrollLeft + sc.clientWidth - 3 * CW) sc.scrollLeft = x - sc.clientWidth + 8 * CW;
+}
+function centerLine(l) {
+  sc.scrollTop = Math.max(0, PADY + l * LH - sc.clientHeight / 2);
+}
+
+// --- edits and their history -------------------------------------------------------------------------------------
+/** The textarea changed: record what (the common prefix and suffix fence it) and refresh. Typing joins the record
+ *  before it within 1.5 s when it carries on where that left off. */
+function changed(kind) {
+  const m = cur;
+  if (!m) return;
+  const old = m.text, now = ta.value;
+  if (old === now) return;
+  const ml = Math.min(old.length, now.length);
+  let a = 0, b = 0;
+  while (a < ml && old.charCodeAt(a) === now.charCodeAt(a)) a++;
+  while (b < ml - a && old.charCodeAt(old.length - 1 - b) === now.charCodeAt(now.length - 1 - b)) b++;
+  const rec = { at: a, del: old.slice(a, old.length - b), ins: now.slice(a, now.length - b), before: m.selBefore || m.sel.slice(0, 2),
+    after: [ta.selectionStart, ta.selectionEnd], t: Date.now(), kind };
+  const last = m.undo[m.undo.length - 1];
+  if (!(kind === "type" && !m.noMerge && last && last.kind === "type" && rec.t - last.t < 1500 && merge(last, rec))) {
+    m.undo.push(rec);
+    if (m.undo.length > 1000) m.undo.shift();
+  }
+  m.redo = [];
+  m.selBefore = null;
+  m.noMerge = false;
+  m.sel = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+  apply(m, now, a);
+}
+function merge(x, r) {
+  if ([x.ins, x.del, r.ins, r.del].some((s) => s.includes("\n"))) return false;
+  if (!x.del && !r.del && r.at === x.at + x.ins.length) x.ins += r.ins;
+  else if (!x.ins && !r.ins && r.at + r.del.length === x.at) { x.del = r.del + x.del; x.at = r.at; }
+  else if (!x.ins && !r.ins && r.at === x.at) x.del += r.del;
+  else return false;
+  x.after = r.after;
+  x.t = r.t;
+  return true;
+}
+function apply(m, text, at) {
+  m.text = text;
+  m.version++;
+  relines(m, at);
+  if (m === cur) { layout(); schedule(); }
+  lintSoon(m);
+  if (dirty(m) !== m.shownDirty) { m.shownDirty = dirty(m); drawTabs(); drawFiles(); }
+  if (find.open && m === cur) findAll();
+  drawStatus();
+}
+/** Replace s..e with text, as one step of history, then select a..f (or put the caret after the text). */
+function edit(s, e, text, a, f, kind = "edit") {
+  const m = cur;
+  if (!m) return;
+  m.selBefore = [ta.selectionStart, ta.selectionEnd];
+  ta.setRangeText(text, s, e, "end");
+  if (a != null) setSel(a, f ?? a);
+  changed(kind);
+  reveal();
+}
+function undo() {
+  const m = cur;
+  if (!m || !m.undo.length) return;
+  const r = m.undo.pop(), t = m.text.slice(0, r.at) + r.del + m.text.slice(r.at + r.ins.length);
+  m.redo.push(r);
+  ta.value = t;
+  setSel(r.before[0], r.before[1]);
+  m.noMerge = true;
+  apply(m, t, r.at);
+  reveal();
+}
+function redo() {
+  const m = cur;
+  if (!m || !m.redo.length) return;
+  const r = m.redo.pop(), t = m.text.slice(0, r.at) + r.ins + m.text.slice(r.at + r.del.length);
+  m.undo.push(r);
+  ta.value = t;
+  setSel(r.after[0], r.after[1]);
+  m.noMerge = true;
+  apply(m, t, r.at);
+  reveal();
+}
+/** Swap a tab's whole text for another (a reload from disk), as one undoable step. */
+function replaceAll(m, text) {
+  if (m === cur) { const keep = ta.selectionStart; edit(0, m.text.length, text, Math.min(keep, text.length)); return; }
+  const old = m.text;
+  m.undo.push({ at: 0, del: old, ins: text, before: [0, 0], after: [0, 0], t: Date.now(), kind: "edit" });
+  m.redo = [];
+  m.sel = [0, 0, "none"];
+  apply(m, text, 0);
+}
+
+// --- typing ------------------------------------------------------------------------------------------------------
+const PAIRS = { "(": ")", "[": "]", "{": "}", "'": "'", '"': '"', "`": "`" };
+const CLOSERS = new Set([")", "]", "}"]);
+const QUOTES = new Set(["'", '"', "`"]);
+const PAIR_OK = /^$|[\s)\]};,:]/; // a bracket or quote closes itself only before one of these
+/** A key as the shortcuts name it: Ctrl+Shift+Alt+ then the key, by its place on the keyboard. */
+function keyName(e) {
+  const c = e.code, named = { Slash: "/", Backquote: "`", BracketLeft: "[", BracketRight: "]", Backslash: "\\", Space: "Space", NumpadEnter: "Enter",
+    Minus: "-", Equal: "=", Period: ".", Comma: "," }[c];
+  const k = /^Key[A-Z]$/.test(c) ? c.slice(3) : /^Digit\d$/.test(c) ? c.slice(5) : named
+    ?? (e.key.startsWith("Arrow") ? e.key.slice(5) : e.key.length === 1 ? e.key.toUpperCase() : e.key);
+  return (e.ctrlKey || e.metaKey ? "Ctrl+" : "") + (e.shiftKey ? "Shift+" : "") + (e.altKey ? "Alt+" : "") + k;
+}
+/** The lines a selection covers: one that ends at a line's start leaves that line out. */
+function selLines() {
+  const m = cur, s = ta.selectionStart, e = ta.selectionEnd, l0 = lineOf(m, s);
+  let l1 = lineOf(m, e);
+  if (l1 > l0 && e === m.starts[l1]) l1--;
+  return [l0, l1];
+}
+/** Rewrite lines l0..l1 with f(lines), keeping the selection where it was on them. Changes are at the lines' starts,
+ *  so a caret moves by however much its own line grew. */
+function rewriteLines(l0, l1, f) {
+  const m = cur, old = m.lines.slice(l0, l1 + 1), now = f(old.slice());
+  const starts = [];
+  let p = m.starts[l0];
+  for (const L of now) { starts.push(p); p += L.length + 1; }
+  const grow = now.join("\n").length - old.join("\n").length;
+  const map = (q) => {
+    const l = lineOf(m, q);
+    if (l < l0) return q;
+    if (l > l1) return q + grow;
+    const r = l - l0, col = q - m.starts[l];
+    return starts[r] + clamp(col === 0 ? 0 : col + now[r].length - old[r].length, 0, now[r].length);
+  };
+  const a = map(anchorOf()), fo = map(focusOf());
+  edit(m.starts[l0], lineEnd(m, l1), now.join("\n"), a, fo);
+}
+function indentLines(dir) {
+  const [l0, l1] = selLines();
+  rewriteLines(l0, l1, (ls) => ls.map((L) => {
+    if (dir > 0) return L.trim() || l0 === l1 ? " ".repeat(TAB) + L : L;
+    if (L.startsWith("\t")) return L.slice(1);
+    const w = /^ */.exec(L)[0].length;
+    return L.slice(Math.min(w, w % TAB || TAB));
+  }));
+}
+function toggleComment() {
+  const [l0, l1] = selLines(), body = cur.lines.slice(l0, l1 + 1).filter((L) => L.trim());
+  const off = body.length > 0 && body.every((L) => /^\s*\/\//.test(L));
+  const ind = Math.min(...(body.length ? body : [""]).map((L) => /^\s*/.exec(L)[0].length));
+  rewriteLines(l0, l1, (ls) => ls.map((L) => (off ? L.replace(/^(\s*)\/\/ ?/, "$1") : L.trim() || l0 === l1 ? L.slice(0, ind) + "// " + L.slice(ind) : L)));
+}
+function moveLines(up) {
+  const m = cur, [l0, l1] = selLines();
+  if (up ? l0 === 0 : l1 === m.lines.length - 1) return;
+  const block = m.lines.slice(l0, l1 + 1), other = m.lines[up ? l0 - 1 : l1 + 1], d = (other.length + 1) * (up ? -1 : 1);
+  const a = anchorOf() + d, f = focusOf() + d;
+  edit(m.starts[up ? l0 - 1 : l0], lineEnd(m, up ? l1 : l1 + 1), (up ? [...block, other] : [other, ...block]).join("\n"), a, f);
+}
+function copyLines(up) {
+  const m = cur, [l0, l1] = selLines(), block = m.lines.slice(l0, l1 + 1).join("\n"), d = up ? 0 : block.length + 1;
+  const a = anchorOf() + d, f = focusOf() + d;
+  edit(lineEnd(m, l1), lineEnd(m, l1), "\n" + block, a, f);
+}
+function deleteLines() {
+  const m = cur, [l0, l1] = selLines(), last = l1 === m.lines.length - 1, f = focusOf(), col = f - m.starts[lineOf(m, f)];
+  edit(last && l0 > 0 ? lineEnd(m, l0 - 1) : m.starts[l0], last ? m.text.length : m.starts[l1 + 1], "");
+  const l = Math.min(l0, cur.lines.length - 1);
+  setSel(cur.starts[l] + Math.min(col, cur.lines[l].length));
+  reveal();
+}
+function wordAt(m, p) {
+  const l = lineOf(m, p), L = m.lines[l], c = p - m.starts[l];
+  let a = c, b = c;
+  while (a > 0 && /[\w$]/.test(L[a - 1])) a--;
+  while (b < L.length && /[\w$]/.test(L[b])) b++;
+  return a < b ? [m.starts[l] + a, m.starts[l] + b] : null;
+}
+/** Ctrl+D: the word at the caret, then the next place its text is. ponytail: one selection, no multiple carets */
+function nextMatch() {
+  const m = cur, s = ta.selectionStart, e = ta.selectionEnd;
+  if (s === e) {
+    const w = wordAt(m, s);
+    if (w) setSel(w[0], w[1]);
+  } else {
+    const q = m.text.slice(s, e);
+    let i = m.text.indexOf(q, e);
+    if (i < 0) i = m.text.indexOf(q);
+    if (i >= 0) setSel(i, i + q.length);
+  }
+  reveal();
+  schedule();
+}
+function selectLine() {
+  const m = cur, [l0, l1] = selLines(), s = m.starts[l0], endOf = (l) => (l + 1 < m.lines.length ? m.starts[l + 1] : m.text.length);
+  const full = ta.selectionStart === s && ta.selectionEnd === endOf(l1) && ta.selectionEnd > s;
+  setSel(s, endOf(full ? Math.min(l1 + 1, m.lines.length - 1) : l1));
+  reveal();
+  schedule();
+}
+/** Home: the line's first non-blank, then its start. */
+function home(shift) {
+  const m = cur, f = focusOf(), l = lineOf(m, f), L = m.lines[l], ind = L.length - L.trimStart().length, to = m.starts[l] + (f - m.starts[l] === ind ? 0 : ind);
+  setSel(shift ? anchorOf() : to, to);
+  reveal();
+  schedule();
+}
+/** Enter: keep the indent, one more after an opening bracket, and put a closing one right after it on its own line. */
+function newline() {
+  const m = cur, s = ta.selectionStart, e = ta.selectionEnd, l = lineOf(m, s), L = m.lines[l], before = L.slice(0, s - m.starts[l]);
+  const ind = /^\s*/.exec(L)[0].slice(0, before.length), after = m.text.slice(e, lineEnd(m, lineOf(m, e)));
+  const ws = after.length - after.trimStart().length, open = /[{([]\s*$/.test(before);
+  if (open && /^\s*[)\]}]/.test(after)) {
+    const inner = "\n" + ind + " ".repeat(TAB);
+    edit(s, e + ws, inner + "\n" + ind, s + inner.length);
+  } else {
+    const t = "\n" + ind + (open ? " ".repeat(TAB) : "");
+    edit(s, e + ws, t, s + t.length);
+  }
+}
+function backspace() {
+  const m = cur, p = ta.selectionStart;
+  if (p !== ta.selectionEnd || p === 0) return false;
+  const a = m.text[p - 1], b = m.text[p];
+  if (PAIRS[a] && PAIRS[a] === b) { edit(p - 1, p + 1, "", p - 1, p - 1, "type"); return true; }
+  const before = m.text.slice(m.starts[lineOf(m, p)], p);
+  if (/^ +$/.test(before)) {
+    const n = before.length % TAB || TAB;
+    edit(p - n, p, "", p - n, p - n, "type");
+    return true;
+  }
+  return false;
+}
+/** The string, template or comment the caret is inside, if any. */
+function inString(m, p) {
+  const t = tokAt(m, p);
+  if (!t || !/^(str|tpl|com|re)$/.test(t.c)) return null;
+  if (t.c === "com") return t;
+  const c = p - m.starts[t.l], L = m.lines[t.l], q = L[t.a];
+  const closed = t.c === "str" ? t.b - t.a >= 2 && L[t.b - 1] === q : L[t.b - 1] === "`";
+  return c < t.b || !closed ? t : null;
+}
+/** A typed character the editor handles itself: brackets and quotes close themselves, wrap a selection, or step
+ *  over their twin; `}` on a blank line outdents. True when it did. */
+function typed(ch) {
+  const m = cur, s = ta.selectionStart, e = ta.selectionEnd, next = m.text[e] ?? "", prev = m.text[s - 1] ?? "";
+  if (s !== e) {
+    if (!PAIRS[ch]) return false;
+    edit(s, e, ch + m.text.slice(s, e) + PAIRS[ch], s + 1, e + 1);
+    return true;
+  }
+  if ((CLOSERS.has(ch) || QUOTES.has(ch)) && next === ch) { setSel(s + 1); schedule(); return true; }
+  if (ch === "}") {
+    const before = m.text.slice(m.starts[lineOf(m, s)], s);
+    if (before.length < TAB || !/^ +$/.test(before)) return false;
+    const n = before.length % TAB || TAB;
+    edit(s - n, s, "}", s - n + 1, s - n + 1, "type");
+    return true;
+  }
+  if (!PAIRS[ch] || CLOSERS.has(ch) || !PAIR_OK.test(next)) return false;
+  if (QUOTES.has(ch) && (/[\w$]/.test(prev) || inString(m, s))) return false;
+  edit(s, s, ch + PAIRS[ch], s + 1, s + 1, "type");
+  return true;
+}
+
+ta.addEventListener("keydown", (e) => {
+  if (!cur || e.isComposing) return;
+  const k = keyName(e);
+  if (acKey(e, k)) return;
+  const run = (f) => { e.preventDefault(); f(); };
+  switch (k) {
+    case "Enter": return run(newline);
+    case "Tab": return run(() => {
+      const [l0, l1] = selLines();
+      if (l0 !== l1) return indentLines(1);
+      const s = ta.selectionStart, L = cur.lines[l0], n = TAB - (vcol(L, s - cur.starts[l0]) % TAB);
+      edit(s, ta.selectionEnd, " ".repeat(n), s + n, s + n, "type");
+    });
+    case "Shift+Tab": case "Ctrl+[": return run(() => indentLines(-1));
+    case "Ctrl+]": return run(() => indentLines(1));
+    case "Backspace": if (backspace()) e.preventDefault(); return;
+    case "Ctrl+/": return run(toggleComment);
+    case "Alt+Up": return run(() => moveLines(true));
+    case "Alt+Down": return run(() => moveLines(false));
+    case "Shift+Alt+Up": return run(() => copyLines(true));
+    case "Shift+Alt+Down": return run(() => copyLines(false));
+    case "Ctrl+Shift+K": return run(deleteLines);
+    case "Ctrl+D": return run(nextMatch);
+    case "Ctrl+L": return run(selectLine);
+    case "Home": return run(() => home(false));
+    case "Shift+Home": return run(() => home(true));
+    case "Ctrl+Z": return run(undo);
+    case "Ctrl+Y": case "Ctrl+Shift+Z": return run(redo);
+    case "Ctrl+Space": return run(() => suggest(true));
+    case "Ctrl+Shift+Space": return run(() => showSig(true));
+    case "Ctrl+Shift+\\": return run(() => {
+      const b = matchBracket(cur, focusOf());
+      if (b) { setSel(b[1]); reveal(); schedule(); }
+    });
+    case "Ctrl+X": case "Ctrl+C": { // nothing selected: the whole line, then the native cut or copy
+      const p = ta.selectionStart;
+      if (p !== ta.selectionEnd) return;
+      const l = lineOf(cur, p);
+      setSel(cur.starts[l], l + 1 < cur.lines.length ? cur.starts[l + 1] : cur.text.length);
+      if (k === "Ctrl+C") setTimeout(() => setSel(p));
+      return;
+    }
+    case "Escape": if (closePopups()) e.preventDefault(); return;
+  }
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && typed(e.key)) {
+    e.preventDefault();
+    if (QUOTES.has(e.key)) suggest(false);
+    else closeAc();
+    showSig(false);
+  }
+});
+ta.addEventListener("beforeinput", (e) => {
+  if (e.inputType === "historyUndo") { e.preventDefault(); undo(); return; }
+  if (e.inputType === "historyRedo") { e.preventDefault(); redo(); return; }
+  if (cur) cur.selBefore = [ta.selectionStart, ta.selectionEnd];
+});
+ta.addEventListener("input", (e) => {
+  const t = e.inputType || "";
+  changed(t === "insertText" || t === "deleteContentBackward" || t === "deleteContentForward" ? "type" : "edit");
+  reveal();
+  if (t === "insertText" && /^[\w$.]$/.test(e.data || "")) suggest(false);
+  else if (ac.open && t.startsWith("delete")) suggest(false);
+  else closeAc();
+  showSig(false);
+});
+ta.addEventListener("scroll", () => { ta.scrollTop = 0; ta.scrollLeft = 0; });
+function afterMove() {
+  if (!cur || document.activeElement !== ta) return;
+  cur.sel = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection];
+  schedule();
+  drawStatus();
+  if (ac.open && (ta.selectionStart !== ta.selectionEnd || ta.selectionStart < ac.from)) closeAc();
+  if (!$("sig").hidden) showSig(false);
+}
+document.addEventListener("selectionchange", afterMove);
+for (const n of ["keyup", "mouseup", "select", "focus"]) ta.addEventListener(n, afterMove);
+ta.addEventListener("mousedown", () => { closeAc(); hideTip(); });
+sc.addEventListener("scroll", () => { schedule(); hideTip(); placePopups(); });
+$("gut").addEventListener("mousedown", (e) => { // a line number selects its line
+  if (!cur) return;
+  e.preventDefault();
+  const l = clamp(Math.floor((e.clientY - $("gut").getBoundingClientRect().top + sc.scrollTop - PADY) / LH), 0, cur.lines.length - 1);
+  ta.focus({ preventScroll: true });
+  setSel(cur.starts[l], l + 1 < cur.lines.length ? cur.starts[l + 1] : cur.text.length);
+  schedule();
+});
+$("gut").addEventListener("wheel", (e) => { sc.scrollTop += e.deltaY; }, { passive: true });
+
+// --- find and replace --------------------------------------------------------------------------------------------
+const fq = $("fq"), frIn = $("fr");
+let fcase = false, fre = false;
+function openFind(replace) {
+  if (!cur) return;
+  find.open = true;
+  $("find").hidden = false;
+  $("frow").hidden = !replace;
+  const s = ta.selectionStart, e = ta.selectionEnd, sel = cur.text.slice(s, e);
+  if (s !== e && !sel.includes("\n")) fq.value = sel;
+  const f = replace && fq.value ? frIn : fq;
+  f.focus();
+  f.select();
+  findAll();
+}
+function closeFind() {
+  if (!find.open) return false;
+  find.open = false;
+  find.hits = [];
+  $("find").hidden = true;
+  schedule();
+  ta.focus({ preventScroll: true });
+  return true;
+}
+function findAll() {
+  find.hits = [];
+  find.idx = -1;
+  find.bad = false;
+  find.re = null;
+  const q = fq.value;
+  if (cur && q) {
+    try { find.re = new RegExp(fre ? q : q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), fcase ? "gm" : "gim"); }
+    catch { find.bad = true; }
+    if (find.re) {
+      const re = find.re, t = cur.text;
+      let m;
+      while ((m = re.exec(t)) && find.hits.length < 10000) {
+        if (!m[0].length) { re.lastIndex++; continue; }
+        find.hits.push([m.index, m.index + m[0].length]);
+      }
+      const s = ta.selectionStart, e = ta.selectionEnd;
+      find.idx = find.hits.findIndex((h) => h[0] === s && h[1] === e);
+    }
+  }
+  $("find").classList.toggle("bad", find.bad);
+  findCount();
+  schedule();
+}
+function findCount() {
+  const n = find.hits.length;
+  $("fcount").textContent = find.bad ? "bad pattern" : !fq.value ? "" : n ? `${find.idx >= 0 ? find.idx + 1 : "?"} of ${n}${n >= 10000 ? "+" : ""}` : "no results";
+}
+function findGo(dir, from) {
+  const H = find.hits;
+  if (!H.length) return;
+  const s = from ?? ta.selectionStart, empty = from != null || ta.selectionStart === ta.selectionEnd;
+  let i;
+  if (dir > 0) {
+    i = H.findIndex((h) => (empty ? h[0] >= s : h[0] > s));
+    if (i < 0) i = 0;
+  } else {
+    i = H.length - 1;
+    while (i >= 0 && H[i][0] >= s) i--;
+    if (i < 0) i = H.length - 1;
+  }
+  find.idx = i;
+  setSel(H[i][0], H[i][1]);
+  if (Math.abs(lineOf(cur, H[i][0]) * LH - sc.scrollTop - sc.clientHeight / 2) > sc.clientHeight / 2 - LH) centerLine(lineOf(cur, H[i][0]));
+  reveal(H[i][1]);
+  findCount();
+  schedule();
+}
+function replaceOne() {
+  const H = find.hits, s = ta.selectionStart, e = ta.selectionEnd;
+  if (!find.re || !H.some((h) => h[0] === s && h[1] === e)) return findGo(1);
+  const text = cur.text.slice(s, e), rep = fre ? text.replace(new RegExp(find.re.source, find.re.flags.replace("g", "")), frIn.value) : frIn.value;
+  edit(s, e, rep, s + rep.length);
+  findGo(1, s + rep.length);
+}
+function replaceAllHits() {
+  if (!find.re || !find.hits.length) return;
+  const n = find.hits.length, re = new RegExp(find.re.source, find.re.flags), rep = frIn.value;
+  const t = fre ? cur.text.replace(re, rep) : cur.text.replace(re, () => rep);
+  edit(0, cur.text.length, t, Math.min(ta.selectionStart, t.length));
+  toast(`Replaced ${n} match${n === 1 ? "" : "es"}.`);
+}
+fq.addEventListener("input", () => { findAll(); if (find.hits.length) findGo(1, ta.selectionStart); });
+for (const el of [fq, frIn]) el.addEventListener("keydown", (e) => {
+  const k = keyName(e);
+  if (k === "Escape") { e.preventDefault(); closeFind(); }
+  else if (k === "Enter" && el === fq) { e.preventDefault(); findGo(1); }
+  else if (k === "Shift+Enter") { e.preventDefault(); findGo(-1); }
+  else if (k === "Enter") { e.preventDefault(); replaceOne(); }
+  else if (k === "Ctrl+Alt+Enter") { e.preventDefault(); replaceAllHits(); }
+});
+$("fcase").onclick = () => { fcase = !fcase; $("fcase").classList.toggle("on", fcase); findAll(); };
+$("fre").onclick = () => { fre = !fre; $("fre").classList.toggle("on", fre); findAll(); };
+$("fnext").onclick = () => findGo(1);
+$("fprev").onclick = () => findGo(-1);
+$("fx").onclick = closeFind;
+$("fone").onclick = replaceOne;
+$("fall").onclick = replaceAllHits;
+
+// --- suggestions -------------------------------------------------------------------------------------------------
+const ac = { open: false, items: [], idx: 0, from: 0, to: 0, q: "" };
+const EV_NAMES = new Set(["ev", "e", "event", "evt"]);
+const MEMBERS = { store: ["get", "set", "inc", "del", "has", "keys", "all", "clear"], script: ["name", "dry"],
+  console: ["log", "warn", "error", "info", "debug"], Math: "abs ceil floor round max min random pow sqrt trunc sign hypot PI".split(" "),
+  JSON: ["stringify", "parse"], Object: "keys values entries assign fromEntries freeze".split(" "), Array: ["isArray", "from", "of"],
+  Number: "isFinite isInteger parseFloat parseInt".split(" "), Promise: "all allSettled any race resolve reject".split(" "), Date: ["now", "parse", "UTC"] };
+const GLOBALS = ("Math JSON Object Array Number String Boolean Promise Date Map Set RegExp Error TypeError console setTimeout setInterval " +
+  "clearTimeout clearInterval structuredClone parseInt parseFloat isNaN encodeURIComponent").split(" ");
+const SNIPPETS = [["onchat", 'on("chat", (ev) => {\n  $0\n});', "on chat"], ["onkill", 'on("kill", (ev) => {\n  $0\n});', "on kill"],
+  ["onjoin", 'on("join", (ev) => {\n  $0\n});', "on join"], ["onleave", 'on("leave", (ev) => {\n  $0\n});', "on leave"],
+  ["if", "if ($0) {\n  \n}", "if"], ["ifelse", "if ($0) {\n  \n} else {\n  \n}", "if, else"], ["for", "for (let i = 0; i < $0; i++) {\n  \n}", "counted loop"],
+  ["forof", "for (const x of $0) {\n  \n}", "for each"], ["try", "try {\n  $0\n} catch (err) {\n  error(err);\n}", "try, catch"],
+  ["fn", "function $0() {\n  \n}", "function"], ["afn", "async function $0() {\n  \n}", "async function"]];
+const API_SNIP = { on: 'on("$0", (ev) => {\n  \n});', command: 'command("!$0", (ev) => {\n  \n});', every: 'every("$0", () => {\n  \n});',
+  after: 'after("$0", () => {\n  \n});', store: "store", script: "script" };
+const RETRIGGER = new Set(["on", "every", "after"]);
+const item = (label, ic, detail, doc, x) => ({ label, ic, detail, doc, ...x });
+
+/** The call the caret is in the arguments of: {name, obj (what's before a "."), arg (which one), open (the "(")}. */
+function sigAt(m, pos) {
+  const l0 = lineOf(m, pos), c0 = pos - m.starts[l0];
+  let depth = 0, arg = 0;
+  for (let l = l0, n = 0; l >= 0 && n < 30; l--, n++) {
+    const k = tokens(m, l).k, L = m.lines[l];
+    for (let j = k.length - 1; j >= 0; j--) {
+      const t = k[j];
+      if (l === l0 && t[0] >= c0) continue;
+      const tx = L.slice(t[0], t[1]);
+      if (t[2] === "br") {
+        if (")]}".includes(tx)) { depth++; continue; }
+        if (depth > 0) { depth--; continue; }
+        const pt = prevTok(m, l, j);
+        if (tx === "(") {
+          if (pt && pt.c === "kw") return null;
+          if (pt && /^(api|fn|id|prop)$/.test(pt.c)) {
+            const dot = prevTok(m, pt.l, pt.i), ot = dot && dot.text === "." ? prevTok(m, dot.l, dot.i) : null;
+            return { name: pt.text, obj: ot && /^(id|api|prop)$/.test(ot.c) ? ot.text : dot && dot.text === "." ? "?" : null, arg, open: m.starts[l] + t[0] };
+          }
+        } else if (tx === "{" && pt && (pt.text === ")" || pt.text === "=>")) return null; // a block, not an object
+        arg = 0; // inside a group, a list or an object: count the call's arguments from here
+      } else if (depth === 0 && t[2] === "pun") {
+        if (tx === ",") arg++;
+        else if (tx === ";") return null;
+      }
+    }
+  }
+  return null;
+}
+/** What an event handler's parameter can hold: the kinds of the last on() or command() before p whose arrow names it
+ *  (or a usual name for one). ponytail: a regex over the text, not a parse; good for the arrow handlers people write. */
+function evKinds(m, obj, p) {
+  const re = /\b(on|command)\s*\(\s*(\[[^\]]*\]|"[^"]*"|'[^']*')[^]*?(?:\(\s*|\b)([A-Za-z_$][\w$]*)\s*\)?\s*=>/g, t = m.text.slice(Math.max(0, p - 8000), p);
+  let last = null, x;
+  while ((x = re.exec(t))) last = x;
+  if (!EV_NAMES.has(obj) && (!last || last[3] !== obj)) return null;
+  if (!last) return { kinds: [], cmd: false };
+  if (last[1] === "command") return { kinds: ["chat"], cmd: true };
+  const ks = [...last[2].matchAll(/["']([\w*]+)["']/g)].map((y) => y[1]);
+  return { kinds: ks.includes("*") ? [] : ks.filter((k) => FIELDS[k]), cmd: false };
+}
+function evDoc(name) {
+  const h = EV_HELPERS.find((x) => x[0] === name);
+  if (h) return ["ev." + h[1], h[2]];
+  const c = [...EV_COMMON, ...CMD_FIELDS].find((x) => x[0] === name);
+  if (c) return ["ev." + name, c[1]];
+  return FDOC[name] ? ["ev." + name, `${FDOC[name]}. On ${KINDS.filter((k) => FIELDS[k].split(" ").includes(name)).join(", ")}.`] : null;
+}
+/** The choices for a string argument of a call. */
+function argItems(sg) {
+  const n = sg.obj && sg.obj !== "store" ? "." + sg.name : sg.obj ? null : sg.name, a = sg.arg;
+  if (n === "on" && a === 0) return [...KINDS.map((k) => item(k, "◆", FIELDS[k], KIND_DOC[k])), item("*", "◆", "every kind", "Every event, whatever its kind.")];
+  if (SERVER_ARG.has(n) && a === 0)
+    return [...S.servers.map((s) => item(s.name, "▣", s.online ? "online" : "offline")), ...(n === "say" ? [item("*", "▣", "every online server")] : [])];
+  if (n === "rcon" && a === 1) return RCON.map((c) => item(c, "›", READONLY.has(c) ? "reads only" : "changes the server"));
+  if ((n === "ban" && a === 2) || (n === ".ban" && a === 0)) return BAN_TIMES.map((t) => item(t, "◷", t ? "" : "for good", null, { show: t || '""' }));
+  if ((n === "mute" && a === 2) || (n === ".mute" && a === 0)) return MUTE_TIMES.map((t) => item(t, "◷", t ? "" : "until the server restarts", null, { show: t || '""' }));
+  if ((n === "discord" || n === "telegram") && a === 0) return S.hooks[n].map((h) => item(h, "✉", n));
+  if ((n === "every" || n === "after" || n === "sleep") && a === 0) return DURS.map((d) => item(d, "◷", ""));
+  if (n === "notify" && a === 1) return LEVELS.map((x) => item(x, "!", ""));
+  return null;
+}
+function memberItems(m, obj, p) {
+  if (obj === "store") return MEMBERS.store.map((k) => item(k, "ƒ", DOC["store." + k][0].slice(6), DOC["store." + k][1], { insert: k + "($0)" }));
+  if (obj === "script") return [item("name", "▸", "string", "This script's name."), item("dry", "▸", "boolean", "True during a TEST run.")];
+  if (MEMBERS[obj]) return MEMBERS[obj].map((k) => (/^[A-Z]/.test(k) ? item(k, "▸", obj) : item(k, "ƒ", obj, null, { insert: k + "($0)" })));
+  const ctx = evKinds(m, obj, p);
+  if (!ctx) return null;
+  const kinds = ctx.kinds.length ? ctx.kinds : KINDS, by = new Map();
+  for (const k of kinds) for (const f of FIELDS[k].split(" ")) by.set(f, [...(by.get(f) || []), k]);
+  return [...[...by].map(([f, ks]) => item(f, "▸", ks.length === kinds.length ? "" : ks.join(" "), FDOC[f])),
+    ...(ctx.cmd ? CMD_FIELDS.map(([f, d]) => item(f, "▸", "command", d)) : []), ...EV_COMMON.map(([f, d]) => item(f, "▸", "", d)),
+    ...EV_HELPERS.map(([k, sig, d]) => item(k, "ƒ", sig, d, { insert: k + "($0)" }))];
+}
+function identItems(m, q) {
+  const out = [], seen = new Set(), add = (it, pri) => {
+    const key = it.ic + it.label;
+    if (!seen.has(key)) { seen.add(key); it.pri = pri; out.push(it); }
+  };
+  for (const k of API) add(item(k, "ƒ", DOC[k][0], DOC[k][1], { insert: API_SNIP[k] ?? k + "($0)", retrigger: RETRIGGER.has(k) }), 0);
+  for (const k of KW) add(item(k, "k", "keyword"), 1);
+  for (const [k, ins, d] of SNIPPETS) add(item(k, "≡", d, ins.replace("$0", ""), { insert: ins, snip: true }), 2);
+  for (const k of GLOBALS) add(item(k, "▸", "global"), 3);
+  const count = new Map(); // ponytail: the whole text on each keystroke; fine at 256 KiB, cache by version if it shows
+  for (const w of m.text.match(/[A-Za-z_$][\w$]{2,}/g) || []) count.set(w, (count.get(w) || 0) + 1);
+  for (const [w, n] of count) if (!API_SET.has(w) && !KW.has(w) && (w !== q || n > 1)) add(item(w, "·", ""), 4);
+  return out;
+}
+/** Prefix matches first (same case, then any), then the letters in order with the fewest gaps. */
+function rank(items, q) {
+  const lq = q.toLowerCase(), out = [];
+  items.forEach((it, i) => {
+    const L = it.label;
+    let s;
+    if (!q || L.startsWith(q)) s = 0;
+    else if (L.toLowerCase().startsWith(lq)) s = 1;
+    else {
+      let j = 0, last = -1, gaps = 0;
+      for (let c = 0; c < L.length && j < lq.length; c++) if (L[c].toLowerCase() === lq[j]) { if (last >= 0 && c > last + 1) gaps++; last = c; j++; }
+      if (j < lq.length) return;
+      s = 2 + gaps + (L[0].toLowerCase() === lq[0] ? 0 : 3);
+    }
+    out.push([s, it.pri ?? 0, i, it]);
+  });
+  out.sort((a, b) => a[0] - b[0] || a[1] - b[1] || a[2] - b[2]);
+  return out.slice(0, 50).map((x) => x[3]);
+}
+/** Open (or refresh) the suggestions at the caret. explicit: asked for with Ctrl+Space, so show them with nothing typed. */
+function suggest(explicit) {
+  if (!cur) return;
+  const m = cur, p = ta.selectionStart;
+  if (p !== ta.selectionEnd) return closeAc();
+  const l = lineOf(m, p), L = m.lines[l], c = p - m.starts[l], before = L.slice(0, c), t = tokAt(m, p);
+  let items = null, q = "", from, to;
+  if (t && (t.c === "com" || t.c === "re" || t.c === "tpl")) return closeAc();
+  if (t && t.c === "str") {
+    if (!inString(m, p)) return closeAc();
+    const sg = sigAt(m, m.starts[l] + t.a);
+    items = sg && argItems(sg);
+    q = L.slice(t.a + 1, c);
+    from = p - q.length;
+    to = p + /^[^'"\s]*/.exec(L.slice(c))[0].length;
+  } else {
+    const mm = /([A-Za-z_$][\w$]*)\s*\.\s*([\w$]*)$/.exec(before);
+    if (mm) { items = memberItems(m, mm[1], p); q = mm[2]; }
+    else {
+      const w = /[A-Za-z_$][\w$]*$/.exec(before);
+      if (w ? /[\w$]/.test(before[w.index - 1] || "") : !explicit) return closeAc();
+      if (/\b(?:const|let|var|function|class|catch\s*\()\s*[\w$]*$/.test(before)) return closeAc(); // naming something new
+      q = w ? w[0] : "";
+      items = identItems(m, q);
+    }
+    from = p - q.length;
+    to = p + /^[\w$]*/.exec(L.slice(c))[0].length;
+  }
+  const ranked = items ? rank(items, q) : [];
+  if (!ranked.length || (!explicit && ranked.length === 1 && ranked[0].label === q && !ranked[0].insert)) return closeAc();
+  Object.assign(ac, { open: true, items: ranked, idx: 0, from, to, q });
+  $("ac").hidden = false;
+  drawAc();
+  place($("ac"), from);
+}
+function hilite(label, q) {
+  const lq = q.toLowerCase();
+  let o = "", j = 0;
+  for (const ch of label) {
+    if (j < lq.length && ch.toLowerCase() === lq[j]) { o += `<b>${esc(ch)}</b>`; j++; }
+    else o += esc(ch);
+  }
+  return o;
+}
+function drawAc() {
+  const box = $("aclist"), it = ac.items[ac.idx];
+  box.innerHTML = ac.items.map((x, i) => `<div class="ai${i === ac.idx ? " on" : ""}" data-i="${i}"><span class="ic">${x.ic}</span><span class="lb">${
+    x.show ? esc(x.show) : hilite(x.label, ac.q)}</span><span class="dt">${esc(mask(x.detail || ""))}</span></div>`).join("");
+  $("acdoc").innerHTML = !it || !it.doc ? "" : it.snip ? `<code style="white-space:pre">${esc(it.doc)}</code>` : esc(it.doc);
+  const on = box.children[ac.idx];
+  if (on && on.offsetTop < box.scrollTop) box.scrollTop = on.offsetTop;
+  else if (on && on.offsetTop + on.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTop = on.offsetTop + on.offsetHeight - box.clientHeight;
+}
+function closeAc() {
+  ac.open = false;
+  $("ac").hidden = true;
+}
+/** What accepting an item types: just its name when a "(" already follows. */
+function insertOf(it) {
+  const ins = it.insert ?? it.label;
+  return cur.text[ac.to] === "(" && ins.startsWith(it.label + "(") ? it.label : ins;
+}
+function accept(it) {
+  const m = cur, from = ac.from, to = ac.to, ind = /^\s*/.exec(m.lines[lineOf(m, from)])[0];
+  let text = insertOf(it).replace(/\n/g, "\n" + ind);
+  const k = text.indexOf("$0");
+  text = text.replace("$0", "");
+  closeAc();
+  edit(from, to, text, from + (k < 0 ? text.length : k));
+  if (it.retrigger) suggest(true);
+  showSig(false);
+}
+/** The suggestion list's keys, while it is open. True when it took the key. */
+function acKey(e, k) {
+  if (!ac.open) return false;
+  const n = ac.items.length, go = (i) => { e.preventDefault(); ac.idx = i; drawAc(); return true; };
+  if (k === "Down") return go((ac.idx + 1) % n);
+  if (k === "Up") return go((ac.idx - 1 + n) % n);
+  if (k === "PageDown") return go(Math.min(n - 1, ac.idx + 8));
+  if (k === "PageUp") return go(Math.max(0, ac.idx - 8));
+  if (k === "Escape") { e.preventDefault(); closeAc(); return true; }
+  if (k === "Enter" || k === "Tab") {
+    const it = ac.items[ac.idx];
+    if (k === "Enter" && insertOf(it) === cur.text.slice(ac.from, ac.to)) { closeAc(); return false; } // nothing to add: a newline
+    e.preventDefault();
+    accept(it);
+    return true;
+  }
+  return false;
+}
+$("aclist").addEventListener("mousedown", (e) => {
+  e.preventDefault();
+  const r = e.target.closest(".ai");
+  if (r) accept(ac.items[+r.dataset.i]);
+});
+
+// --- popups at the caret -----------------------------------------------------------------------------------------
+function caretXY(p) {
+  const m = cur, l = lineOf(m, p), L = m.lines[l];
+  return { x: $("gut").offsetWidth + PADX + vcol(L, p - m.starts[l]) * CW - sc.scrollLeft, y: PADY + l * LH - sc.scrollTop };
+}
+/** Put a popup under character p's line (or over it, when above), flipping when it doesn't fit. */
+function place(el, p, above) {
+  const { x, y } = caretXY(p), ed = $("ed"), w = el.offsetWidth, h = el.offsetHeight, under = y + LH + 2, over = y - h - 2;
+  const top = above ? (over >= 0 ? over : under) : under + h <= ed.clientHeight || over < 0 ? under : over;
+  el.style.left = clamp(x, 0, Math.max(0, ed.clientWidth - w - 4)) + "px";
+  el.style.top = Math.max(0, top) + "px";
+}
+let sigFor = 0;
+function placePopups() {
+  if (!cur) return;
+  if (ac.open) place($("ac"), ac.from);
+  if (!$("sig").hidden) place($("sig"), sigFor, true);
+}
+function sigDoc(sg) {
+  if (!sg) return null;
+  if (!sg.obj) return API_SET.has(sg.name) ? DOC[sg.name] : null;
+  if (sg.obj === "store") return DOC["store." + sg.name] ?? null;
+  return (!MEMBERS[sg.obj] && DOC["ev." + sg.name]) || null;
+}
+/** The signature of the call the caret is in, its current argument bold. Opens by itself after "(" or ",". */
+function showSig(explicit) {
+  const el = $("sig");
+  if (!cur || ta.selectionStart !== ta.selectionEnd) { el.hidden = true; return; }
+  const p = ta.selectionStart;
+  if (!explicit && el.hidden && !"(,".includes(cur.text[p - 1] ?? "x")) return;
+  const sg = sigAt(cur, p), d = sigDoc(sg), o = d ? d[0].indexOf("(") : -1;
+  if (o < 0) { el.hidden = true; return; }
+  const params = d[0].slice(o + 1, d[0].lastIndexOf(")")).split(", ").filter(Boolean), lastP = params.length - 1;
+  const at = sg.arg <= lastP ? sg.arg : params[lastP]?.startsWith("...") ? lastP : -1;
+  el.innerHTML = esc(d[0].slice(0, o + 1)) + params.map((x, i) => (i === at ? `<b>${esc(x)}</b>` : esc(x))).join(", ") + `)<span class="d">${esc(d[1])}</span>`;
+  el.hidden = false;
+  sigFor = sg.open;
+  place(el, sg.open, true);
+}
+
+// --- hover -------------------------------------------------------------------------------------------------------
+let hoverT = 0, tipSpan = [0, 0];
+function hideTip() {
+  clearTimeout(hoverT);
+  $("tip").hidden = true;
+}
+/** The character under the mouse, or null past a line's end. */
+function posAt(x, y) {
+  if (!cur) return null;
+  const r = sc.getBoundingClientRect(), l = Math.floor((y - r.top + sc.scrollTop - PADY) / LH);
+  if (l < 0 || l >= cur.lines.length) return null;
+  const L = cur.lines[l], c = colAt(L, (x - r.left + sc.scrollLeft - PADX) / CW - 0.5);
+  return x - r.left + sc.scrollLeft < PADX || c >= L.length ? null : cur.starts[l] + c;
+}
+function showTip(p) {
+  const m = cur, l = lineOf(m, p), c = p - m.starts[l], L = m.lines[l], t = tokAt(m, p + 1), parts = [];
+  for (const d of allDiags(m.name)) {
+    if (d.line !== l) continue;
+    const a = d.col ?? 0, b = d.end ?? (d.col == null ? L.length : a + Math.max(1, (/^[\w$]+/.exec(L.slice(a)) || [""])[0].length));
+    if (d.col == null || (c >= a && c < b)) parts.push(`<div class="${d.sev === "warn" ? "w" : "e"}">${esc(mask(d.msg))}</div>`);
+  }
+  let doc = null;
+  if (t) {
+    const i = tokens(m, t.l).k.findIndex((x) => x[0] === t.a), dot = prevTok(m, t.l, i), obj = dot && dot.text === "." ? prevTok(m, dot.l, dot.i) : null;
+    if (t.c === "api" && !obj) doc = DOC[t.text];
+    else if ((t.c === "prop" || t.c === "fn") && obj) {
+      if (obj.text === "store") doc = DOC["store." + t.text];
+      else if (obj.text === "script") doc = { name: ["script.name", "This script's name."], dry: ["script.dry", "True during a TEST run."] }[t.text];
+      else if (!MEMBERS[obj.text] && evKinds(m, obj.text, p)) doc = evDoc(t.text);
+    } else if (t.c === "str") {
+      const v = t.text.slice(1, -1), sg = sigAt(m, m.starts[t.l] + t.a);
+      if (sg && !sg.obj && sg.name === "on" && FIELDS[v]) doc = [`"${v}"`, `${KIND_DOC[v][0].toUpperCase() + KIND_DOC[v].slice(1)}. ev has ${FIELDS[v].split(" ").join(", ")}.`];
+      else if (sg && !sg.obj && sg.name === "rcon" && sg.arg === 1 && RCON.includes(v))
+        doc = [`rcon(server, "${v}")`, READONLY.has(v) ? (v === "nextmap" || v === "admins" ? "Reads only without arguments: a TEST run sends it then, and only logs it with them." : "Reads only: a TEST run sends it too.") : "Changes the server: a TEST run only logs it."];
+    }
+  }
+  if (doc) parts.push(`<code>${esc(doc[0])}</code>\n${esc(doc[1])}`);
+  if (!parts.length) return;
+  const el = $("tip");
+  el.innerHTML = parts.join("<hr>");
+  el.hidden = false;
+  tipSpan = t ? [m.starts[t.l] + t.a, m.starts[t.l] + t.b] : [p, p + 1];
+  place(el, tipSpan[0], true);
+}
+sc.addEventListener("mousemove", (e) => {
+  clearTimeout(hoverT);
+  if (e.buttons || !cur) return;
+  const p = posAt(e.clientX, e.clientY), tip = $("tip");
+  if (p != null && !tip.hidden && p >= tipSpan[0] && p < tipSpan[1]) return;
+  tip.hidden = true;
+  if (p != null) hoverT = setTimeout(() => showTip(p), 450);
+});
+sc.addEventListener("mouseleave", hideTip);
+/** Escape in the editor: the topmost popup. True when one closed. */
+function closePopups() {
+  if (ac.open) { closeAc(); return true; }
+  if (!$("sig").hidden) { $("sig").hidden = true; return true; }
+  if (!$("tip").hidden) { hideTip(); return true; }
+  return closeFind();
+}
+
+// --- checking: the browser's own parser, then the API's rules ----------------------------------------------------
+function lintSoon(m) {
+  clearTimeout(m.lintT);
+  m.lintT = setTimeout(() => lint(m), 450);
+}
+/** Parse the code in a throwaway worker, inside a function that is never called: the error event says where it
+ *  broke. [] when it parses, null when the check itself couldn't run. */
+function syntaxCheck(code) {
+  return new Promise((res) => {
+    let w, url;
+    try {
+      url = URL.createObjectURL(new Blob(['self.postMessage("ok");0&&async function(){"use strict";\n' + code + "\n}"], { type: "text/javascript" }));
+      w = new Worker(url);
+    } catch { res(null); return; }
+    const done = (r) => { clearTimeout(t); w.terminate(); URL.revokeObjectURL(url); res(r); };
+    const t = setTimeout(() => done(null), 3000);
+    w.onmessage = () => done([]);
+    w.onerror = (e) => {
+      e.preventDefault();
+      done([{ line: Math.max(0, (e.lineno || 2) - 2), col: e.lineno > 1 && e.colno > 0 ? e.colno - 1 : undefined, sev: "error",
+        msg: String(e.message || "Syntax error").replace(/^Uncaught /, "") }]);
+    };
+  });
+}
+async function lint(m) {
+  const v = m.version, d = diagsOf(m.name);
+  m.syms = symbols(m);
+  if (m === cur) drawOutline();
+  d.lint = check(m);
+  const syn = await syntaxCheck(m.text);
+  if (m.version !== v) return; // it changed again: that one's check will draw
+  if (syn) d.syntax = syn;
+  drawProblems();
+  if (m === cur) schedule();
+}
+const BLOCKED = new Set(["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "importScripts", "require", "document", "window", "localStorage", "eval", "Function"]);
+/** The API's rules, over its calls' literal arguments: known kinds, servers, hooks, commands, durations and times. */
+function check(m) {
+  const out = [], names = new Set(S.servers.map((s) => s.name));
+  for (let l = 0; l < m.lines.length; l++) {
+    const k = tokens(m, l).k, L = m.lines[l];
+    for (let j = 0; j < k.length; j++) {
+      const [a, b, c] = k[j], tx = L.slice(a, b);
+      if ((c === "id" || c === "fn") && BLOCKED.has(tx)) {
+        const pv = prevTok(m, l, j);
+        if (!pv || pv.text !== ".") out.push({ line: l, col: a, end: b, sev: "warn", msg: `${tx} isn't there for scripts: they reach out through rcon(), say(), discord(), telegram() and the rest of the API.` });
+        continue;
+      }
+      if (c !== "str" && c !== "num") continue;
+      const pv = prevTok(m, l, j);
+      if (!pv || !["(", ",", "["].includes(pv.text)) continue; // only literal arguments
+      if (c === "str" && (tx.length < 2 || tx[tx.length - 1] !== tx[0])) continue; // unclosed: the parser says so
+      const sg = sigAt(m, m.starts[l] + a);
+      if (!sg || sg.obj === "store" || MEMBERS[sg.obj]) continue;
+      const n = sg.obj ? "." + sg.name : sg.name, i = sg.arg, v = c === "num" ? Number(tx.replace(/_/g, "")) : tx.slice(1, -1);
+      const A = c === "str" ? a + 1 : a, B = Math.max(c === "str" ? b - 1 : b, A + 1);
+      const bad = (sev, msg) => out.push({ line: l, col: A, end: B, sev, msg });
+      if (c === "num") {
+        if ((n === "every" && i === 0 && v < 1000)) bad("warn", "every() runs at most once a second.");
+      } else if (n === "on" && i === 0) {
+        if (v !== "*" && !FIELDS[v]) bad("error", `There is no "${v}" event. The kinds are ${KINDS.join(", ")}, or "*".`);
+      } else if (n === "command" && i === 0) {
+        if (!v.trim() || /\s/.test(v)) bad("warn", 'A command is one word, like "!rules".');
+      } else if (n === "rcon" && i === 1) {
+        if (!RCON.includes(v.toLowerCase())) bad("warn", `Oni has no "${v}" command, so it won't be sent.`);
+      } else if ((n === "discord" || n === "telegram") && i === 0) {
+        if (S.hooksLoaded && !S.hooks[n].includes(v)) bad("warn", `No ${n === "discord" ? "Discord webhook" : "Telegram chat"} is named "${v}": add it in F9, Automation.`);
+      } else if ((n === "every" || n === "after" || n === "sleep") && i === 0) {
+        const ms = parseDur(v);
+        if (Number.isNaN(ms)) bad("error", `"${v}" isn't a duration: try "30s", "10m", "2h" or "1d".`);
+        else if (n === "every" && ms < 1000) bad("warn", "every() runs at most once a second.");
+      } else if (SERVER_ARG.has(n) && i === 0) {
+        if (v === "*") { if (n !== "say") bad("error", '"*" (every online server) works with say() only.'); }
+        else if (names.size && !names.has(v)) bad("warn", `Oni has no server named "${v}".`);
+      } else if ((n === "ban" && i === 2) || (n === ".ban" && i === 0)) {
+        if (!BAN_TIMES.includes(v)) bad("error", `A ban lasts ${BAN_TIMES.map((x) => `"${x}"`).join(", ")}.`);
+      } else if ((n === "mute" && i === 2) || (n === ".mute" && i === 0)) {
+        if (!MUTE_TIMES.includes(v)) bad("error", `A mute lasts ${MUTE_TIMES.map((x) => `"${x}"`).join(", ")}.`);
+      } else if (n === "notify" && i === 1) {
+        if (!LEVELS.includes(v)) bad("error", 'A notification is "info", "warn" or "error".');
+      }
+    }
+  }
+  return out;
+}
+/** The outline: what a script hooks, its timers, and its top-level names. ponytail: line regexes, not a parse */
+function symbols(m) {
+  const out = [], list = (s) => s.replace(/["'[\]\s]/g, "").replace(/,/g, ", ");
+  for (let l = 0; l < m.lines.length; l++) {
+    const L = m.lines[l];
+    let x;
+    if (/^\s*(\/\/|\/\*|\*)/.test(L)) continue;
+    if ((x = /(?<![.\w$])on\s*\(\s*(\[[^\]]*\]|"[^"]*"|'[^']*')/.exec(L))) out.push({ l, ic: "◆", name: "on " + list(x[1]) });
+    else if ((x = /(?<![.\w$])command\s*\(\s*(\[[^\]]*\]|"[^"]*"|'[^']*')/.exec(L))) out.push({ l, ic: "!", name: list(x[1]) });
+    else if ((x = /(?<![.\w$])(every|after)\s*\(\s*("[^"]*"|'[^']*'|[\d_]+)/.exec(L))) out.push({ l, ic: "◷", name: x[1] + " " + x[2].replace(/["']/g, "") });
+    else if ((x = /^\s*(?:async\s+)?function\s*\*?\s*([\w$]+)/.exec(L))) out.push({ l, ic: "ƒ", name: x[1] + "()" });
+    else if ((x = /^(?:const|let|var)\s+([\w$]+)\s*=\s*(?:async\s*)?(?:\([^)]*\)|[\w$]+)\s*=>/.exec(L))) out.push({ l, ic: "ƒ", name: x[1] + "()" });
+    else if ((x = /^(?:const|let|var)\s+([\w$]+)/.exec(L))) out.push({ l, ic: "▸", name: x[1] });
+  }
+  return out;
+}
+function drawOutline() {
+  $("outline").innerHTML = !cur ? "" : cur.syms.length
+    ? cur.syms.map((s, i) => `<div class="sym" data-i="${i}" title="Line ${s.l + 1}"><i>${esc(s.ic)}</i>${esc(mask(s.name))}<span class="dim">${s.l + 1}</span></div>`).join("")
+    : '<div class="empty">Nothing yet.</div>';
+}
+$("outline").onclick = (e) => {
+  const r = e.target.closest(".sym");
+  if (r && cur) goTo(cur.syms[+r.dataset.i].l);
+};
+/** Put the caret on line l (0-based), at col or the line's first non-blank, in the middle of the view. */
+function goTo(l, col) {
+  if (!cur) return;
+  l = clamp(l, 0, cur.lines.length - 1);
+  const L = cur.lines[l];
+  ta.focus({ preventScroll: true });
+  setSel(cur.starts[l] + clamp(col ?? L.length - L.trimStart().length, 0, L.length));
+  centerLine(l);
+  reveal();
+  schedule();
+  drawStatus();
+}
+let probRows = [];
+function drawProblems() {
+  const rows = [];
+  let ne = 0;
+  for (const [name, d] of diags)
+    for (const [src, xs] of [["syntax", d.syntax], ["check", d.lint], ["runtime", d.runtime]])
+      for (const x of xs) { rows.push({ name, src, ...x }); if (x.sev === "error") ne++; }
+  rows.sort((a, b) => a.name.localeCompare(b.name) || a.line - b.line || (a.col ?? 0) - (b.col ?? 0));
+  probRows = rows;
+  const bp = $("b-problems");
+  bp.textContent = rows.length ? String(rows.length) : "";
+  bp.className = "badge" + (ne ? "" : " w");
+  $("plist").innerHTML = rows.length ? rows.map((x, i) => `<div class="row prob ${x.sev}" data-i="${i}"><span class="ic ${x.sev === "error" ? "bad" : "warn"}">${
+    x.sev === "error" ? "✖" : "▲"}</span><span class="m">${esc(mask(x.msg))}</span><span class="dim">${x.src}</span><span class="loc">${esc(x.name)}.js:${x.line + 1}${
+    x.col != null ? ":" + (x.col + 1) : ""}</span></div>`).join("") : '<div class="empty">No problems.</div>';
+  drawFiles();
+}
+$("plist").onclick = async (e) => {
+  const r = e.target.closest(".prob"), x = r && probRows[+r.dataset.i];
+  if (x && (await openScript(x.name))) goTo(x.line, x.col);
+};
+
+// --- the runtime: each script in a worker of its own ------------------------------------------------------------
+/** Runs in a script's worker, before the script: the API as globals, over messages to this page, which checks and
+ *  limits everything that leaves. It is turned into text, so it uses nothing from outside itself. */
+function workerMain() {
+  "use strict";
+  const post = self.postMessage.bind(self), T = { once: self.setTimeout.bind(self), every: self.setInterval.bind(self), clear: self.clearTimeout.bind(self) };
+  let NAME = "", DRY = false, SERVERS = [], KINDS = [], BANS = [], MUTES = [], DATA = Object.create(null);
+  let mainDone = false, lastLive = -1, seq = 0, tid = 0, busy = 0, settling = false, storing = false, logN = 0, logT = 0, logLost = 0;
+  const handlers = [], timers = new Map(), asks = new Map();
+  const live = () => handlers.length + timers.size + asks.size + busy;
+  /** Tell the page how much is left to happen, once the script's top level is done: nothing left means finished. */
+  function settle() {
+    if (settling) return;
+    settling = true;
+    queueMicrotask(() => {
+      settling = false;
+      const n = live();
+      if (mainDone && n !== lastLive) { lastLive = n; post({ t: "live", n }); }
+    });
+  }
+  function fmt(v, d = 0, seen = new Set()) {
+    if (typeof v === "string") return d ? JSON.stringify(v) : v;
+    if (typeof v === "function") return `[function ${v.name || "anonymous"}]`;
+    if (typeof v === "bigint") return v + "n";
+    if (v === null || typeof v !== "object") return String(v);
+    if (seen.has(v)) return "[Circular]";
+    if (v instanceof Error) return `${v.name}: ${v.message}`;
+    if (v instanceof Date) return isNaN(v) ? "Invalid Date" : v.toISOString();
+    if (v instanceof RegExp) return String(v);
+    if (v instanceof Promise) return "Promise {}";
+    if (d >= 4) return Array.isArray(v) ? "[Array]" : "[Object]";
+    seen.add(v);
+    const more = (n) => (n > 100 ? [`… ${n - 100} more`] : []), key = (k) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k));
+    let o;
+    if (Array.isArray(v)) o = `[${[...v.slice(0, 100).map((x) => fmt(x, d + 1, seen)), ...more(v.length)].join(", ")}]`;
+    else if (v instanceof Map) o = `Map(${v.size}) {${[...[...v].slice(0, 100).map(([k, x]) => `${fmt(k, d + 1, seen)} => ${fmt(x, d + 1, seen)}`), ...more(v.size)].join(", ")}}`;
+    else if (v instanceof Set) o = `Set(${v.size}) {${[...[...v].slice(0, 100).map((x) => fmt(x, d + 1, seen)), ...more(v.size)].join(", ")}}`;
+    else {
+      const ks = Object.keys(v);
+      o = ks.length ? `{ ${[...ks.slice(0, 100).map((k) => `${key(k)}: ${fmt(v[k], d + 1, seen)}`), ...more(ks.length)].join(", ")} }` : "{}";
+    }
+    seen.delete(v);
+    return o;
+  }
+  function out(level, a) {
+    const now = Date.now();
+    if (now - logT > 10000) {
+      if (logLost) post({ t: "log", level: "warn", text: `${logLost} lines weren't shown: over 500 in 10 s` });
+      logT = now; logN = 0; logLost = 0;
+    }
+    if (++logN > 500) { logLost++; return; }
+    let text;
+    try { text = a.map((x) => fmt(x)).join(" "); } catch { text = "[unprintable]"; }
+    post({ t: "log", level, text: text.length > 20000 ? text.slice(0, 20000) + "…" : text, stack: new Error().stack });
+  }
+  const errText = (err) => (err instanceof Error ? `${err.name}: ${err.message}` : "Uncaught " + fmt(err));
+  function report(err, where) {
+    post({ t: "error", text: (where ? where + ": " : "") + errText(err), stack: err instanceof Error ? String(err.stack) : "" });
+  }
+  /** Every callback the script hands over runs through this: what it throws, now or later, is reported, not fatal. */
+  function guard(fn, where) {
+    return (...a) => {
+      try {
+        const r = fn(...a);
+        if (r && typeof r.then === "function") {
+          busy++;
+          Promise.resolve(r).then(undefined, (err) => report(err, where)).finally(() => { busy--; settle(); });
+        }
+      } catch (err) { report(err, where); }
+    };
+  }
+  function toMs(x, what) {
+    let ms = NaN;
+    if (typeof x === "number") ms = x;
+    else if (typeof x === "string") {
+      const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?\s*$/i.exec(x);
+      if (m) ms = +m[1] * { ms: 1, s: 1e3, m: 6e4, h: 36e5, d: 864e5 }[(m[2] || "ms").toLowerCase()];
+    }
+    if (!(ms >= 0)) throw new TypeError(`${what}: ${JSON.stringify(x)} isn't a duration, like "30s", "10m", "2h" or "1d"`);
+    return Math.min(ms, 2147483647);
+  }
+  const needFn = (fn, what) => { if (typeof fn !== "function") throw new TypeError(`${what}: the last argument must be a function`); };
+  function every(dur, fn) {
+    const ms = Math.max(1000, toMs(dur, "every()")), id = ++tid;
+    needFn(fn, "every()");
+    timers.set(id, T.every(guard(fn, "every " + dur), ms));
+    settle();
+    return id;
+  }
+  function after(dur, fn) {
+    const ms = toMs(dur, "after()"), id = ++tid, g = guard(fn, "after " + dur);
+    needFn(fn, "after()");
+    timers.set(id, T.once(() => { timers.delete(id); g(); settle(); }, ms));
+    settle();
+    return id;
+  }
+  function cancel(id) {
+    if (!timers.has(id)) return false;
+    T.clear(timers.get(id));
+    timers.delete(id);
+    settle();
+    return true;
+  }
+  function sleep(dur) {
+    const ms = toMs(dur, "sleep()"), id = ++tid;
+    return new Promise((res) => timers.set(id, T.once(() => { timers.delete(id); res(); settle(); }, ms)));
+  }
+  const timer = (f, what) => (fn, ms, ...a) => {
+    if (typeof fn !== "function") throw new TypeError(`${what} needs a function`);
+    return f(+ms || 0, () => fn(...a));
+  };
+  self.setTimeout = timer(after, "setTimeout");
+  self.setInterval = timer(every, "setInterval");
+  self.clearTimeout = self.clearInterval = cancel;
+  /** One request to the page; its answer settles the promise. A failure's stack is where the script asked. */
+  function ask(t, body) {
+    const id = ++seq, stack = new Error().stack;
+    return new Promise((res, rej) => {
+      asks.set(id, { res, rej, stack });
+      post({ t, id, ...body });
+      settle();
+    });
+  }
+  function answered(m) {
+    const a = asks.get(m.id);
+    if (!a) return;
+    asks.delete(m.id);
+    if (m.ok) a.res(m.value);
+    else {
+      const e = new Error(String(m.error || "failed"));
+      e.stack = `Error: ${e.message}\n` + String(a.stack).split("\n").slice(1).join("\n");
+      a.rej(e);
+    }
+    settle();
+  }
+  function serverOf(s, what) {
+    const n = s && typeof s === "object" ? s.server ?? s.name : s;
+    if (typeof n !== "string" || !SERVERS.some((x) => x.name === n)) throw new TypeError(`${what}: Oni has no server named ${JSON.stringify(n)}`);
+    return n;
+  }
+  function who(p, what) {
+    const v = p && typeof p === "object" ? p.player_id ?? p.id ?? p.player ?? p.name : p;
+    if (v == null || v === "") throw new TypeError(`${what}: which player?`);
+    return String(v);
+  }
+  function timeOf(t, list, what) {
+    t = String(t ?? "");
+    if (!list.includes(t)) throw new TypeError(`${what}: the time is one of ${list.map((x) => JSON.stringify(x)).join(", ")}`);
+    return t;
+  }
+  const trim = (a) => { while (a.length && a[a.length - 1] === "") a.pop(); return a; };
+  function rcon(server, command, ...args) {
+    const s = serverOf(server, "rcon()");
+    if (typeof command !== "string" || !command.trim()) throw new TypeError("rcon(server, command, ...args): command must be a word");
+    return ask("rcon", { server: s, command: command.trim().toLowerCase(), args: args.map((x) => String(x ?? "")) });
+  }
+  function say(server, text) {
+    if (server === "*") return Promise.all(SERVERS.filter((x) => x.online).map((x) => rcon(x.name, "say", String(text ?? ""))));
+    return rcon(serverOf(server, "say()"), "say", String(text ?? ""));
+  }
+  const tell = (server, p, text) => rcon(serverOf(server, "tell()"), "tell", who(p, "tell()"), String(text ?? ""));
+  const kick = (server, p, reason = "") => rcon(serverOf(server, "kick()"), "kick", ...trim([who(p, "kick()"), String(reason)]));
+  const ban = (server, p, time = "", reason = "") =>
+    rcon(serverOf(server, "ban()"), "ban", ...trim([who(p, "ban()"), timeOf(time, BANS, "ban()"), String(reason)]));
+  const mute = (server, p, time = "", reason = "") =>
+    rcon(serverOf(server, "mute()"), "mute", ...trim([who(p, "mute()"), timeOf(time, MUTES, "mute()"), String(reason)]));
+  const unmute = (server, p) => rcon(serverOf(server, "unmute()"), "unmute", who(p, "unmute()"));
+  async function players(server) {
+    const r = await rcon(server, "players");
+    if (!r.ok) throw new Error(`players(): ${r.text || "no answer"}`);
+    return r.data ?? [];
+  }
+  const servers = () => SERVERS.map((x) => ({ ...x }));
+  const notify = (text, level = "info") => void post({ t: "notify", text: String(text), level: String(level) });
+  const discord = (hook, text) => ask("discord", { to: String(hook), text: String(text ?? "") });
+  const telegram = (chat, text) => ask("telegram", { to: String(chat), text: String(text ?? "") });
+  const copy = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+  function stored() {
+    if (storing) return;
+    storing = true;
+    queueMicrotask(() => { storing = false; post({ t: "store", data: DATA }); });
+  }
+  const store = Object.freeze({
+    get(k, fallback) { k = String(k); return k in DATA ? copy(DATA[k]) : fallback; },
+    set(k, v) {
+      const s = JSON.stringify(v);
+      if (s === undefined) throw new TypeError("store.set(): only JSON values (numbers, text, true/false, null, lists and objects of them) can be saved");
+      DATA[String(k)] = JSON.parse(s);
+      stored();
+      return v;
+    },
+    inc(k, by = 1) {
+      k = String(k);
+      const n = (typeof DATA[k] === "number" ? DATA[k] : 0) + Number(by);
+      if (!Number.isFinite(n)) throw new TypeError("store.inc(): by must be a number");
+      DATA[k] = n;
+      stored();
+      return n;
+    },
+    del(k) { k = String(k); const had = k in DATA; delete DATA[k]; if (had) stored(); return had; },
+    has: (k) => String(k) in DATA,
+    keys: (prefix = "") => Object.keys(DATA).filter((k) => k.startsWith(String(prefix))),
+    all: () => copy(DATA),
+    clear() { DATA = Object.create(null); stored(); },
+  });
+  function match(want, got) {
+    if (typeof want === "function") return !!want(got);
+    if (want instanceof RegExp) { want.lastIndex = 0; return want.test(String(got ?? "")); }
+    if (Array.isArray(want)) return want.some((w) => match(w, got));
+    if (typeof want === "string" && typeof got === "string") return want.toLowerCase() === got.toLowerCase();
+    return want === got || (want != null && got != null && typeof want !== "object" && String(want) === String(got));
+  }
+  function matcher(f) {
+    if (f == null) return () => true;
+    if (typeof f === "function") return f;
+    if (typeof f !== "object") throw new TypeError("a filter is an object of fields to match, or a function of ev");
+    const ents = Object.entries(f);
+    return (ev) => ents.every(([k, w]) => match(w, ev[k]));
+  }
+  function on(kinds, filter, fn) {
+    if (fn === undefined) { fn = filter; filter = null; }
+    needFn(fn, "on()");
+    const ks = kinds === "*" ? null : (Array.isArray(kinds) ? kinds : [kinds]).map(String);
+    for (const k of ks || []) if (!KINDS.includes(k)) throw new TypeError(`on(): there is no "${k}" event`);
+    const h = { ks, test: matcher(filter), fn: guard(fn, "on " + (ks ? ks.join(",") : "*")) };
+    handlers.push(h);
+    settle();
+    return () => {
+      const i = handlers.indexOf(h);
+      if (i >= 0) { handlers.splice(i, 1); settle(); }
+    };
+  }
+  function command(names, filter, fn) {
+    if (fn === undefined) { fn = filter; filter = null; }
+    needFn(fn, "command()");
+    const ns = (Array.isArray(names) ? names : [names]).map((n) => String(n).trim().toLowerCase());
+    if (!ns.length || ns.some((n) => !n || /\s/.test(n))) throw new TypeError('command(): a command is one word, like "!rules"');
+    const test = matcher(filter), g = guard(fn, "command " + ns.join(","));
+    return on("chat", (ev) => {
+      if (ev.channel === "server") return;
+      const text = String(ev.text ?? "").trim(), word = text.split(/\s+/)[0].toLowerCase();
+      if (!ns.includes(word)) return;
+      ev.command = word;
+      ev.rest = text.slice(word.length).trim();
+      ev.args = ev.rest ? ev.rest.split(/\s+/) : [];
+      if (test(ev)) g(ev);
+    });
+  }
+  /** Each handler gets a copy of the event of its own, with where it came from and what to do back. */
+  function decorate(ev, server, kind, at) {
+    ev.server = server;
+    ev.kind = kind;
+    ev.at = at;
+    ev.player = kind === "kill" ? ev.killer_name ?? ev.killer : kind === "pardon" ? ev.target : ev.name;
+    const p = () => ev.player_id ?? ev.id ?? ev.player;
+    Object.defineProperties(ev, {
+      reply: { value: (text) => say(server, text) },
+      tell: { value: (text) => tell(server, p(), text) },
+      kick: { value: (reason = "") => kick(server, p(), reason) },
+      ban: { value: (time = "", reason = "") => ban(server, p(), time, reason) },
+      mute: { value: (time = "", reason = "") => mute(server, p(), time, reason) },
+      unmute: { value: () => unmute(server, p()) },
+    });
+    return ev;
+  }
+  function dispatch(m) {
+    for (const h of handlers.slice()) {
+      if (h.ks && !h.ks.includes(m.kind)) continue;
+      const ev = decorate(structuredClone(m.ev), m.server, m.kind, m.at);
+      let ok;
+      try { ok = h.test(ev); } catch (err) { report(err, "a filter"); continue; }
+      if (ok) h.fn(ev);
+    }
+  }
+  function init(m) {
+    if (NAME) return;
+    NAME = String(m.name); DRY = !!m.dry; SERVERS = m.servers || []; KINDS = m.kinds || []; BANS = m.bans || [""]; MUTES = m.mutes || [""];
+    DATA = Object.assign(Object.create(null), m.data || {});
+    const log = (...a) => out("log", a), warn = (...a) => out("warn", a), error = (...a) => out("error", a);
+    const api = { on, command, every, after, cancel, sleep, log, warn, error, rcon, say, tell, kick, ban, mute, unmute, players, servers, notify,
+      discord, telegram, store, script: Object.freeze({ name: NAME, dry: DRY }) };
+    for (const [k, v] of Object.entries(api)) Object.defineProperty(self, k, { value: v, writable: true, configurable: true });
+    try { Object.defineProperty(self, "console", { value: { log, info: log, debug: log, warn, error }, writable: true, configurable: true }); } catch {}
+    const main = self.__main;
+    delete self.__main;
+    Promise.resolve().then(() => main()).then(
+      () => { mainDone = true; lastLive = live(); post({ t: "done", n: lastLive }); },
+      (err) => post({ t: "fatal", text: errText(err), stack: err instanceof Error ? String(err.stack) : "" }));
+  }
+  self.addEventListener("message", (e) => {
+    const m = e.data;
+    if (!m || typeof m !== "object") return;
+    if (m.t === "event") dispatch(m);
+    else if (m.t === "reply") answered(m);
+    else if (m.t === "ping") post({ t: "pong" });
+    else if (m.t === "servers") SERVERS = m.servers || [];
+    else if (m.t === "store") DATA = Object.assign(Object.create(null), m.data || {});
+    else if (m.t === "init") init(m);
+  });
+  self.onerror = (msg, src, line, col, err) => (report(err ?? new Error(String(msg))), true);
+  self.addEventListener("unhandledrejection", (e) => { e.preventDefault(); report(e.reason, "a promise nobody waited on"); });
+  post({ t: "hello" });
+}
+const PRELUDE = "(" + workerMain + ")();";
+/** The worker's line (1-based) that holds a script's first line. */
+const CODE_LINE = PRELUDE.split("\n").length + 2;
+const workerSource = (code) => PRELUDE + '\n;self.__main=async function(){"use strict";\n' + code + "\n};";
+/** Where in the script a stack points: its first frame in the script's own lines, 0-based. */
+function locOf(stack) {
+  for (const x of String(stack || "").matchAll(/blob:[^\s)]*:(\d+):(\d+)/g)) {
+    const line = +x[1] - CODE_LINE;
+    if (line >= 0) return { line, col: +x[2] - 1 };
+  }
+  return null;
+}
+function runtimeDiag(name, loc, msg) {
+  if (!loc) return;
+  const R = diagsOf(name).runtime;
+  if (R.some((d) => d.line === loc.line && d.msg === msg)) return;
+  if (R.length >= 50) R.shift();
+  R.push({ line: loc.line, col: loc.col, sev: "error", msg });
+  drawProblems();
+  if (cur && cur.name === name) schedule();
+}
+
+const runs = new Map(); // the live scripts, by name
+let test = null; // the TEST run (a dry run of the editor's text), if there is one
+const sayT = new Map(); // server -> when say and tell went out to it, all scripts together
+const HOOKS = { discord: { q: [], busy: false, gap: 2000, last: 0 }, telegram: { q: [], busy: false, gap: 3000, last: 0 } };
+const LOG_LEVELS = new Set(["log", "warn", "error"]);
+const bytes = (s) => new TextEncoder().encode(s).length;
+
+class Run {
+  constructor(name, code, dry) {
+    Object.assign(this, { name, code, dry, state: "starting", why: "", started: Date.now(), events: 0, rcon: 0, errors: 0, store: {}, storeSize: 0,
+      q: [], w: null, url: "", hello: false, pong: 0, pinged: 0, wd: 0, rconT: [], errT: [], notifyT: [], saveT: 0, saving: null, unsaved: false, bigT: 0 });
+  }
+  get active() { return this.state === "starting" || this.state === "running"; }
+  post(x) { if (this.w) this.w.postMessage(x); }
+  send(x) {
+    if (this.hello) this.post(x);
+    else if (this.q.length < 200) this.q.push(x);
+  }
+  /** To the console. where: a stack from the worker, or a {line, col}. */
+  log(level, text, where) {
+    logLine({ at: Date.now(), script: this.name, test: this.dry, level, text: String(text), loc: typeof where === "string" ? locOf(where) : where ?? null });
+  }
+  async start() {
+    try { this.store = (await call({ op: "store", name: this.name })).data ?? {}; }
+    catch (e) {
+      if (!this.dry) return this.fail(`couldn't load its store: ${e.message}`); // starting empty would save over it
+      this.store = {};
+    }
+    if (this.state !== "starting") return; // stopped while it loaded
+    this.storeSize = bytes(JSON.stringify(this.store));
+    this.url = URL.createObjectURL(new Blob([workerSource(this.code)], { type: "text/javascript" }));
+    try { this.w = new Worker(this.url); }
+    catch (e) { return this.fail(`couldn't start: ${e.message}`); }
+    this.w.onmessage = (e) => this.msg(e.data);
+    this.w.onerror = (e) => { // after hello the worker reports its own errors; this is one that stopped it parsing
+      e.preventDefault();
+      if (!this.hello) this.fail(String(e.message || "Syntax error").replace(/^Uncaught /, ""),
+        e.lineno ? { line: clamp(e.lineno - CODE_LINE, 0, this.code.split("\n").length - 1), col: e.colno ? e.colno - 1 : undefined } : null);
+    };
+    this.pong = Date.now();
+    this.wd = setInterval(() => this.watch(), 2000);
+    this.log("sys", this.dry ? "TEST started: commands that change anything are only logged, and its store is never saved" : "started");
+    storeChanged(this);
+  }
+  /** A ping every 2 s; one unanswered for 6 s means it is stuck (a loop that never ends), so it is stopped. */
+  watch() {
+    const now = Date.now();
+    if (this.pinged > this.pong && now - this.pinged > 6000) return this.fail("it stopped answering for 6 s: a loop that never ends?");
+    if (this.pinged <= this.pong) { this.pinged = now; this.post({ t: "ping" }); }
+  }
+  msg(m) {
+    if (!m || typeof m !== "object" || !this.w) return;
+    switch (m.t) {
+      case "hello":
+        this.hello = true;
+        this.state = "running";
+        this.post({ t: "init", name: this.name, dry: this.dry, servers: S.servers, data: this.store, kinds: KINDS, bans: BAN_TIMES, mutes: MUTE_TIMES });
+        for (const x of this.q.splice(0)) this.post(x);
+        return runsChanged();
+      case "pong": this.pong = Date.now(); return;
+      case "log": return this.log(LOG_LEVELS.has(m.level) ? m.level : "log", m.text, m.stack);
+      case "error": return this.error(String(m.text), m.stack);
+      case "fatal": return this.fail(String(m.text), locOf(m.stack));
+      case "done": case "live":
+        if (m.n === 0) { this.state = "finished"; this.log("sys", "finished: it has nothing left to wait for"); this.end(); runsChanged(); }
+        return;
+      case "rcon": return void this.rconMsg(m);
+      case "notify": return this.notifyMsg(m);
+      case "discord": case "telegram": return this.hookMsg(m);
+      case "store": return this.storeMsg(m.data);
+    }
+  }
+  error(text, stack) {
+    const now = Date.now();
+    this.errors++;
+    this.errT = this.errT.filter((t) => now - t < 60000);
+    this.errT.push(now);
+    this.log("error", text, stack);
+    runtimeDiag(this.name, locOf(stack), text);
+    if (this.errT.length > 50) this.fail("over 50 errors in a minute");
+  }
+  fail(text, loc) {
+    if (this.state === "failed" || this.state === "stopped") return;
+    this.state = "failed";
+    this.why = text;
+    this.log("error", "Stopped: " + text, loc);
+    if (loc) runtimeDiag(this.name, loc, text);
+    this.end();
+    runsChanged();
+    if (!this.dry) toParent({ oni: "notify", text: `Script ${this.name} stopped: ${text}`, level: "error" });
+  }
+  stop() {
+    if (this.active) { this.state = "stopped"; this.log("sys", "stopped"); }
+    const p = this.end();
+    runsChanged();
+    return p;
+  }
+  /** Shut the worker; what its store holds still gets saved. */
+  end() {
+    clearInterval(this.wd);
+    if (this.w) { this.w.terminate(); this.w = null; }
+    if (this.url) { URL.revokeObjectURL(this.url); this.url = ""; }
+    this.q = [];
+    return this.flush();
+  }
+  async rconMsg(m) {
+    const reply = (value) => this.post({ t: "reply", id: m.id, ok: true, value }), no = (text) => reply({ ok: false, text, data: null });
+    const server = String(m.server ?? ""), command = String(m.command ?? "").toLowerCase(), args = Array.isArray(m.args) ? m.args.map(String) : [];
+    const line = cmdLine(command, args), now = Date.now();
+    this.rconT = this.rconT.filter((t) => now - t < 60000);
+    if (this.rconT.length >= 120) { this.log("warn", `not sent, over 120 commands a minute: ${server} › ${line}`); return no("not sent: over 120 commands a minute"); }
+    this.rconT.push(now);
+    this.rcon++;
+    if (this.dry && !(READONLY.has(command) && !(args.length && (command === "nextmap" || command === "admins")))) { this.log("rcon", `TEST, not sent: ${server} › ${line}`); return reply({ ok: null, text: "TEST run: not sent", data: null }); }
+    if (command === "say" || command === "tell") {
+      const t = (sayT.get(server) || []).filter((x) => now - x < 60000);
+      if (t.length >= 20) { this.log("warn", `not sent, over 20 say and tell a minute on ${server}: ${line}`); return no("not sent: over 20 say and tell a minute on this server"); }
+      t.push(now);
+      sayT.set(server, t);
+    }
+    this.log("rcon", `${server} › ${line}`);
+    const r = await rconOut(server, command, args);
+    if (r.ok === false) this.log("warn", `${server} › ${command}: ${r.text || "failed"}`);
+    reply({ ok: r.ok ?? null, text: r.text ?? "", data: r.data ?? null });
+  }
+  notifyMsg(m) {
+    const text = String(m.text ?? "").slice(0, 300), level = LEVELS.includes(m.level) ? m.level : "info", now = Date.now();
+    this.notifyT = this.notifyT.filter((t) => now - t < 60000);
+    if (this.notifyT.length >= 6) return this.log("warn", `not shown, over 6 notifications a minute: ${text}`);
+    this.notifyT.push(now);
+    if (this.dry) return this.log("sys", `TEST, not shown: notify (${level}) ${text}`);
+    this.log("sys", `notify (${level}): ${text}`);
+    toParent({ oni: "notify", text: `${this.name}: ${text}`, level });
+  }
+  hookMsg(m) {
+    const svc = m.t, to = String(m.to ?? ""), text = String(m.text ?? "");
+    const reply = (ok, value, error) => this.post({ t: "reply", id: m.id, ok, value, error });
+    if (!text.trim()) return reply(false, null, `${svc}(): nothing to post`);
+    if (this.dry) { this.log("sys", `TEST, not posted: ${svc} ${to}: ${text}`); return reply(true, { status: "TEST run: not posted" }); }
+    const H = HOOKS[svc];
+    if (H.q.length >= 20) { this.log("warn", `not posted, 20 are already waiting: ${svc} ${to}`); return reply(false, null, `${svc}: 20 posts are already waiting`); }
+    H.q.push({ run: this, to, text, reply });
+    pumpHook(svc);
+  }
+  storeMsg(data) {
+    if (!data || typeof data !== "object") return;
+    const s = JSON.stringify(data), n = bytes(s);
+    if (this.dry) { this.store = JSON.parse(s); this.storeSize = n; return storeChanged(this); } // a TEST run's store is never saved
+    if (n > 256 * 1024) {
+      if (Date.now() - this.bigT > 10000) { this.bigT = Date.now(); this.log("error", `its store is ${Math.ceil(n / 1024)} KiB, over 256 KiB: changes aren't saved`); }
+      return;
+    }
+    this.store = JSON.parse(s);
+    this.storeSize = n;
+    this.unsaved = true;
+    clearTimeout(this.saveT);
+    this.saveT = setTimeout(() => this.flush(), 1000);
+    storeChanged(this);
+  }
+  /** Save the store now if it changed; resolves once every save so far is done. */
+  flush() {
+    clearTimeout(this.saveT);
+    if (this.unsaved) {
+      this.unsaved = false;
+      const data = this.store;
+      this.saving = (this.saving || Promise.resolve()).then(() => call({ op: "store-save", name: this.name, data }))
+        .catch((e) => this.log("error", `couldn't save its store: ${e.message}`));
+    }
+    return this.saving || Promise.resolve();
+  }
+}
+/** Discord and Telegram posts, one at a time per service with a gap between, for every script together. */
+async function pumpHook(svc) {
+  const H = HOOKS[svc];
+  if (H.busy) return;
+  H.busy = true;
+  while (H.q.length) {
+    const wait = H.last + H.gap - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const x = H.q.shift();
+    if (!x.run.w) continue; // its script stopped while it waited
+    H.last = Date.now();
+    try {
+      await call({ op: svc, to: x.to, text: x.text });
+      x.run.log("sys", `posted to ${svc} ${x.to}`);
+      x.reply(true, { ok: true });
+    } catch (e) {
+      x.run.log("warn", `${svc} ${x.to}: ${e.message}`);
+      x.reply(false, null, e.message);
+    }
+  }
+  H.busy = false;
+}
+/** A server event, to each running script (or only to `to`). */
+function deliver(server, ev, to) {
+  const kind = ev && ev.event;
+  if (!FIELDS[kind]) return;
+  const x = { t: "event", server, kind, ev, at: Date.now() };
+  for (const r of to ?? [...runs.values(), ...(test ? [test] : [])]) {
+    if (!r.active) continue;
+    r.events++;
+    r.send(x);
+  }
+}
+async function startLive(name, code) {
+  const old = runs.get(name);
+  if (old) { runs.delete(name); await old.stop(); }
+  const r = new Run(name, code, false);
+  runs.set(name, r);
+  diagsOf(name).runtime = [];
+  drawProblems();
+  runsChanged();
+  await r.start();
+}
+async function stopLive(name) {
+  const r = runs.get(name);
+  if (!r) return;
+  runs.delete(name);
+  await r.stop();
+  runsChanged();
+}
+async function startTest() {
+  if (!cur) return;
+  const m = cur;
+  await stopTest();
+  test = new Run(m.name, m.text, true);
+  diagsOf(m.name).runtime = [];
+  drawProblems();
+  showPanel("console");
+  runsChanged();
+  await test.start();
+}
+async function stopTest() {
+  if (!test) return;
+  const t = test;
+  test = null;
+  await t.stop();
+  runsChanged();
+}
+let statusT = 0;
+/** A run started, stopped or failed: redraw, and tell Oni (its badge on F10). */
+function runsChanged() {
+  drawFiles();
+  drawTabs();
+  drawStatus();
+  clearTimeout(statusT);
+  statusT = setTimeout(() => {
+    const all = [...runs.values()];
+    call({ op: "status", running: all.filter((r) => r.active).length, failed: all.filter((r) => r.state === "failed").length })
+      .then(() => toParent({ oni: "refresh" }), () => {});
+  }, 300);
+}
+
+// --- the bottom panels -------------------------------------------------------------------------------------------
+let panel = "console";
+function showPanel(name) {
+  panel = name;
+  for (const b of $("btabs").querySelectorAll("[data-p]")) b.classList.toggle("on", b.dataset.p === name);
+  for (const s of $("panels").children) s.hidden = s.id !== "p-" + name;
+  setBottom(true);
+  if (name === "console") {
+    logErrs = 0;
+    $("b-console").textContent = "";
+    if (logStick) clog.scrollTop = clog.scrollHeight;
+  } else if (name === "store") loadStore();
+  else if (name === "rcon") rin.focus();
+  else if (name === "docs") $("d-q").focus();
+}
+function setBottom(show) {
+  $("bottom").hidden = $("sp-bottom").hidden = !show;
+}
+const togglePanel = () => ($("bottom").hidden ? showPanel(panel) : (setBottom(false), cur && ta.focus({ preventScroll: true })));
+$("btabs").onclick = (e) => {
+  const b = e.target.closest("[data-p]");
+  if (b) showPanel(b.dataset.p);
+};
+$("bhide").onclick = () => setBottom(false);
+const panelShown = (name) => panel === name && !$("bottom").hidden;
+
+// --- CONSOLE -----------------------------------------------------------------------------------------------------
+const clog = $("clog"), LOG = []; // {n, at, script, test, level: log|warn|error|rcon|sys, text, loc}
+const LOG_KEEP = 5000, LOG_SHOW = 1500;
+let logSeq = 0, logDrawn = 0, logStick = true, logErrs = 0, logDrawT = 0;
+const cf = () => ({ s: $("cf-script").value, l: $("cf-level").value, q: $("cf-text").value.trim().toLowerCase() });
+function logPass(x, f) {
+  if (f.s && x.script !== f.s) return false;
+  if (f.l && !(f.l === "warn" ? x.level === "warn" || x.level === "error" : x.level === f.l)) return false;
+  return !f.q || mask(x.text).toLowerCase().includes(f.q);
+}
+function logRow(x) {
+  return `<div class="row ${x.level === "log" ? "info" : x.level}"><span class="t">${hms(x.at)}</span>${x.test ? '<span class="tag">TEST</span>' : ""}<span class="s" data-s="${
+    esc(x.script)}" title="Only this script">${esc(x.script)}</span><span class="m">${esc(mask(x.text))}</span>${x.loc ? `<span class="loc" data-s="${esc(x.script)}" data-l="${
+    x.loc.line}" data-c="${x.loc.col ?? ""}">${esc(x.script)}.js:${x.loc.line + 1}</span>` : ""}</div>`;
+}
+function logLine(x) {
+  x.n = ++logSeq;
+  LOG.push(x);
+  if (LOG.length > LOG_KEEP) LOG.splice(0, LOG.length - LOG_KEEP);
+  if (x.level === "error" && !panelShown("console")) $("b-console").textContent = String(++logErrs);
+  logDrawT ||= setTimeout(() => drawLog(false), 80);
+}
+/** Draw the lines that came in since the last draw, or (all) every line again: the newest LOG_SHOW that pass. */
+function drawLog(all) {
+  clearTimeout(logDrawT);
+  logDrawT = 0;
+  const f = cf(), stick = logStick;
+  if (all) {
+    const xs = LOG.filter((x) => logPass(x, f)).slice(-LOG_SHOW);
+    clog.innerHTML = xs.length ? xs.map(logRow).join("") : '<div class="empty">Nothing yet. log() writes here, and so does every command a script sends.</div>';
+  } else {
+    const xs = [];
+    for (let i = LOG.length - 1; i >= 0 && LOG[i].n > logDrawn; i--) if (logPass(LOG[i], f)) xs.push(LOG[i]);
+    if (xs.length) {
+      clog.querySelector(".empty")?.remove();
+      clog.insertAdjacentHTML("beforeend", xs.reverse().slice(-LOG_SHOW).map(logRow).join(""));
+      while (clog.childElementCount > LOG_SHOW) clog.firstElementChild.remove();
+    }
+  }
+  logDrawn = logSeq;
+  $("c-count").textContent = LOG.length ? `${LOG.length} lines` : "";
+  if (stick) clog.scrollTop = clog.scrollHeight;
+}
+clog.addEventListener("scroll", () => { if (clog.clientHeight) logStick = clog.scrollTop + clog.clientHeight >= clog.scrollHeight - 4; });
+clog.onclick = async (e) => {
+  const l = e.target.closest(".loc"), s = e.target.closest(".s");
+  if (l) { if (await openScript(l.dataset.s)) goTo(+l.dataset.l, l.dataset.c === "" ? undefined : +l.dataset.c); }
+  else if (s) { $("cf-script").value = s.dataset.s; drawLog(true); }
+};
+$("cf-script").onchange = $("cf-level").onchange = $("cf-text").oninput = () => drawLog(true);
+$("c-clear").onclick = () => {
+  LOG.length = 0;
+  logErrs = 0;
+  $("b-console").textContent = "";
+  drawLog(true);
+};
+const TEST_KEY = "*test"; // the STORE panel's choice for the TEST run: no script's name has a *
+let scriptsKey = null;
+/** The script lists in CONSOLE and STORE, kept to what is there. */
+function fillScripts(names) {
+  const key = names.join("\n") + (test ? "\n" + TEST_KEY + test.name : "");
+  if (key === scriptsKey) return;
+  scriptsKey = key;
+  const opts = (xs) => xs.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join("");
+  const c = $("cf-script"), cv = c.value;
+  c.innerHTML = '<option value="">all scripts</option>' + opts(names);
+  c.value = cv && names.includes(cv) ? cv : "";
+  const s = $("st-script"), sv = s.value;
+  s.innerHTML = opts(names) + (test ? `<option value="${TEST_KEY}">${esc(test.name)} (TEST run)</option>` : "");
+  s.value = sv === TEST_KEY ? (test ? sv : names[0] ?? "") : names.includes(sv) ? sv : cur && names.includes(cur.name) ? cur.name : names[0] ?? "";
+  if (s.value !== sv && panelShown("store")) loadStore();
+}
+
+// --- EVENTS ------------------------------------------------------------------------------------------------------
+const elist = $("elist"), EVS = []; // {n, at, server, kind, ev}
+const EV_KEEP = 300;
+let evSeq = 0, evDrawn = 0, evPaused = false, evDrawT = 0;
+$("ef-kind").innerHTML = '<option value="">all kinds</option>' + KINDS.map((k) => `<option>${k}</option>`).join("");
+function evSummary(kind, ev) {
+  if (kind === "chat") return `${ev.name ?? "?"}${ev.channel && ev.channel !== "all" ? ` [${ev.channel}]` : ""}: ${ev.text ?? ""}`;
+  if (kind === "kill") return `${ev.killer_name ?? ev.killer ?? "?"} ▸ ${ev.victim_name ?? ev.victim ?? "?"}${ev.weapon ? `  (${ev.weapon})` : ""}`;
+  return Object.entries(ev).filter(([k, v]) => k !== "event" && v !== "" && v != null)
+    .map(([k, v]) => `${k}=${typeof v === "object" ? JSON.stringify(v) : v}`).join("  ");
+}
+function eventIn(server, ev) {
+  EVS.push({ n: ++evSeq, at: Date.now(), server, kind: ev.event, ev });
+  if (EVS.length > EV_KEEP) EVS.shift();
+  if (evPaused) { $("e-new").textContent = `${evSeq - evDrawn} new`; $("b-events").textContent = String(Math.min(evSeq - evDrawn, 999)); }
+  else evDrawT ||= setTimeout(() => drawEvents(false), 120);
+}
+const ef = () => ({ k: $("ef-kind").value, q: $("ef-text").value.trim().toLowerCase() });
+const evPass = (x, f) => (!f.k || x.kind === f.k) && (!f.q || mask(`${x.server} ${x.kind} ${evSummary(x.kind, x.ev)}`).toLowerCase().includes(f.q));
+const evRow = (x) => `<div class="row" data-n="${x.n}"><span class="t">${hms(x.at)}</span><span class="srv">${esc(x.server)}</span><span class="k">${esc(x.kind)}</span><span class="m">${
+  esc(mask(evSummary(x.kind, x.ev)))}</span><span class="btns"><button data-a="test" title="Send it to the TEST run">TEST</button><button data-a="sim" title="Open it in SIMULATE, to change and send">SIM</button></span></div>`;
+/** Newest first. Draw what came in since the last draw, or (all) everything again. */
+function drawEvents(all) {
+  clearTimeout(evDrawT);
+  evDrawT = 0;
+  const f = ef();
+  if (all) {
+    const xs = EVS.filter((x) => evPass(x, f)).reverse();
+    elist.innerHTML = xs.length ? xs.map(evRow).join("") : '<div class="empty">No events yet. Each one Oni hears from your servers shows here as it happens.</div>';
+  } else {
+    const xs = EVS.filter((x) => x.n > evDrawn && evPass(x, f)).reverse();
+    if (xs.length) {
+      const top = elist.scrollTop, h = elist.scrollHeight;
+      elist.querySelector(".empty")?.remove();
+      elist.insertAdjacentHTML("afterbegin", xs.map(evRow).join(""));
+      const rows = elist.querySelectorAll(":scope > .row");
+      for (let i = EV_KEEP; i < rows.length; i++) {
+        if (rows[i].nextElementSibling?.tagName === "PRE") rows[i].nextElementSibling.remove();
+        rows[i].remove();
+      }
+      if (top > 0) elist.scrollTop = top + elist.scrollHeight - h; // reading further down: stay on what was there
+    }
+  }
+  evDrawn = evSeq;
+  $("e-new").textContent = $("b-events").textContent = "";
+}
+elist.onclick = (e) => {
+  const r = e.target.closest(".row"), x = r && EVS.find((y) => y.n === +r.dataset.n);
+  if (!x) return;
+  const a = e.target.closest("button")?.dataset.a;
+  if (a === "test") return void simTest(x.server, x.ev);
+  if (a === "sim") return simLoad(x.kind, x.server, x.ev);
+  if (getSelection().toString()) return; // selecting text, not opening
+  const nx = r.nextElementSibling;
+  if (nx && nx.tagName === "PRE") nx.remove();
+  else r.insertAdjacentHTML("afterend", `<pre class="json">${esc(mask(JSON.stringify(x.ev, null, 2)))}</pre>`);
+};
+$("e-pause").onclick = () => {
+  evPaused = !evPaused;
+  $("e-pause").textContent = evPaused ? "RESUME" : "PAUSE";
+  $("e-pause").title = evPaused ? "Show what came in, and keep showing" : "Stop showing new events";
+  if (!evPaused) drawEvents(true);
+};
+$("ef-kind").onchange = $("ef-text").oninput = () => drawEvents(true);
+$("e-clear").onclick = () => {
+  EVS.length = 0;
+  drawEvents(true);
+};
+
+// --- SIMULATE ----------------------------------------------------------------------------------------------------
+const sKind = $("s-kind"), sServer = $("s-server"), sJson = $("s-json");
+sKind.innerHTML = KINDS.map((k) => `<option>${k}</option>`).join("");
+const sampleText = (k) => JSON.stringify(sample(k), null, 2);
+sJson.value = sampleText("chat");
+sKind.onchange = $("s-sample").onclick = () => { sJson.value = sampleText(sKind.value); };
+/** The server lists in SIMULATE and RCON, kept to Oni's servers. */
+function fillServers() {
+  const ns = S.servers.map((s) => s.name);
+  for (const el of [sServer, $("r-server")]) {
+    const v = el.value;
+    el.innerHTML = ns.length ? S.servers.map((s) => `<option value="${esc(s.name)}">${esc(s.name)}${s.online ? "" : " (offline)"}</option>`).join("")
+      : '<option value="">no servers</option>';
+    el.value = ns.includes(v) ? v : ns.includes(S.server) ? S.server : ns[0] ?? "";
+  }
+}
+function simEvent() {
+  let o;
+  try { o = JSON.parse(sJson.value); } catch (e) { toast("That isn't JSON: " + e.message, true); return null; }
+  if (!o || typeof o !== "object" || Array.isArray(o)) { toast('An event is a JSON object of its fields: { "name": "Rook", ... }', true); return null; }
+  if (!sServer.value) { toast("Oni has no server for it to come from: add one first.", true); return null; }
+  return { server: sServer.value, ev: { ...o, event: sKind.value } };
+}
+/** An event to the TEST run, started first (on the open script) when there isn't one. */
+async function simTest(server, ev) {
+  if (!test || !test.active) {
+    if (!cur) return toast("Open a script, then TEST it.", true);
+    await startTest();
+  }
+  if (!test || !test.active) return;
+  test.log("sys", `simulated: ${ev.event} on ${server}`);
+  deliver(server, ev, [test]);
+  toast(`Sent the ${ev.event} to the TEST run of ${test.name}.`);
+}
+function simLoad(kind, server, ev) {
+  sKind.value = kind;
+  if ([...sServer.options].some((o) => o.value === server)) sServer.value = server;
+  const { event, ...rest } = ev;
+  sJson.value = JSON.stringify(rest, null, 2);
+  showPanel("simulate");
+}
+$("s-test").onclick = () => {
+  const x = simEvent();
+  if (x) simTest(x.server, x.ev);
+};
+$("s-live").onclick = async () => {
+  const x = simEvent();
+  if (!x) return;
+  const live = [...runs.values()].filter((r) => r.active);
+  if (!live.length) return toast("No script is running live. RUN one, or SEND TO TEST.", true);
+  const ok = await modal({ title: "SEND TO LIVE SCRIPTS", ok: "SEND", danger: true,
+    text: `Send this made-up ${x.ev.event} on ${x.server} to ${live.length === 1 ? "1 running script" : live.length + " running scripts"}: ${live.map((r) => r.name).join(", ")}?\n\nThey act on it for real: what they send goes to the server.` });
+  if (!ok) return;
+  for (const r of live) r.log("sys", `simulated: ${x.ev.event} on ${x.server}`);
+  deliver(x.server, x.ev, live);
+};
+
+// --- RCON --------------------------------------------------------------------------------------------------------
+const rlog = $("rlog"), rin = $("rin"), rHist = [];
+let rAt = 0;
+rlog.innerHTML = '<div class="empty">Send a command to a server, as a script would: help lists them.</div>';
+function rRow(server, text, color) {
+  rlog.querySelector(".empty")?.remove();
+  rlog.insertAdjacentHTML("beforeend", `<div class="row"><span class="t">${hms(Date.now())}</span><span class="srv">${esc(server)}</span><span class="m"${
+    color ? ` style="color:var(--${color})"` : ""}>${esc(mask(text))}</span></div>`);
+  while (rlog.childElementCount > 1000) rlog.firstElementChild.remove();
+  rlog.scrollTop = rlog.scrollHeight;
+}
+rin.onkeydown = async (e) => {
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    e.preventDefault();
+    rAt = clamp(rAt + (e.key === "ArrowUp" ? -1 : 1), 0, rHist.length);
+    rin.value = rHist[rAt] ?? "";
+    return;
+  }
+  if (e.key !== "Enter") return;
+  const line = rin.value.trim(), server = $("r-server").value;
+  if (!line) return;
+  if (!server) return toast("Oni has no servers to send it to.", true);
+  if (rHist[rHist.length - 1] !== line) rHist.push(line);
+  if (rHist.length > 100) rHist.shift();
+  rAt = rHist.length;
+  rin.value = "";
+  const { command, args } = parseCommand(line);
+  if (!RCON.includes(command)) return rRow(server, `Oni has no "${command}" command. It knows ${RCON.join(", ")}.`, "warn");
+  rRow(server, "› " + cmdLine(command, args), "grey");
+  const r = await rconOut(server, command, args);
+  rRow(server, r.text || (r.data != null ? JSON.stringify(r.data, null, 2) : r.ok === false ? "failed" : "done"), r.ok === false ? "red" : "");
+};
+
+// --- STORE -------------------------------------------------------------------------------------------------------
+const stSel = $("st-script"), stJson = $("st-json");
+let stEdited = false;
+async function loadStore() {
+  const v = stSel.value, r = v === TEST_KEY ? test : runs.get(v);
+  stEdited = false;
+  if (!v) { stJson.value = ""; $("st-info").textContent = "No scripts yet."; stJson.readOnly = true; return; }
+  if (r && r.hello) return showStore(r.store, r); // it has started: what it holds now
+  let data;
+  try { data = (await call({ op: "store", name: v })).data ?? {}; }
+  catch (e) { stJson.value = ""; $("st-info").textContent = "Couldn't load it: " + e.message; return; }
+  if (stSel.value === v && !stEdited) showStore(data, null);
+}
+function showStore(data, r) {
+  const s = JSON.stringify(data, null, 2), isTest = stSel.value === TEST_KEY;
+  stJson.value = mask(s);
+  stJson.readOnly = S.redact || isTest;
+  $("st-save").disabled = $("st-clear").disabled = stJson.readOnly;
+  $("st-info").textContent = `${Object.keys(data).length} keys, ${(bytes(JSON.stringify(data)) / 1024).toFixed(1)} of 256 KiB` +
+    (isTest ? ": the TEST run's, never saved" : r && r.active ? ": live" : "") + (S.redact ? ". Read-only while addresses are hidden." : "");
+}
+/** A run's store changed: show it, unless what is shown is being edited. */
+function storeChanged(run) {
+  if (!panelShown("store") || stEdited || stSel.value !== (run.dry ? TEST_KEY : run.name)) return;
+  if (run.dry ? run === test : runs.get(run.name) === run) showStore(run.store, run);
+}
+stJson.oninput = () => { stEdited = true; };
+stSel.onchange = $("st-reload").onclick = () => loadStore();
+async function saveStore(data) {
+  const name = stSel.value;
+  if (!name || name === TEST_KEY || S.redact) return;
+  const n = bytes(JSON.stringify(data));
+  if (n > 256 * 1024) return toast(`That is ${Math.ceil(n / 1024)} KiB: a store is 256 KiB at most.`, true);
+  const r = runs.get(name);
+  try {
+    if (r && r.w) { // running: it gets the new data, and saves it
+      Object.assign(r, { store: data, storeSize: n, unsaved: true });
+      r.post({ t: "store", data });
+      await r.flush();
+    } else await call({ op: "store-save", name, data });
+  } catch (e) { return toast("Couldn't save it: " + e.message, true); }
+  stEdited = false;
+  showStore(data, r);
+  toast(`Saved ${name}'s store.`);
+}
+$("st-save").onclick = () => {
+  let o;
+  try { o = JSON.parse(stJson.value.trim() || "{}"); } catch (e) { return toast("That isn't JSON: " + e.message, true); }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return toast('A store is a JSON object: { "key": value, ... }', true);
+  saveStore(o);
+};
+$("st-clear").onclick = async () => {
+  const name = stSel.value;
+  if (name && (await modal({ title: "CLEAR STORE", text: `Forget everything ${name} has saved? This can't be undone.`, ok: "CLEAR", danger: true }))) saveStore({});
+};
+
+// --- DOCS --------------------------------------------------------------------------------------------------------
+const EXAMPLE = `// The top level runs once, when the script starts. What it hooks keeps it running.
+command("!kills", (ev) => {
+  ev.reply(\`\${ev.player} has \${store.get("kills:" + ev.player, 0)} kills\`);
+});
+
+on("kill", (ev) => {
+  store.inc("kills:" + ev.player);
+});
+
+every("30m", () => say("*", "Type !kills to see how you're doing"));`;
+function docsHTML() {
+  const q = (...s) => esc(s.join(" ").toLowerCase());
+  const it = ([sig, d]) => `<div class="it" data-q="${q(sig, d)}"><code>${esc(sig)}</code><div>${esc(d)}</div></div>`;
+  const table = (rows) => `<table>${rows.map(([a, b]) => `<tr data-q="${q(a, b)}"><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join("")}</table>`;
+  const sec = (title, body) => `<section><h3>${title}</h3>${body}</section>`;
+  const text = (s) => `<div class="it" data-q="${q(s)}">${esc(s)}</div>`;
+  return [
+    sec("A SCRIPT", `<div data-q="${q("example script start", EXAMPLE)}"><pre class="json" style="margin-left:0">${esc(EXAMPLE)}</pre></div>`),
+    sec("HOW SCRIPTS RUN", [
+      "Each script runs on its own, apart from the rest: no network, no files, no page. It reaches your servers only through the API below, and Oni's plug-in permissions decide what it may send.",
+      "RUN (Ctrl+Enter) saves the script, turns it on and starts it again: it runs for real, and starts each time Oni does, until you STOP it. Its light in SCRIPTS is green while it runs.",
+      "TEST (Ctrl+Shift+Enter) runs the editor's text, saved or not, as a dry run. Commands that only read (status, players, bans, maps, modes, help, and nextmap and admins without arguments) are sent; the rest, say() and kick() included, are logged instead, and resolve to { ok: null }. notify(), discord() and telegram() are logged too, and its store starts from the saved one but is never saved. Real events reach it, and SIMULATE sends it made-up ones.",
+      "The top level runs once. on(), command(), every() and after() keep a script running; once nothing is left to wait for it is finished. An error in a handler is logged and the script carries on; one at the top level stops it.",
+    ].map(text).join("")),
+    sec("THE API", [...API, ...Object.keys(DOC).filter((k) => k.startsWith("store."))].map((k) => it(DOC[k])).join("")),
+    sec("EVENTS", table(KINDS.map((k) => [k, `${KIND_DOC[k]}: ${FIELDS[k].split(" ").map((f) => "ev." + f).join(", ")}`]))),
+    sec("EVERY EVENT HAS", table([...EV_COMMON.map(([a, b]) => ["ev." + a, b]), ...EV_HELPERS.map(([, s, d]) => ["ev." + s, d]),
+      ...CMD_FIELDS.map(([a, b]) => ["ev." + a, b + ", in command() only"])])),
+    sec("FIELDS", table(Object.entries(FDOC).map(([a, b]) => ["ev." + a, b]))),
+    sec("LIMITS", table(LIMITS)),
+    sec("KEYS", table(KEYS)),
+  ].join("");
+}
+$("docs").innerHTML = docsHTML();
+$("d-q").oninput = () => {
+  const q = $("d-q").value.trim().toLowerCase(), D = $("docs");
+  for (const el of D.querySelectorAll("[data-q]")) el.hidden = !!q && !el.dataset.q.includes(q);
+  for (const s of D.querySelectorAll("section")) s.hidden = !!q && !s.querySelector("[data-q]:not([hidden])");
+};
+
+// --- splitters ---------------------------------------------------------------------------------------------------
+function splitter(el, at) {
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("drag");
+    const move = (ev) => at(ev), up = () => {
+      el.classList.remove("drag");
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointercancel", up);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+    el.addEventListener("pointercancel", up);
+  });
+}
+const rootStyle = document.documentElement.style;
+splitter($("sp-side"), (e) => rootStyle.setProperty("--side", clamp(e.clientX, 150, innerWidth / 2) + "px"));
+splitter($("sp-bottom"), (e) => rootStyle.setProperty("--bottom", clamp(innerHeight - $("status").offsetHeight - e.clientY, 90, innerHeight * 0.8) + "px"));
+let roT = 0; // a frame later: layout() resizes what sc holds, which would loop the observer
+new ResizeObserver(() => roT || (roT = requestAnimationFrame(() => { roT = 0; measure(); layout(); schedule(); placePopups(); }))).observe(sc); // measure: the frame may load hidden
+
+// --- scripts: the list, the tabs, and what to do with them -------------------------------------------------------
+const files = new Map(); // name -> {name, on, mtime}: what is on disk, as the last list said
+const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/; // studio.rs name_ok
+const nameError = (n) => (!n ? "Give it a name." : !NAME_RE.test(n) ? "Lower-case letters, digits, - and _, up to 40, starting with a letter or digit."
+  : files.has(n) ? `There is already a script called ${n}.` : "");
+const freeName = (base) => { if (!files.has(base)) return base; for (let i = 2; ; i++) if (!files.has(`${base}-${i}`)) return `${base}-${i}`; };
+const upFor = (t) => { const s = Math.floor((Date.now() - t) / 1000); return s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m" : Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m"; };
+const stateOf = (r) => (r ? r.state + (r.why ? ": " + r.why : "") : "");
+
+function drawFiles() {
+  const names = [...files.keys()].sort();
+  $("nfiles").textContent = names.length ? String(names.length) : "";
+  $("files").innerHTML = names.length ? names.map((n) => {
+    const f = files.get(n), r = runs.get(n), m = tabs.find((t) => t.name === n), d = allDiags(n), ne = d.filter((x) => x.sev === "error").length;
+    return `<div class="file${cur && cur.name === n ? " on" : ""}" data-n="${esc(n)}" title="${esc(mask(`${n}.js${r ? ", " + stateOf(r) : f.on ? ", on" : ""}`))}"><span class="light ${
+      r ? r.state : ""}"></span><span class="nm">${esc(n)}</span>${m && dirty(m) ? '<span class="dot">●</span>' : ""}${test && test.name === n && test.active ? '<span class="tb">TEST</span>' : ""}${
+      ne ? `<span class="bad">${ne}</span>` : d.length ? `<span class="warn">${d.length}</span>` : ""}<span class="acts"><button data-a="rename" title="Rename">✎</button><button data-a="dup" title="Duplicate">⧉</button><button data-a="del" title="Delete">✕</button></span><button class="sw${
+      f.on ? " on" : ""}" data-a="on" title="${f.on ? "On: it runs whenever Oni does. Click to stop it and turn it off." : "Off. Click to save, turn on and start it."}"></button></div>`;
+  }).join("") : '<div class="empty">No scripts yet.</div>';
+  fillScripts(names);
+}
+$("files").onclick = (e) => {
+  const row = e.target.closest(".file");
+  if (!row) return;
+  const n = row.dataset.n, a = e.target.closest("button")?.dataset.a;
+  if (a === "on") return files.get(n)?.on ? stopScript(n, false) : runScript(n);
+  if (a === "rename") return renameScript(n);
+  if (a === "dup") return duplicate(n);
+  if (a === "del") return deleteScript(n);
+  openScript(n);
+};
+function drawTabs() {
+  $("tabs").innerHTML = tabs.map((m, i) => {
+    const r = runs.get(m.name);
+    return `<div class="tab${m === cur ? " on" : ""}" data-i="${i}" title="${esc(m.name)}.js">${r ? `<span class="light ${r.state}"></span>` : ""}${esc(m.name)}${
+      dirty(m) ? '<span class="dot">●</span>' : ""}<button class="x" data-a="x" title="Close (Ctrl+W)">✕</button></div>`;
+  }).join("");
+  $("tabs").querySelector(".tab.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  $("welcome").hidden = !!cur;
+  drawBanner();
+  drawRunInfo();
+}
+$("tabs").onclick = (e) => {
+  const t = e.target.closest(".tab"), m = t && tabs[+t.dataset.i];
+  if (m) e.target.closest("[data-a=x]") ? closeTab(m) : activate(m);
+};
+$("tabs").onauxclick = (e) => {
+  const t = e.target.closest(".tab");
+  if (t && e.button === 1) closeTab(tabs[+t.dataset.i]);
+};
+$("tabs").addEventListener("wheel", (e) => { $("tabs").scrollLeft += e.deltaY; }, { passive: true });
+function drawBanner() {
+  const b = $("banner"), m = cur;
+  b.hidden = !m || !(m.gone || m.conflict);
+  if (b.hidden) return;
+  b.innerHTML = m.gone ? `<span class="grow">${esc(m.name)}.js was deleted outside the Studio. Save it to put it back.</span><button data-a="save">SAVE</button><button data-a="close">CLOSE</button>`
+    : `<span class="grow">${esc(m.name)}.js changed on disk while you had changes here.</span><button data-a="reload">LOAD THE DISK'S</button><button data-a="keep">KEEP MINE</button>`;
+}
+$("banner").onclick = (e) => {
+  const a = e.target.closest("button")?.dataset.a, m = cur;
+  if (!a || !m) return;
+  if (a === "save" || a === "keep") { m.conflict = false; save(m); }
+  else if (a === "close") closeTab(m, true);
+  else if (a === "reload") reloadFromDisk(m);
+};
+function drawStatus() {
+  const m = cur, o = [], all = [...runs.values()], nf = all.filter((r) => r.state === "failed").length;
+  if (m) {
+    const p = focusOf(), l = lineOf(m, Math.min(p, m.text.length)), n = Math.abs(ta.selectionEnd - ta.selectionStart), d = allDiags(m.name);
+    const ne = d.filter((x) => x.sev === "error").length;
+    o.push(`<span class="it" data-a="line" title="Go to a line (Ctrl+G)">Ln ${l + 1}, Col ${vcol(m.lines[l], p - m.starts[l]) + 1}${n ? ` (${n} selected)` : ""}</span>`,
+      `<span class="it" data-a="problems" title="Problems (Ctrl+Shift+M)"><span class="${ne ? "bad" : "dim"}">✖ ${ne}</span> <span class="${d.length - ne ? "warn" : "dim"}">▲ ${d.length - ne}</span></span>`);
+  }
+  o.push(`<span class="it" data-a="console" title="Console">${all.filter((r) => r.active).length} running${nf ? `, <span class="bad">${nf} failed</span>` : ""}${
+    test && test.active ? ', <span class="cyan">TEST</span>' : ""}</span>`, '<span class="grow"></span>');
+  if (S.redact) o.push('<span class="warn">addresses hidden</span>');
+  o.push(`<span>${S.servers.filter((s) => s.online).length} of ${S.servers.length} servers online</span>`, "<span>JavaScript</span>");
+  $("status").innerHTML = o.join("");
+}
+$("status").onclick = (e) => {
+  const a = e.target.closest("[data-a]")?.dataset.a;
+  if (a === "line") openQuick(":");
+  else if (a) showPanel(a);
+};
+const runText = (r) => `<span class="${r.state === "failed" ? "bad" : r.active ? "ok" : "grey"}">● ${r.state}</span> ${r.state === "failed" ? esc(mask(r.why))
+  : `${upFor(r.started)}, ${r.events} events, ${r.rcon} commands, ${r.errors} errors`}`;
+/** The toolbar, for the open script: what can be done, and how its runs are going. */
+function drawRunInfo() {
+  const m = cur, r = m && runs.get(m.name), t = m && test && test.name === m.name ? test : null, f = m && files.get(m.name);
+  $("run").disabled = $("test").disabled = $("save").disabled = !m;
+  $("stop").disabled = !(r && r.active) && !(t && t.active) && !(f && f.on);
+  $("restart").disabled = !r && !t;
+  $("runinfo").innerHTML = [r && "LIVE " + runText(r), t && "TEST " + runText(t)].filter(Boolean).join('<span class="dim">  ·  </span>');
+}
+
+/** Show a script in the editor, reading it from disk into a tab of its own when it has none. The tab, or null. */
+async function openScript(name) {
+  let m = tabs.find((t) => t.name === name);
+  if (!m) {
+    let x;
+    try { x = await call({ op: "read", name }); } catch (e) { toast(e.message, true); return null; }
+    m = tabs.find((t) => t.name === name); // opened while it read
+    if (!m) {
+      m = model(name, x.code);
+      m.mtime = x.mtime;
+      tabs.push(m);
+      lintSoon(m);
+    }
+  }
+  activate(m);
+  return m;
+}
+function activate(m) {
+  if (cur === m) { ta.focus({ preventScroll: true }); return; }
+  if (cur) { cur.sel = [ta.selectionStart, ta.selectionEnd, ta.selectionDirection]; cur.scroll = [sc.scrollTop, sc.scrollLeft]; }
+  closeAc();
+  hideTip();
+  $("sig").hidden = true;
+  cur = m;
+  ta.value = m.text;
+  layout();
+  ta.setSelectionRange(m.sel[0], m.sel[1], m.sel[2]);
+  sc.scrollTop = m.scroll[0];
+  sc.scrollLeft = m.scroll[1];
+  if (find.open) findAll();
+  drawTabs();
+  drawFiles();
+  drawOutline();
+  drawStatus();
+  schedule();
+  ta.focus({ preventScroll: true });
+}
+async function closeTab(m, force) {
+  if (!m) return;
+  if (dirty(m) && !force) {
+    const r = await modal({ title: "UNSAVED CHANGES", text: `${m.name}.js has changes that aren't saved.`, ok: "SAVE", alt: "DON'T SAVE" });
+    if (r === null || (r === true && !(await save(m)))) return;
+  }
+  const i = tabs.indexOf(m);
+  if (i < 0) return;
+  tabs.splice(i, 1);
+  if (cur !== m) return drawTabs();
+  cur = null;
+  if (tabs.length) return activate(tabs[Math.min(i, tabs.length - 1)]);
+  ta.value = "";
+  hl.innerHTML = gutin.innerHTML = deco.innerHTML = sqEl.innerHTML = "";
+  closeFind();
+  drawTabs();
+  drawFiles();
+  drawOutline();
+  drawStatus();
+}
+const cycleTab = (d) => tabs.length > 1 && activate(tabs[(tabs.indexOf(cur) + d + tabs.length) % tabs.length]);
+/** Save a tab to disk. True when it did. */
+async function save(m = cur) {
+  if (!m) return false;
+  const text = m.text;
+  let x;
+  try { x = await call({ op: "save", name: m.name, code: text }); } catch (e) { toast(`Couldn't save ${m.name}: ${e.message}`, true); return false; }
+  Object.assign(m, { saved: text, mtime: x.mtime, conflict: false, gone: false });
+  m.shownDirty = dirty(m);
+  if (!files.has(m.name)) files.set(m.name, { name: m.name, on: false, mtime: x.mtime });
+  drawTabs();
+  drawFiles();
+  drawStatus();
+  return true;
+}
+async function saveAll() {
+  for (const m of tabs.slice()) if (dirty(m)) await save(m);
+}
+async function reloadFromDisk(m) {
+  let x;
+  try { x = await call({ op: "read", name: m.name }); } catch (e) { return toast(e.message, true); }
+  m.conflict = false;
+  m.mtime = x.mtime;
+  replaceAll(m, x.code);
+  m.saved = x.code;
+  m.shownDirty = dirty(m);
+  drawTabs();
+  drawFiles();
+}
+/** RUN: save it, turn it on, and start it again from what is saved. */
+async function runScript(name = cur?.name) {
+  if (!name) return;
+  const m = tabs.find((t) => t.name === name);
+  if (m && dirty(m) && !(await save(m))) return;
+  let code = m?.text;
+  try {
+    if (code == null) code = (await call({ op: "read", name })).code;
+    await call({ op: "enable", name, on: true });
+  } catch (e) { return toast(e.message, true); }
+  const f = files.get(name);
+  if (f) f.on = true;
+  if (test && test.name === name) await stopTest(); // the real one takes over
+  await startLive(name, code);
+}
+/** STOP: its run (and its TEST, unless only the switch was flipped) stops, and it is turned off. */
+async function stopScript(name = cur?.name, andTest = true) {
+  if (!name) return;
+  if (andTest && test && test.name === name) await stopTest();
+  await stopLive(name);
+  const f = files.get(name);
+  if (f && f.on) {
+    try { await call({ op: "enable", name, on: false }); f.on = false; } catch (e) { toast(e.message, true); }
+  }
+  drawFiles();
+  drawRunInfo();
+}
+/** RESTART: the live run from what is saved, else the TEST from the editor. */
+async function restartScript(name = cur?.name) {
+  if (!name) return;
+  if (runs.has(name)) {
+    let x;
+    try { x = await call({ op: "read", name }); } catch (e) { return toast(e.message, true); }
+    await startLive(name, x.code);
+  } else if (test && cur && test.name === cur.name) await startTest();
+}
+async function stopAll() {
+  await stopTest();
+  await Promise.all([...runs.keys()].map(stopLive));
+  toast("Stopped every script. Those turned on start again with Oni, or with RUN.");
+}
+const TEMPLATES = [
+  ["Empty", "Nothing yet.", ""],
+  ["Welcome", "Greets each player who joins, counts their visits, and answers !rules.", `// Greets each player who joins, and counts their visits.
+on("join", (ev) => {
+  const n = store.inc("visits:" + ev.player);
+  ev.tell(n === 1 ? \`Welcome, \${ev.player}! Type !rules for the rules.\` : \`Welcome back, \${ev.player}: visit \${n}.\`);
+});
+
+command("!rules", (ev) => {
+  ev.tell("Be kind. No cheating. Have fun.");
+});
+`],
+  ["Chat filter", "Mutes a player who says a word on the list, and bans one who keeps on.", `// Words nobody may say. Each time mutes for 10 minutes; the third time bans for a day.
+const WORDS = [/\\bbadword\\b/i, /\\bworseword\\b/i];
+
+on("chat", (ev) => {
+  if (ev.channel === "server" || !WORDS.some((w) => w.test(ev.text))) return;
+  const n = store.inc("strikes:" + ev.player);
+  if (n >= 3) {
+    ev.ban("1d", "language");
+    store.del("strikes:" + ev.player);
+  } else {
+    ev.mute("10m", "language");
+    ev.tell(\`Mind your language: strike \${n} of 3.\`);
+  }
+});
+`],
+  ["Kill streaks", "Calls out kill streaks, and answers !top with the most kills since it started.", `// Calls out every fifth kill in a row, and answers !top. Counts every server together.
+const streak = new Map();
+const kills = new Map();
+
+on("kill", (ev) => {
+  const killer = ev.killer_name, victim = ev.victim_name;
+  if (victim) streak.delete(victim);
+  if (!killer || killer === victim) return;
+  const n = (streak.get(killer) ?? 0) + 1;
+  streak.set(killer, n);
+  kills.set(killer, (kills.get(killer) ?? 0) + 1);
+  if (n % 5 === 0) ev.reply(\`\${killer} is on a \${n}-kill streak!\`);
+});
+
+on("leave", (ev) => streak.delete(ev.player));
+
+command("!top", (ev) => {
+  const top = [...kills].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  ev.reply(top.length ? "Top: " + top.map(([name, n], i) => \`\${i + 1}. \${name} (\${n})\`).join("  ") : "No kills yet.");
+});
+`],
+  ["Announcer", "Says the next of a list of messages on every online server, every 10 minutes.", `// Says the next message on every online server every 10 minutes, carrying on where it left off.
+const MESSAGES = [
+  "Type !rules to see the rules.",
+  "Seen a cheater? Type !report and their name.",
+  "Enjoying it? Bring a friend.",
+];
+let next = store.get("next", 0);
+
+every("10m", async () => {
+  await say("*", MESSAGES[next % MESSAGES.length]);
+  next = (next + 1) % MESSAGES.length;
+  store.set("next", next);
+});
+`],
+  ["Reports", "!report <player> <what they did>: a notification in Oni, and a post to Discord.", `// !report <player> <what they did>: tells you in Oni, and posts to the Discord webhook named "admin"
+// (add it in F9, Automation).
+command("!report", async (ev) => {
+  if (ev.args.length < 2) return ev.tell("Use: !report <player> <what they did>");
+  const [who, ...what] = ev.args, text = \`\${ev.player} reported \${who} on \${ev.server}: \${what.join(" ")}\`;
+  notify(text, "warn");
+  try {
+    await discord("admin", "🚩 " + text);
+    ev.tell("Thanks: an admin has been told.");
+  } catch (err) {
+    warn("couldn't post the report:", err.message);
+  }
+});
+`],
+  ["Discord log", "Posts joins, kicks and bans to a Discord webhook.", `// Posts joins, kicks and bans to the Discord webhook named "admin" (add it in F9, Automation).
+const HOOK = "admin";
+
+on("join", (ev) => discord(HOOK, \`→ \${ev.player} joined \${ev.server}\`));
+on("kick", (ev) => discord(HOOK, \`\${ev.player} was kicked from \${ev.server} by \${ev.by}: \${ev.reason || "no reason given"}\`));
+on("ban", (ev) => discord(HOOK, \`⛔ \${ev.player} was banned on \${ev.server} by \${ev.by}: \${ev.reason || "no reason given"}\`));
+`],
+  ["Next-game vote", "!nextvote: players vote on what plays next, and the winner is queued after this game.", `// !nextvote: an admin opens a vote on what plays next. Players answer with a number (2 or !2), and their last
+// answer counts. Standings go out with 30 and 10 seconds left, and the winner is queued with nextmap, so this game
+// finishes first. !nextvote end closes it early, !nextvote cancel drops it, and anyone can type !nextvote list.
+// Leave CHOICES empty to vote on up to 5 games from the server's own rotation.
+const CHOICES = []; // e.g. [["Guardian", "Slayer"], ["Narrows", "CTF"], ["The Pit", ""]]: a map, then a mode ("" keeps the rules)
+const SECONDS = 60;
+const timers = new Map(); // server -> its vote's after() ids, so end and cancel stop them
+
+const label = (c) => (c.mode ? \`\${c.map} (\${c.mode})\` : c.map);
+const list = (v) => v.choices.map((c, i) => \`\${i + 1}. \${label(c)}\`).join("  ");
+const tally = (v) => v.choices.map((_, i) => Object.values(v.answers).filter((a) => a === i + 1).length);
+const standings = (v) => tally(v).map((n, i) => \`\${i + 1}: \${n}\`).join("  ");
+
+async function isAdmin(ev) {
+  if (!ev.player_id) return false; // a name alone could be anyone's
+  const r = await rcon(ev.server, "admins");
+  return (r.data?.admins ?? []).some((a) => a.player_id === ev.player_id);
+}
+
+function stop(server) {
+  for (const id of timers.get(server) ?? []) cancel(id);
+  timers.delete(server);
+  store.del("vote:" + server);
+}
+
+function schedule(server) {
+  const left = store.get("vote:" + server).ends - Date.now(), ids = [after(Math.max(left, 1000), () => finish(server))];
+  for (const s of [30, 10]) {
+    if (left > (s + 1) * 1000) ids.push(after(left - s * 1000, () => say(server, \`\${s} s left: \${standings(store.get("vote:" + server))}\`)));
+  }
+  timers.set(server, ids);
+}
+
+async function finish(server) {
+  const v = store.get("vote:" + server);
+  stop(server);
+  if (!v) return;
+  const n = tally(v), top = Math.max(...n);
+  if (!top) return say(server, "Nobody voted, so the next game stays as it was.");
+  const tied = n.flatMap((k, i) => (k === top ? [i] : [])), c = v.choices[tied[Math.floor(Math.random() * tied.length)]];
+  const r = await rcon(server, "nextmap", ...(c.mode ? [c.map, c.mode] : [c.map]));
+  if (r.ok === false) {
+    warn(\`couldn't queue \${label(c)} on \${server}:\`, r.text);
+    return say(server, \`\${label(c)} won, but it couldn't be queued.\`);
+  }
+  say(server, \`\${label(c)} plays next, with \${top} vote\${top === 1 ? "" : "s"}\${tied.length > 1 ? " (a tie, drawn at random)" : ""}.\`);
+}
+
+command("!nextvote", async (ev) => {
+  const sub = (ev.args[0] ?? "").toLowerCase(), v = store.get("vote:" + ev.server);
+  if (sub === "list") return ev.tell(v ? list(v) : "No vote is open.");
+  if (!(await isAdmin(ev))) return ev.tell("Only an admin can start or stop a vote.");
+  if (sub === "end" || sub === "cancel") {
+    if (!v) return ev.tell("No vote is open.");
+    if (sub === "end") return finish(ev.server);
+    stop(ev.server);
+    return say(ev.server, "The vote on the next game was cancelled.");
+  }
+  if (v) return ev.tell("A vote is already open: !nextvote end or !nextvote cancel.");
+  let choices = CHOICES.map(([map, mode = ""]) => ({ map, mode }));
+  if (!choices.length) {
+    const rot = (await rcon(ev.server, "nextmap")).data?.rotation ?? [];
+    choices = rot.map((e) => ({ map: e.map, mode: e.mode ?? "" })).filter((c, i, all) => all.findIndex((d) => label(d) === label(c)) === i).slice(0, 5);
+  }
+  if (choices.length < 2) return ev.tell("Nothing to vote on: fill in CHOICES at the top of the script.");
+  store.set("vote:" + ev.server, { choices, answers: {}, ends: Date.now() + SECONDS * 1000 });
+  schedule(ev.server);
+  await say(ev.server, \`Vote on the next game, \${SECONDS} s: answer with its number.\`);
+  say(ev.server, list(store.get("vote:" + ev.server)));
+});
+
+on("chat", (ev) => {
+  const v = store.get("vote:" + ev.server), m = /^!?(\\d+)$/.exec(String(ev.text ?? "").trim());
+  if (!v || !m || ev.channel === "server") return;
+  const n = Number(m[1]);
+  if (n < 1 || n > v.choices.length) return ev.tell(\`Answer 1 to \${v.choices.length}.\`);
+  v.answers[ev.player_id || ev.player] = n;
+  store.set("vote:" + ev.server, v);
+});
+
+for (const key of store.keys("vote:")) schedule(key.slice(5)); // a vote open when Oni closed carries on
+`],
+];
+async function newScript() {
+  const r = await modal({ title: "NEW SCRIPT", pick: TEMPLATES.map(([label, sub]) => ({ label, sub })), input: true, value: freeName("script"),
+    placeholder: "its name, like welcome", ok: "CREATE", check: nameError });
+  if (r) await createScript(r.value, TEMPLATES[r.pick][2]);
+}
+async function createScript(name, code) {
+  let x;
+  try { x = await call({ op: "save", name, code, new: true }); } catch (e) { toast(e.message, true); return null; }
+  files.set(name, { name, on: false, mtime: x.mtime });
+  drawFiles();
+  return openScript(name);
+}
+async function renameScript(name) {
+  const to = await modal({ title: "RENAME", text: `A new name for ${name}:`, input: true, value: name, ok: "RENAME", check: (v) => (v === name ? "That is its name now." : nameError(v)) });
+  if (!to) return;
+  const m = tabs.find((t) => t.name === name), wasOn = !!files.get(name)?.on;
+  if (m && dirty(m) && !(await save(m))) return;
+  await stopLive(name); // its store is saved first, so it moves with it
+  if (test && test.name === name) await stopTest();
+  try { await call({ op: "rename", name, to }); }
+  catch (e) { toast(e.message, true); if (wasOn) runScript(name); return; }
+  if (m) m.name = to;
+  const d = diags.get(name);
+  diags.delete(name);
+  if (d) diags.set(to, d);
+  await refreshList().catch(() => {});
+  drawTabs();
+  drawProblems();
+  if (wasOn) runScript(to);
+}
+async function duplicate(name) {
+  const m = tabs.find((t) => t.name === name);
+  let code = m?.text;
+  if (code == null) {
+    try { code = (await call({ op: "read", name })).code; } catch (e) { return toast(e.message, true); }
+  }
+  const to = await modal({ title: "DUPLICATE", text: `A copy of ${name}, called:`, input: true, value: freeName(name.slice(0, 30) + "-copy"), ok: "CREATE", check: nameError });
+  if (to) await createScript(to, code);
+}
+async function deleteScript(name) {
+  if (!(await modal({ title: "DELETE SCRIPT", text: `Delete ${name}.js and everything it has saved? This can't be undone.`, ok: "DELETE", danger: true }))) return;
+  if (test && test.name === name) await stopTest();
+  await stopLive(name);
+  try { await call({ op: "delete", name }); } catch (e) { return toast(e.message, true); }
+  files.delete(name);
+  diags.delete(name);
+  const m = tabs.find((t) => t.name === name);
+  if (m) await closeTab(m, true);
+  drawFiles();
+  drawProblems();
+}
+/** The scripts on disk, and whether each is on. */
+async function refreshList() {
+  const r = await call({ op: "list" });
+  S.dir = String(r.dir ?? S.dir);
+  $("dir").textContent = mask(S.dir);
+  $("dir").title = "Scripts are saved in " + mask(S.dir);
+  files.clear();
+  for (const x of r.scripts) files.set(x.name, { name: x.name, on: !!x.on, mtime: x.mtime });
+  for (const m of tabs) m.gone = !files.has(m.name);
+  for (const n of [...runs.keys()]) if (!files.has(n)) stopLive(n); // deleted outside the Studio
+  drawFiles();
+  drawTabs();
+  return r;
+}
+/** Every 5 s: scripts added, removed or changed outside the Studio. A changed one reloads, unless it has changes here. */
+async function poll() {
+  let r;
+  try { r = await call({ op: "stat" }); } catch { return; }
+  const now = new Map(r.scripts.map((x) => [x.name, x.mtime]));
+  if (now.size !== files.size || [...now.keys()].some((n) => !files.has(n))) await refreshList().catch(() => {});
+  for (const m of tabs.slice()) {
+    const t = now.get(m.name);
+    if (t === undefined || t === m.mtime || m.conflict) continue;
+    let x;
+    try { x = await call({ op: "read", name: m.name }); } catch { continue; }
+    m.mtime = x.mtime;
+    if (x.code === m.saved) continue;
+    if (dirty(m)) m.conflict = true;
+    else { replaceAll(m, x.code); m.saved = x.code; m.shownDirty = false; }
+    drawTabs();
+    drawFiles();
+  }
+}
+
+// --- dialogs -----------------------------------------------------------------------------------------------------
+/** A dialog over everything. Resolves null when cancelled, false for `alt`, and otherwise: {value, pick} with a pick
+ *  list, the input's text with an input, or true. check(value): why the input won't do, "" when it will. */
+function modal({ title, text, input, value = "", placeholder = "", pick, ok = "OK", alt, danger, check }) {
+  const o = $("overlay"), back = document.activeElement;
+  closeQuick();
+  closePopups();
+  o.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><h2>${esc(title)}</h2><div class="body">${text ? `<div>${esc(mask(text))}</div>` : ""}${
+    pick ? `<div class="tpls" role="listbox">${pick.map((p, i) => `<div class="tpli${i ? "" : " on"}" role="option" data-i="${i}"><b>${esc(p.label)}</b>${p.sub ? `<span>${esc(p.sub)}</span>` : ""}</div>`).join("")}</div>` : ""}${
+    input ? `<input spellcheck="false" placeholder="${esc(placeholder)}" value="${esc(value)}">` : ""}${check ? '<div class="err"></div>' : ""}</div><div class="btns"><button data-a="cancel">CANCEL</button>${
+    alt ? `<button data-a="alt">${esc(alt)}</button>` : ""}<button data-a="ok" class="${danger ? "danger" : "pri"}">${esc(ok)}</button></div></div>`;
+  o.hidden = false;
+  return new Promise((res) => {
+    const inp = o.querySelector("input"), err = o.querySelector(".err");
+    let sel = 0;
+    const done = (v) => {
+      o.hidden = true;
+      o.innerHTML = "";
+      o.onclick = o.ondblclick = o.onkeydown = null;
+      back?.focus?.({ preventScroll: true });
+      res(v);
+    };
+    const finish = () => {
+      const v = inp ? inp.value.trim() : "", why = check && inp ? check(v) : "";
+      if (why) { err.textContent = why; return inp.focus(); }
+      done(pick ? { value: v, pick: sel } : inp ? v : true);
+    };
+    const choose = (i) => {
+      sel = clamp(i, 0, pick.length - 1);
+      o.querySelectorAll(".tpli").forEach((el, j) => el.classList.toggle("on", j === sel));
+      o.querySelectorAll(".tpli")[sel].scrollIntoView({ block: "nearest" });
+    };
+    if (inp && err) inp.oninput = () => (err.textContent = "");
+    o.onclick = (e) => {
+      const t = e.target.closest(".tpli"), a = e.target.closest("button")?.dataset.a;
+      if (t) return choose(+t.dataset.i);
+      if (a === "ok") finish();
+      else if (a === "alt") done(false);
+      else if (a === "cancel") done(null);
+    };
+    o.ondblclick = (e) => e.target.closest(".tpli") && finish();
+    o.onkeydown = (e) => {
+      e.stopPropagation(); // not the editor's keys, nor the page's
+      if (e.key === "Escape") { e.preventDefault(); done(null); }
+      else if (e.key === "Enter" && e.target.tagName !== "BUTTON") { e.preventDefault(); finish(); }
+      else if (pick && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); choose(sel + (e.key === "ArrowDown" ? 1 : -1)); }
+      else if (e.key === "Tab") { // focus stays in the dialog
+        const f = [...o.querySelectorAll("input, button")], i = f.indexOf(document.activeElement);
+        e.preventDefault();
+        f[(i + (e.shiftKey ? -1 : 1) + f.length) % f.length].focus();
+      } else if (/^F([1-9]|1[0-2])$/.test(e.key)) e.preventDefault();
+    };
+    if (inp) { inp.focus(); inp.select(); }
+    else o.querySelector(danger ? "[data-a=cancel]" : "[data-a=ok]").focus();
+  });
+}
+
+// --- the quick pick: scripts, >commands, @symbols, :line ---------------------------------------------------------
+const qpEl = $("qp"), qpin = $("qpin"), qplist = $("qplist");
+const qp = { items: [], idx: 0, back: null };
+const need = (f) => () => (cur ? f() : toast("Open a script first.", true));
+const COMMANDS = [
+  ["Run script", "Ctrl+Enter", need(() => runScript())],
+  ["Test script (dry run)", "Ctrl+Shift+Enter", need(startTest)],
+  ["Stop script", "", need(() => stopScript())],
+  ["Restart script", "", need(() => restartScript())],
+  ["Stop every script", "", stopAll],
+  ["Save", "Ctrl+S", need(() => save())],
+  ["Save all", "Ctrl+Shift+S", saveAll],
+  ["New script", "Ctrl+N", newScript],
+  ["Open script", "Ctrl+P", () => openQuick("")],
+  ["Rename script", "", need(() => renameScript(cur.name))],
+  ["Duplicate script", "", need(() => duplicate(cur.name))],
+  ["Delete script", "", need(() => deleteScript(cur.name))],
+  ["Close tab", "Ctrl+W", need(() => closeTab(cur))],
+  ["Close all tabs", "", async () => { for (const m of tabs.slice()) { await closeTab(m); if (tabs.includes(m)) return; } }],
+  ["Find", "Ctrl+F", need(() => openFind(false))],
+  ["Replace", "Ctrl+H", need(() => openFind(true))],
+  ["Go to line", "Ctrl+G", () => openQuick(":")],
+  ["Go to symbol", "Ctrl+Shift+O", () => openQuick("@")],
+  ["Toggle comment", "Ctrl+/", need(toggleComment)],
+  ["Show or hide the panel", "Ctrl+J", togglePanel],
+  ["Console", "Ctrl+`", () => showPanel("console")],
+  ["Problems", "Ctrl+Shift+M", () => showPanel("problems")],
+  ["Events", "", () => showPanel("events")],
+  ["Simulate an event", "", () => showPanel("simulate")],
+  ["RCON console", "", () => showPanel("rcon")],
+  ["Script store", "", () => showPanel("store")],
+  ["Docs", "", () => showPanel("docs")],
+  ["Clear the console", "", () => $("c-clear").click()],
+  ["Reload the script list", "", () => refreshList().then(() => toast(`${files.size} scripts.`), (e) => toast(e.message, true))],
+];
+function openQuick(prefix) {
+  if (!$("overlay").hidden) return;
+  closePopups();
+  if (qpEl.hidden) qp.back = document.activeElement;
+  qpEl.hidden = false;
+  qpin.value = prefix;
+  qp.idx = 0;
+  drawQuick();
+  qpin.focus();
+  qpin.setSelectionRange(prefix.length, prefix.length);
+}
+function closeQuick() {
+  if (qpEl.hidden) return;
+  qpEl.hidden = true;
+  if (qp.back && qp.back !== qpin && document.contains(qp.back)) qp.back.focus({ preventScroll: true });
+  else if (cur) ta.focus({ preventScroll: true });
+  qp.back = null;
+}
+function drawQuick() {
+  const v = qpin.value, mode = /^[>@:]/.test(v) ? v[0] : "", q = v.slice(mode ? 1 : 0).trim();
+  let items;
+  if (mode === ">") items = COMMANDS.map(([label, dt, run]) => ({ label, dt, run }));
+  else if (mode === "@") items = cur ? cur.syms.map((s) => ({ label: s.name, dt: "line " + (s.l + 1), run: () => goTo(s.l) })) : [];
+  else if (mode === ":") {
+    const x = /^(\d+)(?:[:,](\d+))?$/.exec(q);
+    items = !cur ? [] : [x ? { label: `Go to line ${x[1]}${x[2] ? ", column " + x[2] : ""}`, run: () => goTo(+x[1] - 1, x[2] ? +x[2] - 1 : undefined) }
+      : { label: `A line number, 1 to ${cur.lines.length}`, dt: "and :column if you like" }];
+  } else items = [...files.keys()].sort().map((n) => {
+    const r = runs.get(n);
+    return { label: n, dt: r ? r.state : files.get(n).on ? "on" : "", pri: tabs.some((t) => t.name === n) ? 0 : 1, run: () => openScript(n) };
+  });
+  qp.items = mode === ":" ? items : rank(items, q);
+  qp.idx = clamp(qp.idx, 0, Math.max(0, qp.items.length - 1));
+  qplist.innerHTML = qp.items.length ? qp.items.map((it, i) => `<div class="qi${i === qp.idx ? " on" : ""}" data-i="${i}"><span>${
+    mode === ":" ? esc(it.label) : hilite(it.label, q)}</span><span class="dt">${esc(it.dt || "")}</span></div>`).join("")
+    : `<div class="empty">${mode === "@" ? (cur ? "No symbols." : "Open a script first.") : mode === ":" ? "Open a script first." : mode === ">" ? "No such command." : files.size ? "No script matches." : "No scripts yet: Ctrl+N makes one."}</div>`;
+  qplist.querySelector(".qi.on")?.scrollIntoView({ block: "nearest" });
+}
+function runQuick(i) {
+  const it = qp.items[i];
+  if (!it?.run) return;
+  closeQuick();
+  it.run();
+}
+qpin.oninput = () => { qp.idx = 0; drawQuick(); };
+qpin.onkeydown = (e) => {
+  e.stopPropagation();
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const n = qp.items.length;
+    if (n) { qp.idx = (qp.idx + (e.key === "ArrowDown" ? 1 : -1) + n) % n; drawQuick(); }
+  } else if (e.key === "Enter") { e.preventDefault(); runQuick(qp.idx); }
+  else if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeQuick(); }
+  else if (/^F([1-9]|1[0-2])$/.test(e.key)) { e.preventDefault(); closeQuick(); toParent({ oni: "key", key: e.key }); }
+};
+qpin.onblur = () => setTimeout(() => document.activeElement !== qpin && closeQuick());
+qplist.onmousedown = (e) => e.preventDefault(); // keep the input focused
+qplist.onclick = (e) => {
+  const r = e.target.closest(".qi");
+  if (r) runQuick(+r.dataset.i);
+};
+
+// --- the page's keys, and its buttons ----------------------------------------------------------------------------
+const KEYMAP = {
+  "Ctrl+S": () => save(), "Ctrl+Shift+S": saveAll, "Ctrl+Enter": need(() => runScript()), "Ctrl+Shift+Enter": need(startTest),
+  "Ctrl+P": () => openQuick(""), "Ctrl+Shift+P": () => openQuick(">"), "Ctrl+Shift+O": () => openQuick("@"), "Ctrl+G": () => openQuick(":"),
+  "Ctrl+F": need(() => openFind(false)), "Ctrl+H": need(() => openFind(true)), "Ctrl+J": togglePanel, "Ctrl+`": () => showPanel("console"),
+  "Ctrl+Shift+M": () => showPanel("problems"), "Ctrl+N": newScript, "Ctrl+W": () => closeTab(cur), "Ctrl+Tab": () => cycleTab(1), "Ctrl+Shift+Tab": () => cycleTab(-1),
+  "Ctrl+R": () => {}, "Ctrl+Shift+R": () => {}, // a reload would stop every script
+};
+document.addEventListener("keydown", (e) => {
+  if (!$("overlay").hidden || e.isComposing) return;
+  if (/^F([1-9]|1[0-2])$/.test(e.key)) { // Oni's own keys (F5 would reload the frame)
+    e.preventDefault();
+    if (!e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) toParent({ oni: "key", key: e.key });
+    return;
+  }
+  const f = KEYMAP[keyName(e)];
+  if (!f) return;
+  e.preventDefault();
+  f();
+});
+$("run").onclick = () => runScript();
+$("test").onclick = need(startTest);
+$("stop").onclick = () => stopScript();
+$("restart").onclick = () => restartScript();
+$("save").onclick = () => save();
+$("new").onclick = $("side-new").onclick = $("w-new").onclick = () => newScript();
+$("findb").onclick = need(() => openFind(false));
+$("cmds").onclick = () => openQuick(">");
+$("w-open").onclick = () => openQuick("");
+$("w-docs").onclick = () => showPanel("docs");
+$("w-keys").innerHTML = KEYS.slice(0, 12).map(([k, d]) => `<span>${k.split(" / ").map((x) => `<kbd>${esc(x)}</kbd>`).join(" / ")}</span><span>${esc(d)}</span>`).join("");
+addEventListener("pagehide", () => { for (const r of runs.values()) r.flush(); }); // Oni closing: what the stores hold, saved
+
+// --- Oni → page ----------------------------------------------------------------------------------------------------
+let serversKey = "";
+addEventListener("message", (e) => {
+  const m = e.data;
+  if (e.source !== parent || !m || typeof m !== "object") return;
+  if (m.oni === "data") {
+    const redactWas = S.redact;
+    S.redact = !!m.redact;
+    S.server = String(m.server ?? "");
+    if (m.data && m.data.dir) S.dir = String(m.data.dir);
+    const sv = Array.isArray(m.servers) ? m.servers.map((s) => ({ name: String(s.name), online: !!s.online })) : [];
+    if (JSON.stringify(sv) !== serversKey) {
+      serversKey = JSON.stringify(sv);
+      S.servers = sv;
+      for (const r of [...runs.values(), ...(test ? [test] : [])]) r.send({ t: "servers", servers: sv });
+      fillServers();
+      tabs.forEach(lintSoon); // "no server called …"
+    }
+    for (const [k, v] of Object.entries(m.theme || {})) if (v) rootStyle.setProperty("--" + k, String(v));
+    $("dir").textContent = mask(S.dir);
+    if (S.redact !== redactWas) {
+      drawLog(true);
+      drawEvents(true);
+      drawOutline();
+      drawProblems();
+      if (panelShown("store")) loadStore();
+    }
+    drawFiles();
+    drawStatus();
+    if (!S.booted) { S.booted = true; boot(); }
+  } else if (m.oni === "event") {
+    if (!m.ev || typeof m.ev !== "object") return;
+    eventIn(String(m.server ?? ""), m.ev);
+    deliver(String(m.server ?? ""), m.ev);
+  } else if (m.oni === "rcon-reply") {
+    const f = m.id != null && rconWait.get(m.id); // a reply with no id (or `replies`) is someone else's
+    if (f) { rconWait.delete(m.id); f(m); }
+  } else if (m.oni === "reply") {
+    const w = waiting.get(m.ref);
+    if (!w) return;
+    waiting.delete(m.ref);
+    clearTimeout(w.t);
+    if (!m.ok) w.rej(new Error(String(m.error || "failed")));
+    else if (m.data && m.data.error) w.rej(new Error(String(m.data.error))); // studio.rs refused it
+    else w.res(m.data ?? {});
+  }
+});
+
+const loadHooks = () => call({ op: "hooks" }).then((h) => {
+  const was = JSON.stringify(S.hooks);
+  S.hooks = { discord: h.discord ?? [], telegram: h.telegram ?? [] };
+  S.hooksLoaded = true;
+  if (JSON.stringify(S.hooks) !== was) tabs.forEach(lintSoon);
+}, () => {});
+/** The first data from Oni: list the scripts, and start the ones turned on. */
+async function boot() {
+  measure();
+  document.fonts?.ready.then(() => { measure(); layout(); schedule(); });
+  showPanel("console");
+  drawLog(true);
+  drawEvents(true);
+  drawProblems();
+  drawTabs();
+  drawStatus();
+  let list;
+  for (let i = 0; !list; i++) {
+    try { list = await refreshList(); }
+    catch (e) {
+      if (i === 0) logLine({ at: Date.now(), script: "", level: "error", text: `Couldn't list the scripts (trying again every 5 s): ${e.message}` });
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+  }
+  loadHooks();
+  setInterval(loadHooks, 60000);
+  setInterval(poll, 5000);
+  setInterval(() => cur && (runs.has(cur.name) || test) && drawRunInfo(), 1000);
+  const on = list.scripts.filter((x) => x.on);
+  logLine({ at: Date.now(), script: "", level: "sys", text: `Studio ready: ${list.scripts.length} scripts, ${on.length} turned on.` });
+  for (const x of on) startLive(x.name, x.code);
+}
+
+toParent({ oni: "ready" });
+</script>
+</body>
+</html>

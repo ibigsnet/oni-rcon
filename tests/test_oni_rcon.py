@@ -2,13 +2,14 @@ import asyncio
 import hashlib
 import json
 import sys
+from datetime import datetime, timezone
 
 import pytest
 from rich.text import Text
 
 from oni_rcon import app as appmod
 from oni_rcon.app import (JOIN_PING, Boot, Form, Help, OniApp, Pick, emblem, explain, parse_command, redact_data, render_event,
-                          resolve, same, sides, split_tag, target_of)
+                          resolve, same, sides, split_tag, target_of, vpn_check, vpn_lists, admin_rows, Confirm)
 from oni_rcon.art import biosig, decrypt, hbar, spark, split_bar
 from oni_rcon.config import Server, add_servers, load_config, parse_target, resolve_passwords
 from oni_rcon.demo import serve_fakes
@@ -127,12 +128,15 @@ def test_app_against_fakes():
             assert app.query_one("#players").row_count == len(app.stations[0].players) > 0
             assert app.query_one("#op-passvote").disabled  # no vote under way
 
-            await pilot.click("#pl-tell")  # the player file's buttons open the same dialogs as the keys
-            await pilot.pause()
+            await until(pilot, lambda: app.query_one("#player-actions").display)  # shown once a player is selected
+            for _ in range(10):  # the player file's buttons open the same dialogs as the keys
+                await pilot.click("#pl-tell")  # retried: on a slow Windows runner the first click can land before layout settles
+                if await until(pilot, lambda: isinstance(app.screen, Form), tries=20):
+                    break
             assert isinstance(app.screen, Form)
             await pilot.press("escape")
             await pilot.press("question_mark")
-            await pilot.pause()
+            await until(pilot, lambda: isinstance(app.screen, Help))
             assert isinstance(app.screen, Help)
             await pilot.press("escape")
             await pilot.pause()
@@ -143,6 +147,10 @@ def test_app_against_fakes():
             await pilot.pause()
             assert app.stations[1].alerts == 0
             await pilot.press("1")
+            await pilot.press("f4")  # the demo's 0.9.22 VPN lists: the 10-day-old, failing one is flagged
+            lists = app.query_one("#vpnlists")
+            await until(pilot, lambda: lists.row_count == 3)
+            assert "1 need a look" in str(lists.border_title)
             await pilot.press("f5")
             app.query_one("#cmd").focus()
             app.query_one("#cmd").value = "say hello there"
@@ -221,6 +229,32 @@ def test_self_update_is_disabled(tmp_path, monkeypatch):
     assert update.check(exe) == ""
     assert update.check(None) == ""
     assert exe.read_bytes() == b"reviewed build"
+
+
+def test_reclaimer_drift():
+    from oni_rcon.update import behind, mixed_versions
+    assert behind("0.9.9", "v0.9.18") == "0.9.18"  # numeric, not text: 9 < 18
+    assert behind("0.9.18", "0.9.18") == behind("0.9.19", "0.9.18") == ""  # current or ahead
+    assert behind("?", "0.9.18") == behind("0.9.17", "") == ""  # unknown never counts as behind
+    assert behind("0.9.17-rc1", "0.9.18") == "0.9.18"
+    assert mixed_versions([("F1", "0.9.18"), ("F2", "0.9.17"), ("F3", "0.9.18"), ("F4", None)]) == \
+        "0.9.17 on F2 · 0.9.18 on F1, F3"
+    assert mixed_versions([("F1", "0.9.18"), ("F2", "v0.9.18"), ("F3", "?")]) == ""
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False)  # they report 0.9.7-demo
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False,
+                     reclaimer=lambda: "0.9.18")
+        async with app.run_test(size=(160, 48)) as pilot:
+            await until(pilot, lambda: all(st.online for st in app.stations) and app.reclaimer_latest)
+            await pilot.pause()
+            st = app.stations[0]  # IBIGS: the key ends with the station number, detail is [-2]
+            assert app.lag(st) == "0.9.18" and st.drawn[-2][-1] == "0.9.18"  # the card shows it
+            assert not any("MIXED" in str(e.get("text")) for _, e in app.feed)  # all on one version
+            st.rcon.info["version"] = "0.9.18"
+            app.note_mixed()
+            assert app.lag(st) == "" and any("MIXED VERSIONS  0.9.7 on" in str(e.get("text")) for _, e in app.feed)
+    asyncio.run(go())
 
 
 def test_medals():
@@ -303,6 +337,14 @@ async def settle(app, pilot, *keys):
             return
 
 
+async def until(pilot, ok, tries=100):  # a fixed pause is a guess on a slow runner: wait for the thing itself
+    for _ in range(tries):
+        await pilot.pause(0.05)
+        if ok():
+            return True
+    return False  # a caller that can't go on without it asserts on this
+
+
 def plain(widget) -> str:
     return str(widget.render())
 
@@ -322,7 +364,7 @@ def test_app_keeps_the_selection_and_redacts():
             chosen = app.ban_rows[bans.selected]
             fake.bans["players"].insert(0, {"id": "f" * 32, "name": "New", "reason": "y"})  # someone else bans
             app.fetch(app.cur, "bans")
-            await pilot.pause(0.3)
+            await until(pilot, lambda: bans.row_count == 7)
             assert bans.row_count == 7 and app.ban_rows[bans.selected] == chosen  # u still lifts the chosen ban
             assert "192.0.2.44" not in str(app.query_one("#vpn").get_row_at(0))
 
@@ -484,10 +526,13 @@ def test_feed_holds_still_and_keeps_its_width(monkeypatch):
             chat = lambda i: {"type": "event", "event": "chat", "channel": "all", "name": "Rook", "text": f"line {i}"}
             for i in range(120):
                 app.on_rcon_event(st.rcon, chat(i))
-            await pilot.pause(0.3)
+            # every write queued a scroll to the end for after the next refresh; one still pending when the view is
+            # scrolled up drags it back down and turns following on again
+            assert await until(pilot, lambda: len(feed.lines) >= 120 and feed.scroll_y == feed.max_scroll_y)
+            await pilot.pause()  # idle: whatever was queued has run
             assert feed.is_vertical_scroll_end  # following the tail
             feed.scroll_to(y=10, animate=False)
-            await pilot.pause(0.1)
+            assert await until(pilot, lambda: feed.scroll_y == 10 and not feed.auto_scroll)
             for i in range(20):
                 app.on_rcon_event(st.rcon, chat(i))
             await pilot.pause(0.3)
@@ -536,8 +581,8 @@ def test_a_fleet():
         ports, keep = await serve_fakes(tick=False, specs=fleet(14))
         app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest")
         async with app.run_test(size=(160, 48)) as pilot:
-            await pilot.pause(1.2)  # a line every 0.22 s
-            log = plain(app.screen.query_one("#boot-log"))
+            await until(pilot, lambda: isinstance(app.screen, Boot) and "STATIONS 1-14" in plain(app.screen.query_one("#boot-log")))
+            log = plain(app.screen.query_one("#boot-log"))  # a line every 0.22 s, and the splash goes after about 2
             assert "STATIONS 1-14" in log and "[14]" not in log  # a tally, not a line each
             await pilot.press("escape")
             await settle(app, pilot, "status")
@@ -630,5 +675,133 @@ def test_a_late_reply_is_reported():
         await asyncio.sleep(0.5)
         assert late and late[0][0] == "endgame" and late[0][1]["ok"]
         task.cancel()
+
+    asyncio.run(go())
+
+
+def test_kicked_list_follows_kick_refused_and_pardon():
+    from oni_rcon.app import kick_left, note_kick, pardon_target
+    kicks, t = {}, 1_000_000.0
+    assert note_kick(kicks, {"event": "kick", "name": "Bravo", "id": "76561198000000001", "by": "RCON",
+                             "reason": "spawn camping", "seconds": 600}, t)
+    assert not note_kick(kicks, {"event": "kick", "name": "Slow", "id": "x", "by": "Server", "seconds": 0}, t)
+    note_kick(kicks, {"event": "refused", "name": "Bravo", "id": "76561198000000001", "ip": "203.0.113.4",
+                      "reason": "You were kicked: 9 minutes left"}, t)
+    k = kicks["76561198000000001"]
+    assert (k["ip"], kick_left(k, t + 61), kick_left(k, t + 600), pardon_target(k)) == \
+        ("203.0.113.4", "9m", "over", "76561198000000001")
+    note_kick(kicks, {"event": "refused", "name": "Charlie", "id": "c1", "ip": "198.51.100.7",
+                      "reason": "Kicked by an admin"}, t)  # a kick from before we connected
+    assert not note_kick(kicks, {"event": "refused", "name": "Delta", "id": "d1", "reason": "You are banned"}, t)
+    assert kick_left(kicks["c1"]) == "?"
+    assert note_kick(kicks, {"event": "pardon", "target": "198.51.100.7", "name": ["Charlie"], "by": "RCON"})
+    assert note_kick(kicks, {"event": "pardon", "target": "Bravo", "name": "Bravo", "by": "RCON"}) and not kicks
+    assert appmod.describe({"event": "pardon", "target": "x", "name": ["Bravo", "Bravo2"], "by": "Alice (RCON)"}, {}).plain \
+        == "PARDON  Bravo, Bravo2  may rejoin  by Alice (RCON)"
+
+
+def test_admin_and_reload_events_get_a_layout():
+    d = lambda ev: appmod.describe(ev, {}).plain
+    assert d({"event": "admin_added", "name": "Bravo", "id": "76561198000000001", "by": "RCON"}) \
+        == "ADMIN  Bravo  made admin  by RCON"
+    assert d({"event": "admin_removed", "id": "0123456789abcdef0123456789abcdef"}) == "ADMIN  01234567…  no longer admin"
+    assert d({"event": "control", "action": "reload", "ok": True, "text": "max_players 16 -> 12"}) \
+        == "RELOAD  max_players 16 -> 12"
+    assert d({"event": "control", "action": "reload", "ok": False, "text": "dedicated.toml: line 4"}) \
+        == "RELOAD FAILED  dedicated.toml: line 4"
+    assert d({"event": "control", "action": "reload_applied", "ok": True, "text": "playlist"}) == "RELOAD APPLIED  playlist"
+    assert d({"event": "control", "action": "kill_feed", "ok": True, "text": "x"}).startswith("CONTROL  x")
+
+
+def test_f4_pardons_a_kick():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = OniApp([Server(port=ports[0], password="demo")], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players")
+            st, victim = app.stations[0], keep[0].players[0]
+            app.send(st, "kick", victim["name"], "camping")
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if app.kick_rows:
+                    break
+            kicks = app.query_one("#kicks")
+            assert [str(c) for c in kicks.get_row_at(0)][:4] == [victim["name"], victim["player_id"], "camping", "pytest"]
+            app.action_tab("blacklist")
+            app.bl("pardon")
+            await pilot.pause(0.2)
+            assert isinstance(app.screen, Form) and app.screen.query_one("#field-target").value == victim["player_id"]
+            await pilot.press("enter")
+            for _ in range(60):
+                await pilot.pause(0.05)
+                if not app.kick_rows:
+                    break
+            assert not st.kicks and kicks.row_count == 0 and not keep[0].kicked
+
+    asyncio.run(go())
+
+
+def test_vpn_lists():
+    now = 1_800_000_000
+    v = {"lists": {"refreshed_at": now - 60, "sources": [
+        {"list": "fresh", "ranges": 100, "asns": 0, "fetched_at": now - 600, "problem": None},
+        {"list": "old", "ranges": 5, "asns": 2, "fetched_at": (now - 8 * 86400) * 1000, "problem": None},
+        {"list": "broken", "ranges": 0, "fetched_at": None, "problem": "HTTP 404"}],
+        "table": {"table": "ip2asn", "rows": 10, "blocks": 4,
+                  "fetched_at": datetime.fromtimestamp(now - 3600, timezone.utc).isoformat().replace("+00:00", "Z")}}}
+    lists = vpn_lists(v, now)  # seconds, milliseconds and ISO times all read
+    assert [(x["name"], x["stale"], x["problem"]) for x in lists] == [
+        ("fresh", False, ""), ("old", True, ""), ("broken", True, "HTTP 404"), ("ASN table (ip2asn)", False, "")]
+    assert lists[0]["size"] == "100 ranges · 0 ASNs" and lists[0]["age"] == "10m 00s"
+    assert lists[1]["age"] == "8d 0h" and lists[2]["age"] == "never" and lists[3]["age"] == "1h 00m"
+    assert vpn_lists({"block_vpn": True, "ranges": 3}) == [] and vpn_lists({"lists": None}) == []  # pre-0.9.22
+    assert vpn_check("refused", {"listed": True, "list": "x4bnet", "refused": True}) == "refused · matched x4bnet"
+    assert "fail_closed" in vpn_check("refused", {"listed": False, "refused": True, "fail_closed": True})
+    assert vpn_check("fine", None) == "fine"
+
+
+def test_admin_rows():
+    a = {"admins": ["76561198000000001", {"name": "Overseer", "player_id": "abc", "source": "dedicated.toml"},
+                    {"name": "Bravo", "id": "def", "from": "rcon", "online": False}, {}]}
+    rows = admin_rows(a, [{"player_id": "abc"}])
+    assert [(r["target"], r["on"], r["fixed"]) for r in rows] == [("76561198000000001", False, False), ("abc", True, True),
+                                                                   ("def", False, False)]  # the reply's online wins
+    assert admin_rows({"entries": [{"name": "Gone"}]}, [])[0] == {"target": "Gone", "name": "Gone", "id": "", "from": "",
+                                                                  "fixed": False, "on": None}
+    assert admin_rows({}, []) == []
+
+
+def test_f4_adds_and_removes_admins():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = OniApp([Server(port=ports[0], password="demo")], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players", "admins")
+            admins = app.query_one("#admins")
+            new = next(p for p in keep[0].players if not p["admin"])
+            before = admins.row_count
+            assert before >= 1 and str(admins.border_title).startswith("ADMINS · ")
+            app.action_tab("blacklist")
+            app.bl("adminadd")
+            await until(pilot, lambda: isinstance(app.screen, Pick))
+            await pilot.press(*new["name"], "enter")
+            await until(pilot, lambda: isinstance(app.screen, Confirm))
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: admins.row_count == before + 1) and new["admin"]
+            assert "Overseer" in [str(admins.get_row_at(i)[0]) for i in range(admins.row_count)]
+
+            admins.move_cursor(row=0)  # Overseer: written in dedicated.toml, so it isn't sent
+            await pilot.pause()
+            assert app.admin_rows[admins.selected]["fixed"]
+            app.bl("adminremove")
+            await pilot.pause(0.2)
+            assert not isinstance(app.screen, Confirm) and admins.row_count == before + 1
+            row = next(i for i in range(admins.row_count) if str(admins.get_row_at(i)[0]) == new["name"])
+            admins.move_cursor(row=row)
+            await pilot.pause()
+            app.bl("adminremove")
+            await until(pilot, lambda: isinstance(app.screen, Confirm))
+            app.screen.query_one("#yes").press()
+            assert await until(pilot, lambda: admins.row_count == before) and not new["admin"]
 
     asyncio.run(go())

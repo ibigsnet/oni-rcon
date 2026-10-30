@@ -173,7 +173,8 @@ def checklist_text(items: list) -> tuple[str, bool]:
 
 class TenantApp(OniApp):
     TITLE = 'IBIGS Server Console'
-    BINDINGS = [*OniApp.BINDINGS, Binding('ctrl+f', 'goto', 'Find server', priority=True),
+    PLUGINS_KEY, PLUGINS_TAB = '', False  # customer consoles don't run plug-ins; F8 is AUTOMATION here
+    BINDINGS = [*[b for b in OniApp.BINDINGS if b.key != 'f8'], Binding('ctrl+f', 'goto', 'Find server', priority=True),
                 Binding('f7', 'power', 'Start/Stop', priority=True),
                 Binding('f8', 'jobs', 'Automation', priority=True), Binding('f9', 'updates', 'Updates', priority=True),
                 Binding('f12', 'settings_menu', 'Settings & mods', priority=True),

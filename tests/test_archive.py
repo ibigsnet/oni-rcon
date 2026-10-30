@@ -103,13 +103,17 @@ def test_full_plays_the_archive_alone_then_the_console(tmp_path, monkeypatch):
     """ibigs.24: one animation, not two. The archive's natural end goes straight into the console."""
     async def go():
         ports, keep = await serve_fakes(tick=False)
-        monkeypatch.setattr(appmod, "TOTAL", 1.5)
+        monkeypatch.setattr(appmod, "TOTAL", 600)  # held open until it's been looked at: a slow runner can't miss it
         app = full_app(ports, tmp_path)
         async with app.run_test(size=(160, 48)) as pilot:
-            await pilot.pause(0.5)
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if isinstance(app.screen, Archive) and "FILE 01" in plain(app.screen.query_one("#boot-log")):
+                    break
             assert isinstance(app.screen, Archive)
             assert "FILE 01" in plain(app.screen.query_one("#boot-log")) and app.prefs.intro_seen
             assert json.loads((tmp_path / "prefs.json").read_text())["intro_seen"] is True
+            monkeypatch.setattr(appmod, "TOTAL", 0)  # and now it's over
             for _ in range(40):
                 await pilot.pause(0.1)
                 if not isinstance(app.screen, Archive):

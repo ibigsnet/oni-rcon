@@ -2,6 +2,7 @@
 #   $ONI_RCON_CONFIG, ./oni-rcon.toml,
 #   %APPDATA%\oni-rcon\config.toml (Windows) / ~/.config/oni-rcon/config.toml (Linux, macOS)
 # Never commit a real password: use password_env or password_command instead of password.
+# The desktop app's HOST ONE HERE and FIND SERVERS ON IT write the [[server]] blocks for you: see docs/hosting.md.
 
 by = "your-name"              # who you are in the server's admin log (default: your login name)
 
@@ -46,6 +47,7 @@ forge_poll = 600              # seconds between checks for updates to what you'v
 ssh = "admin@game-box"        # tunnel through this SSH destination (key auth; leave out for direct)
 host = "127.0.0.1"            # RCON address as seen from the ssh destination (the server's default bind)
 content_dir = "~/reclaimer/content"  # where the server loads Forge content from (on the ssh destination)
+# restart_cmd = "docker restart reclaimer-server-$(({port}-49175))-1"  # RESTART SERVER on F3 (desktop), run like ping_log
 
 # Where the RCON password comes from, first that's set wins:
 #   password = "..."                          (plain text: avoid)
@@ -57,11 +59,11 @@ password_command = ["ssh", "-o", "BatchMode=yes", "admin@game-box",
                     "sed -n 's/^RECLAIMER_DEDICATED_RCON_PASSWORD=//p' ~/reclaimer/.env"]
 
 [[server]]
-port = 11774                  # RCON port = the game port unless its [[server]] in dedicated.toml sets rcon_port
+port = 49176                  # RCON port = the game port unless its [[server]] in dedicated.toml sets rcon_port
 name = "Slayer"               # optional; default = the name the server reports
 
 [[server]]
-port = 11775
+port = 49177
 
 # A server reached without SSH (only if its RCON is behind something that encrypts, e.g. a wss:// reverse proxy):
 # [[server]]

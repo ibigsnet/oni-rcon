@@ -781,6 +781,7 @@ def test_install_and_load_from_f6(fake, tmp_path):
             await pilot.press("i")
             assert await until(pilot, lambda: isinstance(app.screen, Confirm))
             assert app.screen.verb == "INSTALL" and "Big Team Battle" in app.screen.b  # it shares the folder
+            assert await until(pilot, lambda: app.screen.focused is not None)  # on_mount focuses it a beat after the push
             assert app.screen.focused.id == "no"  # ABORT by default
             app.screen.query_one("#yes").press()
             assert await until(pilot, lambda: lid in app.fstate.ids(), 200)

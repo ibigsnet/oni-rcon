@@ -85,18 +85,30 @@ allowances and a raw command console, wrapped in Office of Naval Intelligence, S
 
 On the fleet console host, run `oni-rcon`. From a clone: `uv sync`, then `uv run oni-rcon`. A direct connection opens a setup screen:
 type the server address and RCON password, and it tests them. **Try the demo** looks around three simulated servers.
+The desktop app in `desktop/` (Tauri) comes from upstream [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) and is kept in step with it; IBIGS builds and supports the terminal console.
+
+**No server yet?** In the [desktop app](desktop/README.md), **HOST ONE HERE** on the setup screen asks for a name and a
+join password, downloads Project Reclaimer's dedicated server, sets it up from your Steam copy of MCC, turns its remote
+console on and connects.
+**Servers on a game box already?** **FIND SERVERS ON IT** finds them over SSH and adds them.
+[Hosting and connecting](docs/hosting.md) · [watch the hosting demo](docs/hosting-demo.mp4).
+
+**Desktop app.** [`desktop/`](desktop/README.md) is the same console rebuilt as a native window (Rust and React, on
+Tauri): the same config, keys and look, with the emblem, the archive and the Superintendent drawn at four times the
+resolution, and lighter on a big fleet. Installers are on the [releases page](https://github.com/viik2k/oni-rcon/releases/latest).
 
 ## What it does
 
 | Tab | |
 |---|---|
-| **F1 Assets** | Live player table per server: team, score, K/D, health and shield bars, admin, dead and spree flags, and the score race between the teams along the bottom. The dossier shows the selected player's file, a biometric glyph drawn from their player ID, the medals they've earned and the raw JSON. `t` tell · `k` kick · `b` ban · `m` mute · `j` team · `v` VPN allow · `y` copy ID |
+| **F1 Assets** | Live player table per server: team, score, K/D, health and shield bars, admin, dead and spree flags, and the score race between the teams along the bottom. The dossier shows the selected player's file, a biometric glyph drawn from their player ID, the medals they've earned and the raw JSON. `t` tell · `k` kick · `b` ban · `m` mute · `j` team · `v` VPN allow · `p` make admin · `y` copy ID |
 | **F2 Intercepts** | The selected server's feed (tick ALL SERVERS, or press F2 again, for every server): chat (team and server), kills with weapon, joins, leaves, kicks, bans, votes and game phases. Kills carry their Halo 3 medals: double kill through killionaire, killing spree through invincible, and killjoy. Filter by chat, combat, traffic, moderation or ops; scroll up to read back and it holds still. Chat that mentions admins or cheating raises a toast and the terminal bell |
 | **F3 Operations** | Sitrep for the selected server with the vote under way and its tally, and the title and author of the map or gametype playing when it came from ReclaimerForge; the theatre, with each team's numbers and score as bars, the top guns and who's on a spree; the playlist rotation with the current map marked; and buttons for load map + mode, change map or mode, queue next (each opens the content browser: stock maps, mods, ReclaimerForge downloads by folder, your content folder, Halo 3 and Matchmaking variants, saved and Workshop variants, and ReclaimerForge listings not installed yet, which install first; type to filter, click NAME, INSTALLED, DOWNLOADS or RATING to order and again to reverse), playlists (with the IBIGS `oni` helper), end round or game, shuffle, team count, call, pass or cancel a vote, broadcast, rename, join password and ping limit |
-| **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP |
+| **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP (on the desktop with server 0.9.22 or later, which list it matched). On the desktop with server 0.9.22 or later, each VPN list's size, age and last fetch problem, flagged when older than a week or failing, and whether the server refuses everyone while no list is loaded (fail-closed). The admins, with who's on and where each was made: add or remove one at once on every server sharing the ban list (server 0.9.16 or later), or, on the desktop, of one server only through its `dedicated.toml` (from the next restart). Who was kicked and how long they're still out: pardon one so they can rejoin now (server 0.9.16 or later). `p` add admin · `d` remove admin · `o` pardon |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
 | **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked (trending and rising over the last 24 hours, 7 days or 30 days), or see the collections ReclaimerForge is featuring now, and search it. Each listing shows its type, authors, thumbs up and down, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. Click a column's name to order by it, again to reverse, a third time for Forge's order. `i` install on this server · `l` load it now (a playlist: choose lobbies) · `s` sort · `w` window · `o` order by the next column · `r` reverse · `/` search · `n` more · `k` key · `y` copy ID |
 | **F10 Health** | Whether the servers are crashing and the box is coping. CRASHES lists each server's latest crashes read from its log (time, server, class, how many players were on, whether the RCON connection dropped with it); FRAME RATE shows each server's frames a second from the server's own "falling behind" log lines (now, 5-minute average, worst, longest frame, players), what's limiting it (BOTTLENECK) and a 30-minute frame-time chart with plain-words advice; see [Is my server lagging?](docs/SERVER-PERFORMANCE.md); HOST shows free memory, swap, the kernel's `oom_kill` counter and each container's start time and OOMKilled flag; WORKAROUND shows whether an optional systemd service is running. A new crash, an OOM kill or memory falling under your limit flashes a banner over every tab, goes in the feed and beeps. Needs `health_cmd` in the config: [see below](#health-watch) |
+| **F8 Plug-ins** | Panels drawn by programs you add, such as Gryphon's moderation log: each one's status, tables and buttons, and a badge that can turn CONDITION amber or red. Off until you name one in the config and approve it: [see below](#plug-ins) |
 
 Also:
 
@@ -110,6 +122,9 @@ Also:
   server, the busiest first, to type a name into. Each card shows how full the server is and a trace of its activity
   over the last 100 seconds. Names that share a community tag ("ALPHA · Big Team") are shortened to what tells them
   apart, with the tag on the card's second line.
+- **Version drift.** A server lets in only players on exactly its version, and players' games update themselves, so a
+  server behind the newest Project Reclaimer release says so on its card and in F3 (`▲ 0.9.18 out` in the TUI), and
+  the feed says `MIXED VERSIONS` when your servers disagree. Checked hourly; `ONI_RCON_NO_UPDATE=1` turns it off.
 - **Built for fleets.** Past 12 servers the cards slim to two lines, the boot screen tallies the stations instead of
   listing each one, and the console stays light enough for a web terminal: a card is redrawn only when what it shows
   changes, status polls are spread over 15 seconds instead of fired together, and servers sign in 8 at a time with
@@ -138,6 +153,38 @@ Also:
   goes in the command log on one line, and a tally closes it ("79 stations · 77 ok · 2 no reply yet"). A command that
   gets no reply in 10 seconds is never resent, and if its reply comes later the log shows it.
 - **Command palette.** `Ctrl+P`.
+- **Find a player.** `Ctrl+F` searches every server's players at once: a name (a typo of four letters or more still finds
+  them), `@tag`, `clan:`, `team:`, `id:`, `server:`, `node:` or `port:`, all of which must match the same player.
+  Enter opens their server with them selected. (From ibigs/oni-rcon, by IBIGS.)
+- **Superintendent findings.** `F8`, or a click on the Superintendent, lists what it noticed in the last hour, with the
+  evidence behind each: chat asking for an admin or reporting a player (with up to 20 messages either side, two minutes
+  before and after), repeated or back-and-forth kick votes, a kill burst, an unusual kill rate, a cheat flag the server
+  reported and an explicit Perfection medal. They are observations for you to review, never grounds for moderation by
+  themselves: nothing is kicked, banned or muted for you, and kill heuristics stand down in Infection and SWAT-style
+  modes. A finding that needs review turns the CONDITION red, pops up and chimes; CLEAR ALL acknowledges them. The
+  chat is matched by explicit requests ("need an admin", "please kick Red", "Red is cheating"), not by words like "mod"
+  or "cheat" alone. (From ibigs/oni-rcon, by IBIGS.)
+- **Content browser.** CHANGE MAP, CHANGE MODE, LOAD and QUEUE NEXT list what the server can load in groups (stock maps and
+  game types, mods, ReclaimerForge downloads, your own content folder, the Halo 3 and Matchmaking variants, saved and
+  Workshop variants) instead of one long list. Type to filter (every word has to match a name, author, folder or file),
+  order by name, install date, downloads or rating (click a button again to turn it round), and a ● marks what is
+  playing now. With a ReclaimerForge key loaded, a last group offers maps and game types the server doesn't have yet:
+  choosing one asks, then installs it. (From ibigs/oni-rcon, by IBIGS.)
+- **Playlists.** PLAYLISTS (F3, desktop) lists the server folder's `playlists`, the ones made here and any other, with
+  the playlists installed from F6. NEW and EDIT open an editor: a name, the seconds players get to vote (5 to 120) and
+  its games, a map and a game type each, with a weight for how often it comes up. Three games at least, each map and game
+  type once, no more than 128, in the shape the dedicated server reads. A playlist this console made is saved over; any
+  other is opened as a copy. USE ON THIS SERVER sets `playlist` in `dedicated.toml`. (From ibigs/oni-rcon, by IBIGS.)
+- **Automation rules.** AUTOMATION (F9, desktop) holds rules of WHEN something happens, ONLY IF it holds, THEN DO these: say in
+  chat, message a player, the admins or a role, cancel a vote, shuffle the teams, post to Discord or Telegram. Build one step
+  by step, start from a template, TEST it, and set who counts as an ADMIN, VIP or MOD. Chat from rules is held to 20 lines a
+  minute per server, Discord webhook URLs and Telegram bot tokens stay in the app and show hidden, and every run is written to
+  the command log. Rules run while the console is open. See [docs/AUTOMATION.md](docs/AUTOMATION.md). (From ibigs/oni-rcon, by
+  IBIGS.)
+- **Automation Studio.** A built-in F10 plug-in (desktop) for the automations rules can't express: write JavaScript in an
+  editor with suggestions, docs on hover, live problems and a command palette. RUN a script for real or TEST it as a dry
+  run, watch live events, simulate your own, and keep data that outlives restarts. Scripts run sandboxed, with no
+  network, RCON only through the plug-in filter, and chat and Discord rate limits. See [docs/STUDIO.md](docs/STUDIO.md).
 - **Player addresses are redacted by default,** in the tables, the feed, the toasts and the console's replies and raw
   events. Press `x` to reveal them. This helps when you stream or share screenshots.
 - **SSH tunnels are built in.** One `ssh -L` per host carries every server on it, and it reconnects with backoff.
@@ -173,7 +220,27 @@ screen asks for the address and password and tests them before saving.
 Use a terminal with true colour and a font that has box-drawing glyphs, such as Windows Terminal, iTerm2, kitty or
 WezTerm. At least 140×40 looks best.
 
+## Host a server
+
+This is in the [desktop app](desktop/README.md), on its setup screen.
+
+**HOST ONE HERE**, on Windows with MCC installed from Steam, asks for the server's name, join password, player limit and
+whether it's listed or open to the internet, then downloads the newest Project Reclaimer dedicated server
+(checked against its published SHA-256), makes a server folder from your game (`reclaimer` on the game's drive), turns
+the remote console on with a new random password, starts the servers in a window of their own and adds them. On Linux
+it does the same with the official Docker image in `~/reclaimer`.
+
+**FIND SERVERS ON IT**, under *Advanced: reach it through SSH*, looks on the game box you give it for Reclaimer
+containers and server folders, tests each remote console and adds the ones that answer. Their password stays on the
+box: the config reads it there at each start. With containers it sets up [player ping](#player-ping) and the
+[health watch](#health-watch) too.
+
+[docs/hosting.md](docs/hosting.md) has every step, the firewall rules, copying the game files to a Linux box, and what
+it can't find yet. The servers it adds are in the shared config file, so the terminal console connects to them too.
+
 ## Turn on RCON on the server
+
+You can skip this if HOST ONE HERE or FIND SERVERS ON IT did it for you.
 
 In `dedicated.toml`:
 
@@ -198,9 +265,9 @@ and saves the password only if you leave **Remember the password** ticked.
 From the command line:
 
 ```
-oni-rcon 11774                                # a server on this machine
-oni-rcon 11774 11775 11776                    # several at once
-oni-rcon --ssh admin@game-box 11774 11775     # through an SSH tunnel to the game box
+oni-rcon 49176                                # a server on this machine
+oni-rcon 49176 49177 49178                    # several at once
+oni-rcon --ssh admin@game-box 49176 49177     # through an SSH tunnel to the game box
 oni-rcon wss://rcon.example.org/slayer        # behind a TLS reverse proxy
 ```
 
@@ -236,10 +303,30 @@ password_command = ["ssh", "-o", "BatchMode=yes", "admin@game-box",
                     "sed -n 's/^RECLAIMER_DEDICATED_RCON_PASSWORD=//p' ~/reclaimer/.env"]
 
 [[server]]
-port = 11774
+port = 49176
 [[server]]
-port = 11775
+port = 49177
 ```
+
+### Restarting a server
+
+RESTART SERVER on F3 (desktop app) runs the server's `restart_cmd` where the server is: on its `ssh` host, or on
+this machine without one. The setup screen writes it for the servers it finds or hosts, and a server on this Windows
+machine that its server folder lists gets one without any config; for others, add it to the
+`[[server]]` block (or `[defaults]`; `{port}` is the server's RCON port):
+
+```toml
+restart_cmd = "docker restart my-server-{port}"
+```
+
+Everyone on it is dropped and the console reconnects once it's back. PLAYER CAPACITY (F3, desktop) saves
+`max_players` in that server's `dedicated.toml`, found beside its `content_dir`, then offers this restart so it applies. SWITCH PLAYLIST does the same with `playlist`, picked from the
+`playlists` folder beside `dedicated.toml` or from the playlists installed from F6, and takes out the server's `map`,
+`game`, `variant` or `campaign` (a server plays from one). NEW PLAYLIST (and PLAYLISTS, which also edits them) makes one there from the server's own maps
+and modes, three games at least, and offers to switch to it. NEW GAME TYPE saves a game type in the content folder's
+`Game Modes`, built on one of Reclaimer's ten base modes with the score, teams, time limit, rounds, lives, respawn
+delay and shields you give it (blank keeps the mode's own); once the server lists it, CHANGE MODE plays it. Servers sharing a container (or, on Windows, the
+one window HOST ONE HERE started) restart together.
 
 ### Player ping
 
@@ -278,7 +365,7 @@ F10 reads each server's log and the box's memory, so a crash or a memory squeeze
 It needs one thing from you: `health_cmd`, a command that prints a small report for **one** server. Like `ping_log` it
 is a top-level key above the first `[table]`, `{port}` is the server's RCON port, and it runs on the server's `ssh`
 host (or on this machine without one). It runs once a minute (and soon after a server's RCON connection drops), and it
-only reads: nothing in oni-rcon restarts, kills or changes a server. `{since}` is how far back to read the log: a day
+only reads. `{since}` is how far back to read the log: a day
 the first time, a few minutes after.
 
 ```toml
@@ -317,6 +404,11 @@ but don't alert.
 twice that. Swap is amber from a quarter used and red from half. `oom_kill` shows how far it has risen since you opened
 oni-rcon.
 
+**Frame rate.** The same report carries the server's log, and a server logs every minute it spent under 54 frames a
+second. F10's FRAME RATE table and 30-minute FRAME TIME chart, the `38fps` on a lagging server's card and F3's SERVER FPS
+are read from those lines, so `health_cmd` has to print the log. [docs/SERVER-PERFORMANCE.md](docs/SERVER-PERFORMANCE.md)
+is a plain guide to reading them. (From [ibigsnet/oni-rcon](https://github.com/ibigsnet/oni-rcon), by IBIGS.)
+
 **WORKAROUND** runs `systemctl is-active` and `journalctl` for the named unit (read-only) and shows whether it's active,
 the time of its last `moved tag` line and any `NOT the pinned build` line. It needs the ssh user to be allowed to read that
 journal; without `health_service` the panel is hidden.
@@ -336,8 +428,16 @@ email. Then open Developer tools and create a named key with the `catalog:read` 
 nothing more. The key is shown once, when you make it, so save it then. Make one for oni-rcon alone, so you can rotate
 it without touching anything else that uses a key: create the replacement, load it into oni-rcon, then revoke the old
 one. A key stops working when it expires or is revoked, when its account loses the Developer role or its verified
-email, or when the account is banned; F6 then says the key was refused. oni-rcon never writes, uploads or publishes
-anything there.
+email, or when the account is banned; F6 then says the key was refused. The terminal console never writes, uploads or
+publishes anything there.
+
+**Publishing** (desktop app only) takes a key with `listings:write`, `files:upload` and `listings:publish` as well, and
+`listings:delete` to withdraw versions and delete listings. On F6, `p` opens a file dialog (`.json`, `.mvar`, `.bin`, up
+to 100 MiB each), one form asks for the title, version, who sees it, description, tags and release notes, and the files
+are uploaded in chunks and published. If any step fails, the draft it made is taken down again. MINE (`s`) lists your
+own listings, drafts included: `u` publishes new files as the next version, `e` edits the title, description, tags and
+who sees it, `x` withdraws the selected version (Forge keeps the last one; DELETE LISTING takes the lot), and NOTES
+changes a version's label and release notes. Publishing needs a verified email on the account.
 
 **Give it to oni-rcon.** The first of these that's set wins:
 
@@ -402,9 +502,8 @@ content_dir = "~/reclaimer/content"   # on the game box, for a server reached ov
 
 **Loading is a separate step.** Whether a dedicated server picks up new content while it runs is up to the server, so
 installing never loads anything. Once the server lists the new map or gametype, `l` on F6 loads it, the same as LOAD
-MAP+MODE on F3. If it isn't listed yet, the server needs a restart, which oni-rcon can't do for you. A playlist is
-installed like anything else, but using it means pointing the server's playlist setting at it, and oni-rcon doesn't
-edit `dedicated.toml`. What's installed where is kept in `forge-state.json`, beside the config file.
+MAP+MODE on F3. If it isn't listed yet, the server needs a restart: RESTART SERVER on F3 in the desktop app. A playlist is
+installed like anything else, and SWITCH PLAYLIST on F3 (desktop) puts the server on it. What's installed where is kept in `forge-state.json`, beside the config file.
 
 ### Updates and withdrawals
 
@@ -436,6 +535,22 @@ oni-rcon keeps to the key's quota (120 requests a minute): it reads the rate-lim
 `429` for as long as Forge asks, and keeps recent replies so it doesn't ask twice. Those replies and every verified
 download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` elsewhere.
 
+## Plug-ins
+
+A plug-in is a separate program that draws its own panel on F8, in any language: Oni runs it once per request (on
+this machine, or over ssh like `health_cmd`), sends one line of JSON and reads one back. Its actions show up as buttons
+and in the palette, and it can ask Oni to send RCON commands for it, but only the ones its manifest lists.
+
+Put its folder in `plugins/` next to your config file and name it at the top of the config, above the first `[table]`:
+
+```toml
+plugins = ["hello"]
+```
+
+The first time, F8 shows what it runs, where, and what it may send, and asks you to approve it; any change to its
+`oni-plugin.toml` asks again. [`examples/plugins/hello`](examples/plugins/hello) is a working one in a single Python
+file. [docs/PLUGINS.md](docs/PLUGINS.md) is the protocol.
+
 ## Security
 
 - **RCON is plain text.** Keep the server's `[rcon] address` on `127.0.0.1` and reach it with `--ssh` (or a VPN). Never
@@ -445,6 +560,8 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 - **F10 only reads.** `health_cmd` is your command, run as you on your host: keep it to `docker logs`, `docker inspect`
   and the like. oni-rcon adds only `systemctl is-active` and `journalctl` for `health_service`. Player IDs and addresses
   in logs are stripped before anything is shown or kept.
+- **A plug-in runs as you.** Oni doesn't sandbox it: approve only one you'd run yourself. What it sends is shown as
+  plain text, with addresses redacted, and the only RCON it can have sent is what its manifest lists.
 - **Mind the tool limit.** A server admits 4 RCON tools at once, and oni-rcon uses one connection per server.
 - **Kicks and bans name you.** They go into the server's admin log under your `--by` name.
 - **Your Forge key goes to reclaimerforge.net and nowhere else.** It travels in the `Authorization` header over HTTPS:
@@ -458,19 +575,22 @@ download sit in `%LOCALAPPDATA%\oni-rcon` on Windows or `~/.cache/oni-rcon` else
 | Key | Action |
 |---|---|
 | `F1`–`F6`, `F10` | Assets · Intercepts · Operations · Blacklist · Console · Forge · Health |
+| `F8` | Plug-ins (IBIGS customer and fleet consoles use F8 for AUTOMATION / filter; the tab is still there to click in the fleet console) |
 | `1`–`9` | select server |
 | `g` | go to any server: the list puts the busiest first and filters as you type |
+| `Ctrl+F` | find a player on any server |
+| `F8` | the Superintendent's findings (the desktop app) |
 | `Ctrl+B` | broadcast |
-| `Ctrl+R` | refresh now (on F10, read every health report now) |
+| `Ctrl+R` | refresh now (on F10, read every health report now; on F8, ask every plug-in) |
 | `Ctrl+P` | command palette |
 | `?` | the field manual: what everything does, in plain words |
 | `x` | show or hide player addresses |
 | `/` | jump to the input line |
 | `End` | in the feed or command log: back to the newest line (scrolling up holds the view still) |
 | `t k b m j v y` | on a player: tell, kick, ban, mute, team, VPN allow, copy ID |
-| `n u a r` | on the blacklist: new ban, unban, VPN allow, VPN revoke |
+| `n u a r o` | on the blacklist: new ban, unban, VPN allow, VPN revoke, pardon a kick |
 | `i l a s w n k y` | on the Forge catalog: install, load now, acknowledge a withdrawal, sort (including FAVOURITES and INSTALLED HERE), time window, next page, API key, copy listing ID |
-| any key | skip the boot sequence; `F1`–`F6`, `F10` also open that tab (`--no-intro` skips it for good, `--intro full` plays all of it once) |
+| any key | skip the boot sequence; `F1`–`F6`, `F8`, `F10` also open that tab (`--no-intro` skips it for good, `--intro full` plays all of it once) |
 | `Ctrl+Q` | quit |
 
 ## Field names
@@ -515,7 +635,7 @@ contains no game files.
 
 ## License
 
-GPL-3.0-or-later. Copyright (c) 2026 ibigs, LLC. See [LICENSE](LICENSE).
+GPL-3.0-or-later. Copyright (c) 2026 Arche Labs, with portions copyright (c) 2026 ibigs, LLC. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 
 IBIGS customer controls remain F7 Start/Stop, F8 Automation (rules, schedules, roles, votes, Discord) and F9 Updates. The upstream Health tab is F10. Generated customer inventory enables the local, read-only health helper automatically.

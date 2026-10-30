@@ -9,9 +9,10 @@ from pathlib import Path
 
 from . import __version__, update
 from .config import (Server, default_config, forge_settings, health_settings, load_config, parse_target,
-                     resolve_passwords, user_config)
+                     plugin_settings, resolve_passwords, user_config)
 from .forge import ForgeSetup, Secret, cache_root, load_key
 from .health import HealthSetup
+from .plugins import PluginSetup, discover, enabled
 from .prefs import Prefs
 
 DEMO_HINT = ("Three pretend servers to look around, and a pretend ReclaimerForge on F6. Click a player, try the "
@@ -84,8 +85,10 @@ def main() -> None:
         resolve_passwords(servers)
         if demo:
             health = HealthSetup(service="blueflame-demo", source=box)
+            from .demo import DemoPlugin
+            plugins = DemoPlugin.setup()
         else:
-            forge, health = forge_setup(path), health_setup(path)
+            forge, health, plugins = forge_setup(path), health_setup(path), plugin_setup(path)
 
         from .app import OniApp
         if os.environ.get('IBIGS_ONI_TENANT') == '1':
@@ -94,8 +97,11 @@ def main() -> None:
         else:
             app_class = OniApp
         prefs = Prefs.load(user_config().with_name("prefs.json"))
+        if app_class is not OniApp:  # IBIGS customer console: no plug-ins (they run programs as the console's user)
+            plugins = PluginSetup()
         result = app_class(servers, by=a.by or cfg_by or login(), updater=updater, hint=hint, forge=forge, prefs=prefs,
-                           intro="off" if a.no_intro else a.intro or prefs.intro_mode(), health=health).run()
+                           intro="off" if a.no_intro else a.intro or prefs.intro_mode(), health=health,
+                           plugins=plugins, reclaimer=None if demo else update.reclaimer_latest).run()
         if result != "setup":
             return
         setup, updater = True, None  # + ADD SERVER: back to the setup screen, then round again; updates checked once
@@ -122,6 +128,16 @@ def health_setup(path: Path | None) -> HealthSetup:
         return HealthSetup.from_settings(health_settings(path))
     except ValueError as e:
         raise SystemExit(f"{path}: {e}") from None
+
+
+def plugin_setup(path: Path | None) -> PluginSetup:
+    """The plug-ins the config turns on, read from plugins/ next to it. Only read here: none runs until it's approved
+    on F10."""
+    try:
+        ids = enabled(plugin_settings(path))
+    except ValueError as e:
+        raise SystemExit(f"{path}: {e}") from None
+    return PluginSetup(discover(path.parent / "plugins" if path else None, ids))
 
 
 def login() -> str:

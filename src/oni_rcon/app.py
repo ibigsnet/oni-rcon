@@ -53,8 +53,11 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
 from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
 from .content import CATALOG_SORT, catalog_items, forge_entry, forge_index, items_for
 from .variants import clash_note
-from .install import InstallError, place, plan, size_words, target_for, vet as install_vet
+from .install import SSH_OPTS, InstallError, place, plan, size_words, target_for, vet as install_vet
 from .pings import JOIN_PING, follow_join_pings
+from . import plugins as pl
+from .update import behind, mixed_versions
+from .plugins import ACTION_TIMEOUT, VIEW_TIMEOUT, Manifest, PluginError, PluginSetup, server_name
 from .medals import Medals
 from .findings import Findings, public_roster, quiet_kill_mode
 from .prefs import Prefs
@@ -86,19 +89,23 @@ BAN_TIMES = [("Permanent", ""), ("30 minutes", "30m"), ("2 hours", "2h"), ("12 h
 MUTE_TIMES = [("Until restart", ""), ("10 minutes", "10m"), ("1 hour", "1h"), ("12 hours", "12h"), ("1 day", "1d")]
 COMMANDS = ["status", "players", "say", "tell", "kick", "ban", "banip", "unban", "bans", "vpn", "vpnallow", "vpnrevoke",
             "mute", "unmute", "endround", "endgame", "maps", "modes", "map", "mode", "load", "nextmap", "servername",
-            "password", "maxping", "teamcount", "shuffle", "team", "vote", "startvote", "passvote", "cancelvote", "help"]
+            "password", "maxping", "teamcount", "shuffle", "team", "vote", "startvote", "passvote", "cancelvote", "pardon", "admin", "help"]
 
 CATS = {"chat": WHITE, "combat": RED, "traffic": CYAN, "moderation": AMBER, "ops": GREY}
 KIND = {"chat": "chat", "kill": "combat", "join": "traffic", "leave": "traffic", "refused": "traffic",
         "kick": "moderation", "ban": "moderation", "unban": "moderation", "mute": "moderation",
-        "unmute": "moderation", "cheat": "moderation"}
-GLYPH = {"health": "⚠", "chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□",
-         "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡", "forge": "⬢"}
+        "unmute": "moderation", "cheat": "moderation", "pardon": "moderation", "admin_added": "moderation",
+        "admin_removed": "moderation"}
+GLYPH = {"health": "⚠", "chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□", "pardon": "↺",
+         "admin_added": "✦", "admin_removed": "✧", "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡", "forge": "⬢"}
 STATE = {"online": ("◉", GREEN), "connecting": ("◌", AMBER), "offline": ("○", RED), "denied": ("⊘", RED)}
 SPIN = "◐◓◑◒"
 PANE_FOCUS = {"assets": "#players", "intercepts": "#feed", "operations": "#op-load", "blacklist": "#bans",
-              "console": "#cmd", "forge": "#listings", "health": "#crashes"}
-TABS = ("f1", "f2", "f3", "f4", "f5", "f6", "f10")
+              "console": "#cmd", "forge": "#listings", "health": "#crashes", "plugins": "#plugin-list"}
+# IBIGS: Health stays on F10 (F7 is the customer console's START / STOP); upstream's plug-ins tab is on F8 here
+TABS = ("f1", "f2", "f3", "f4", "f5", "f6", "f8", "f10")
+PLUGIN_EVERY, PLUGIN_BADGE_EVERY = 30, 60  # seconds between asks: with the plug-ins tab open, and for a badge while it's shut
+BADGE = {"ok": GREEN, "warn": AMBER, "alert": RED, "off": DIM}
 HEALTH_EVERY = 60  # seconds between a server's health reports
 HEALTH_GATE = 4  # reports being fetched at once
 BANNER_FOR = 30  # seconds a crash banner stays up unless it's clicked
@@ -134,12 +141,15 @@ OPS = [("load", "LOAD MAP+MODE", "primary"), ("map", "CHANGE MAP", "default"), (
        ("maxping", "PING LIMIT", "default"), ("reconnect", "RECONNECT", "default"),
        ("playlists", "PLAYLISTS", "primary")]
 BAN_OPS = [("newban", "NEW BAN", "error"), ("unban", "UNBAN  u", "warning"), ("vpnallow", "VPN ALLOW  a", "default"),
-           ("vpnrevoke", "VPN REVOKE  r", "default"), ("vpncheck", "CHECK IP", "default")]
+           ("vpnrevoke", "VPN REVOKE  r", "default"), ("vpncheck", "CHECK IP", "default"),
+           ("pardon", "PARDON  o", "default"), ("adminadd", "ADD ADMIN  p", "primary"),
+           ("adminremove", "REMOVE ADMIN  d", "warning")]
 OP_GROUPS = [("MATCH", ["load", "map", "mode", "nextmap", "endround", "endgame"]),
              ("TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]),
              ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect", "playlists"])]
 PLAYER_OPS = [("tell", "TELL", "t"), ("kick", "KICK", "k"), ("ban", "BAN", "b"), ("mute", "MUTE", "m"),
-              ("team", "TEAM", "j"), ("vpnallow", "VPN OK", "v"), ("copy", "COPY ID", "y")]
+              ("team", "TEAM", "j"), ("vpnallow", "VPN OK", "v"), ("admin", "MAKE ADMIN", "p"),
+              ("copy", "COPY ID", "y")]
 
 # What each control does, in plain words: shown when the mouse rests on it.
 TIPS = {
@@ -166,12 +176,16 @@ TIPS = {
     "bl-vpnallow": "Let a player or address join through a VPN.  Key: a",
     "bl-vpnrevoke": "Take back the selected VPN allowance.  Key: r",
     "bl-vpncheck": "Check whether an address looks like a VPN.",
+    "bl-pardon": "Let the selected kicked player rejoin now, or name one. Their next kick starts at 10 minutes again.  Key: o",
+    "bl-adminadd": "Make a player an admin on every server sharing the ban list, at once.  Key: p",
+    "bl-adminremove": "Take back the selected admin, on every server sharing the ban list.  Key: d",
     "pl-tell": "Send a private message only they can see.  Key: t",
     "pl-kick": "Remove them from the game. They can rejoin after a short wait.  Key: k",
     "pl-ban": "Keep them out, for a while or for good.  Key: b",
     "pl-mute": "Silence their text and voice chat (or lift it).  Key: m",
     "pl-team": "Move them to another team.  Key: j",
     "pl-vpnallow": "Let them join through a VPN.  Key: v",
+    "pl-admin": "Make them an admin (or take it back), on every server sharing the ban list.  Key: p",
     "pl-copy": "Copy their player ID, for a ban list or a report.  Key: y",
     "add-server": "Add another server with the setup screen.",
     "f-all": "Show what happens on every server, not only the selected one.  Key: F2 again",
@@ -193,11 +207,12 @@ TIPS = {
 TAB_TIPS = {"assets": "Players on the selected server: click one for their file and actions.",
             "intercepts": "Live chat, kills, joins and moderation from every server, and a box to talk back.",
             "operations": "Change the map or mode, end rounds, run votes, and server settings.",
-            "blacklist": "Bans, and players allowed to join through a VPN.",
+            "blacklist": "Bans, players allowed to join through a VPN, and who was kicked.",
             "console": "Type server commands directly. For when a button doesn't cover it.",
             "forge": "The ReclaimerForge catalog: community maps, gametypes and playlists for your servers.",
             "health": "Crashes and frame rate read from each server's log, the host's memory, and whether the "
-                      "workaround service runs."}
+                      "workaround service runs.",
+            "plugins": "Programs you've added that draw their own panel here, such as Gryphon's moderation log."}
 
 # A connection failure in words to act on: (what the error says, card text, the full explanation)
 EXPLAIN = [
@@ -402,6 +417,76 @@ def age(seconds: float) -> str:
     return f"{d}d {h}h" if d else f"{h}h {m:02d}m" if h else f"{m}m {s % 60:02d}s" if m else f"{s}s"
 
 
+def epoch(ts) -> float | None:
+    """Epoch seconds from a server time: seconds, milliseconds or an ISO string; None when it doesn't read."""
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        return ts / 1000 if ts > 1e11 else float(ts)
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).timestamp() if ts else None
+    except ValueError:
+        return None
+
+
+VPN_STALE_DAYS = 7  # the server calls a list stale after a week (0.9.22)
+
+
+ADMIN_NOTE = {
+    "add": "They can kick, ban and move players in game, and can't be vote-kicked. It applies at once on every server "
+           "sharing this ban list.",
+    "remove": "Applies at once on every server sharing this ban list. An admin written in dedicated.toml can't be "
+              "removed from here.",
+}
+
+
+def admin_rows(a: dict, players: list) -> list[dict]:
+    """The `admins` reply as rows: target (what `admin remove` takes), name, id, on (None: unknown), from, and fixed
+    (written in dedicated.toml, so RCON can't remove it).
+    ponytail: the reply isn't documented, so this takes an ID string or an object with the usual field names, as the
+    desktop does."""
+    online = {str(pick(p, "player_id", "id", default="")) for p in players}
+    rows = []
+    for e in a.get("admins") or a.get("entries") or a.get("list") or []:
+        e = e if isinstance(e, dict) else {"id": e}
+        pid, name = str(pick(e, "player_id", "id", default="")), str(pick(e, "name", default=""))
+        if not (pid or name):
+            continue
+        src, on = str(pick(e, "source", "from", "origin", default="")), pick(e, "online", "connected")
+        rows.append({"target": pid or name, "name": name, "id": pid, "from": src,
+                     "fixed": bool(re.search("toml|config", src, re.I)),
+                     "on": bool(on) if on is not None else (pid in online if pid else None)})
+    return rows
+
+
+def vpn_lists(v: dict, now: float | None = None) -> list[dict]:
+    """The `vpn` reply's lists (0.9.22+): each source and the ASN table, with its size, age and whether it needs a
+    look (older than a week, never fetched, or a fetch problem). Empty before 0.9.22 or the first refresh."""
+    l, now = v.get("lists"), time.time() if now is None else now
+    if not isinstance(l, dict):
+        return []
+
+    def row(name, size, at, problem) -> dict:
+        t = epoch(at)
+        return {"name": name, "size": size, "age": "never" if t is None else age(now - t),
+                "stale": t is None or now - t > VPN_STALE_DAYS * 86400, "problem": str(problem or "")}
+    n = lambda *pairs: " · ".join(f"{x} {unit}" for x, unit in pairs if isinstance(x, int))
+    out = [row(str(s.get("list", "?")), n((s.get("ranges"), "ranges"), (s.get("asns"), "ASNs")), s.get("fetched_at"),
+               s.get("problem")) for s in l.get("sources") or [] if isinstance(s, dict)]
+    if isinstance(t := l.get("table"), dict):
+        out.append(row(f"ASN table ({t['table']})" if t.get("table") else "ASN table",
+                       n((t.get("rows"), "rows"), (t.get("blocks"), "blocks")), t.get("fetched_at"), t.get("problem")))
+    return out
+
+
+def vpn_check(text: str, d) -> str:
+    """CHECK IP's answer, plus the list it matched and a fail-closed refusal when the reply has them (0.9.22+)."""
+    if not isinstance(d, dict):
+        return text
+    extra = [f"matched {d['list']}"] if d.get("list") else []
+    if d.get("fail_closed") and d.get("refused") and not (d.get("listed") or d.get("local") or d.get("allowed")):
+        extra.append("refused because no list is loaded yet (fail_closed)")
+    return " · ".join([text, *extra])
+
+
 def redact_addr(v, on: bool) -> str:
     return "███.███.███.███" if on and v else str(v or "—")
 
@@ -494,6 +579,27 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
         for medal in ev.get("_medals") or ():  # padded with blank braille, not spaces: wrap between pills only
             line.append("  ")
             line.append(f"\u2800{medal}\u2800".replace(" ", "\u2800"), f"{INK} on {GOLD}")
+    elif kind == "pardon":
+        kicked = [str(n) for n in (ev["name"] if isinstance(ev.get("name"), list) else [ev.get("name")]) if n]
+        line.append("PARDON", AMBER)
+        line.append(f"  {', '.join(kicked) or redact_text(str(ev.get('target', '?')), redact)}", WHITE)
+        line.append("  may rejoin", DIM)
+        if ev.get("by"):
+            line.append("  by ", DIM)
+            line.append(str(ev["by"]))
+    elif kind in ("admin_added", "admin_removed"):
+        line.append("ADMIN", AMBER)
+        line.append(f"  {ev['name'] if ev.get('name') else redact_text(clip_id(ev.get('id', '?')), redact)}", WHITE)
+        line.append("  made admin" if kind == "admin_added" else "  no longer admin", DIM)
+        if ev.get("by"):
+            line.append("  by ", DIM)
+            line.append(str(ev["by"]))
+    elif kind == "control" and ev.get("action") in ("reload", "reload_applied"):
+        failed = ev.get("ok") is False  # a reload that changed nothing says why
+        line.append("RELOAD FAILED" if failed else "RELOAD" if ev["action"] == "reload" else "RELOAD APPLIED",
+                    RED if failed else CYAN)
+        if ev.get("text"):
+            line.append(f"  {redact_text(str(ev['text']), redact)}")
     elif kind == "health":
         line.append("HEALTH  " + str(ev.get("text", "")), RED if ev.get("level") == "crit" else AMBER)
     else:
@@ -511,6 +617,52 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
             line.append(f"  {k}=", DIM)
             line.append(str(v))
     return line
+
+
+def note_kick(kicks: dict, ev: dict, now: float | None = None) -> bool:
+    """Keeps a station's kicked list from its events: a kick adds them, a refused join adds its address (or them, when
+    a kick from before we connected turned them away), and a pardon takes them off. `until` is 0 when unknown.
+    True when the list changed."""
+    now = time.time() if now is None else now
+    kind, pid, name = ev.get("event"), str(pick(ev, "id", "player_id", default="")), str(pick(ev, "name", default=""))
+    key, ip = pid or name, str(pick(ev, "ip", default=""))
+    if kind == "kick":
+        secs = num(ev.get("seconds")) or 0
+        if secs <= 0 or not key:
+            return False  # removed for holding up the next game: not kept out
+        kicks.pop(key, None)  # re-added last, so the list runs oldest to newest
+        kicks[key] = {"name": name, "id": pid, "ip": ip, "by": str(ev.get("by", "")),
+                      "reason": str(ev.get("reason", "")), "until": now + secs}
+        while len(kicks) > 50:
+            kicks.pop(next(iter(kicks)))
+    elif kind == "refused":
+        if key in kicks:
+            kicks[key]["ip"] = kicks[key]["ip"] or ip
+        elif key and re.search("kick", str(ev.get("reason", "")), re.I):
+            kicks[key] = {"name": name, "id": pid, "ip": ip, "by": "", "reason": str(ev["reason"]), "until": 0}
+        else:
+            return False
+    elif kind == "pardon":
+        target = str(ev.get("target", ""))
+        names = [str(n) for n in (ev["name"] if isinstance(ev.get("name"), list) else [ev.get("name")]) if n]
+        gone = [k for k, v in kicks.items() if target in (v["id"], v["ip"], v["name"]) or v["name"] in names]
+        for k in gone:
+            del kicks[k]
+        return bool(gone)
+    else:
+        return False
+    return True
+
+
+def pardon_target(k: dict) -> str:
+    """What a pardon is sent with: the player ID, else the address, else the name they were kicked under."""
+    return k["id"] or k["ip"] or k["name"]
+
+
+def kick_left(k: dict, now: float | None = None) -> str:
+    """How long a kick still keeps them out: minutes, "over" (a pardon still resets their next kick) or "?"."""
+    now = time.time() if now is None else now
+    return "?" if not k["until"] else f"{-int((now - k['until']) // 60)}m" if k["until"] > now else "over"
 
 
 def reaction_words(ev: dict, names: dict, redact: bool = True) -> str:
@@ -580,6 +732,7 @@ class Station:
     past: dict = field(default_factory=dict)  # the long ones from earlier rosters and joins: a kill by someone who just left
     aliases: dict = field(default_factory=dict)  # an ID nobody here answers to -> PLAYER n, so it's never shown raw
     alias_serial: int = 0
+    kicks: dict = field(default_factory=dict)  # who it saw kicked, for F4's PARDON: key -> note_kick's entry
     unmatched: bool = False  # said once that kills name players by an ID the roster doesn't carry
     check_at: float = 0.0  # when its next health report is due (monotonic)
     checking: bool = False
@@ -638,6 +791,22 @@ class Station:
         return out
 
 
+@dataclass
+class Plugin:
+    """A plug-in the config turns on, and what the console last heard from it."""
+    m: Manifest
+    view: dict | None = None  # the last view it sent, normalised; kept, greyed, when an ask fails
+    error: str = ""  # why the last ask failed, scrubbed
+    busy: bool = False
+    asked: bool = False  # asked once since start: after that only one with a badge is asked while the plug-ins tab is shut
+    due: float = 0.0  # monotonic: when it's next asked
+    note: str = ""  # the last action's outcome, under its title
+
+    @property
+    def badge(self) -> dict | None:
+        return self.view.get("badge") if self.view and not self.error else None
+
+
 # --- dialogs: titles and bodies are Text, because they carry player names and markup in a name must stay a name ---
 class Dialog(ModalScreen):
     """A stationary modal: opening a control never moves the content underneath it."""
@@ -693,7 +862,7 @@ class Form(Dialog):
             if self.note:
                 yield Static(Text(self.note), classes="dialog-body")
             for key, label, default in self.fields:
-                yield Label(label + ("  (required)" if key in self.required else ""))
+                yield Label(Text(label + ("  (required)" if key in self.required else "")))
                 if isinstance(default, list):
                     yield Select(default, allow_blank=False, id=f"field-{key}")
                 else:
@@ -783,7 +952,7 @@ GUIDE = [
         ("Servers", "Your servers are on the left. Click one, or press 1 to 9. A green ◉ is connected; a red ○ "
                     "says why it isn't, and retries by itself."),
         ("Go to", "g lists every server, the busiest first: type part of a name and press Enter."),
-        ("Tabs", "F1 to F6 and F10, or click the names along the top."),
+        ("Tabs", "F1 to F6, F8 and F10, or click the names along the top."),
         ("Anything", "Ctrl+P opens a searchable list of every action. Rest the mouse on a button to see what it does."),
         ("Copy", "Ctrl+Y, on any page or dialog, lists what can be copied from where you are: a player's ID, name, "
                  "tag and clan, a ban's target, a listing's ID, the server's address, any cell, the row, the whole "
@@ -798,7 +967,7 @@ GUIDE = [
                           "ban, mute, move or allow them through a VPN."),
         ("Ping", "PING is what a player joined with, read from the server's log (needs ping_log in the config; "
                   "RCON has no live ping). Over 200 is red."),
-        ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  y copy their ID"),
+        ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  p make admin  ·  y copy their ID"),
         ("Flags", "ADM an admin  ·  MUT muted  ·  KIA dead right now  ·  NEW just joined  ·  ★5 on a killing spree"),
         ("Their file", "The glyph is drawn from their player ID: the same player always gets the same one. Medals and "
                        "their streak count what this console has seen since it connected."),
@@ -819,10 +988,25 @@ GUIDE = [
                     "and server settings. Anything that ends a game asks first."),
         ("Credit", "When the map or gametype playing came from ReclaimerForge, the sitrep's FORGE line names it and "
                    "whoever made it."),
+        ("Version", "A server lets in only players on exactly its version, and players' games update themselves as "
+                    "soon as Project Reclaimer releases. A server behind the newest release says ▲ 0.9.N out on its "
+                    "card and the sitrep's UPDATE line: update it, or players who updated can't join. The feed says "
+                    "MIXED VERSIONS when your servers disagree. Asked hourly; ONI_RCON_NO_UPDATE=1 turns it off."),
     ]),
     ("F4  BLACKLIST  ·  bans", [
         ("Lists", "Every ban by player, address and device, and who may join through a VPN. Pick a row, then UNBAN "
                   "or REVOKE."),
+        ("VPN lists", "Server 0.9.22 or later: each list the server blocks VPNs with, its size and age, and the last "
+                      "fetch problem. A list older than a week, never fetched, or failing is flagged: the server keeps "
+                      "blocking with the old copy, so refresh it on the server. CHECK IP names the list an address "
+                      "matched."),
+        ("Kicks", "A kick keeps a player out for 10, 30, 60 and then 120 minutes. KICKED lists who this console saw "
+                  "kicked, or turned away for a recent kick, with how long they're still out. PARDON (o) lets the "
+                  "selected one rejoin now and starts their next kick at 10 minutes again; with nothing selected it "
+                  "asks for the name they were kicked under, a player ID or an IP. Needs server 0.9.16 or later."),
+        ("Admins", "ADMINS lists every admin, who's on, and where each was made. ADD ADMIN (p) and REMOVE ADMIN (d) "
+                   "apply at once on every server sharing the ban list (server 0.9.16 or later). An admin written in "
+                   "dedicated.toml changes there: oni-rcon doesn't edit it."),
     ]),
     ("F5  CONSOLE  ·  typing commands", [
         ("Commands", "For anything without a button. Type help for the server's list; ↑ ↓ bring back earlier ones."),
@@ -1071,12 +1255,14 @@ class Assets(Horizontal):
     BINDINGS = [Binding("t", "app.player('tell')", "Tell"), Binding("k", "app.player('kick')", "Kick"),
                 Binding("b", "app.player('ban')", "Ban"), Binding("m", "app.player('mute')", "Mute"),
                 Binding("j", "app.player('team')", "Team"), Binding("v", "app.player('vpnallow')", "VPN allow"),
-                Binding("y", "app.player('copy')", "Copy ID")]
+                Binding("p", "app.player('admin')", "Admin"), Binding("y", "app.player('copy')", "Copy ID")]
 
 
 class Blacklist(Vertical):
     BINDINGS = [Binding("n", "app.bl('newban')", "New ban"), Binding("u", "app.bl('unban')", "Unban"),
-                Binding("a", "app.bl('vpnallow')", "VPN allow"), Binding("r", "app.bl('vpnrevoke')", "VPN revoke")]
+                Binding("a", "app.bl('vpnallow')", "VPN allow"), Binding("r", "app.bl('vpnrevoke')", "VPN revoke"),
+                Binding("o", "app.bl('pardon')", "Pardon"), Binding("p", "app.bl('adminadd')", "Add admin"),
+                Binding("d", "app.bl('adminremove')", "Remove admin")]
 
 
 class ForgePane(Vertical):
@@ -1316,6 +1502,8 @@ class OniApp(App):
     CSS_PATH = "oni.tcss"
     TITLE = "ONI RCON"
     FORGE_KEY = 'F6'
+    PLUGINS_KEY = 'F8'  # '' where a console uses F8 for something else: the tab is still there to click
+    PLUGINS_TAB = True  # False hides the plug-ins tab (IBIGS customer consoles don't run plug-ins)
     TRACK_ROUNDS = True
     seen = range(1 << 30)  # the cards in view in the sidebar, once it's laid out: the rest aren't redrawn
     tabs_width = 0  # the tabs' width as last laid out, for the feeds written to while hidden
@@ -1323,7 +1511,7 @@ class OniApp(App):
         Binding("f1", "tab('assets')", "Assets"), Binding("f2", "tab('intercepts')", "Intercepts"),
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
         Binding("f5", "tab('console')", "Console"), Binding("f6", "tab('forge')", "Forge"),
-        Binding("f10", "tab('health')", "Health"),
+        Binding("f10", "tab('health')", "Health"), Binding("f8", "tab('plugins')", "Plug-ins"),
         Binding("ctrl+b", "broadcast", "Broadcast"),
         Binding("ctrl+l", "clear_alerts", "Clear alerts", show=False, priority=True),
         Binding("ctrl+y", "copy_menu", "Copy", priority=True),
@@ -1336,10 +1524,14 @@ class OniApp(App):
 
     def __init__(self, servers: list[Server], by: str, intro: bool | str = True, updater: Callable[[], str] | None = None,
                  hint: str = "", rcon_factory=Rcon, forge: ForgeSetup | None = None, prefs: Prefs | None = None,
-                 health: HealthSetup | None = None):
+                 health: HealthSetup | None = None, plugins: PluginSetup | None = None,
+                 reclaimer: Callable[[], str] | None = None):
         super().__init__()
         if "TEXTUAL_ANIMATIONS" not in environ:
             self.animation_level = "none"
+        # reclaimer: asks for the newest Project Reclaimer release, so a server that's behind it says so. None in
+        # the demo: its servers are a made-up build
+        self.reclaimer, self.reclaimer_latest, self.mixed_said = reclaimer, "", ""
         # intro: "full" (the archive, then clearance), "quick" (clearance), "off"; True is quick.
         self.by, self.intro, self.updater, self.hint = by, {True: "quick", False: "off"}.get(intro, intro), updater, hint
         self.prefs = prefs or Prefs()
@@ -1379,6 +1571,8 @@ class OniApp(App):
         self.row_players: dict[str, dict] = {}
         self.ban_rows: dict[str, str] = {}
         self.vpn_rows: dict[str, str] = {}
+        self.kick_rows: dict[str, dict] = {}
+        self.admin_rows: dict[str, dict] = {}
         self.alert_at = float("-inf")  # when the last alert came in; each station counts its own unseen ones
         self.hsetup = health or HealthSetup()
         self.mon = Monitor(self.hsetup.min_free_mb)
@@ -1386,6 +1580,9 @@ class OniApp(App):
         self.service_at: dict[str, float] = {}  # ssh destination ("" = here) -> when its service check is next due
         self.service_err: dict[str, str] = {}
         self.banner_until = 0.0
+        self.psetup = plugins or PluginSetup()
+        self.plugins = [Plugin(m) for m in self.psetup.plugins]
+        self.psel, self.pdrawn = 0, None  # the plug-in the plug-ins tab shows, and what its panel was last built from
 
     @property
     def cur(self) -> Station:
@@ -1456,6 +1653,9 @@ class OniApp(App):
                     with Blacklist():
                         yield Roster(id="bans", cursor_type="row", zebra_stripes=True)
                         yield Roster(id="vpn", cursor_type="row", zebra_stripes=True)
+                        yield Roster(id="vpnlists", cursor_type="none", zebra_stripes=True)
+                        yield Roster(id="kicks", cursor_type="row", zebra_stripes=True)
+                        yield Roster(id="admins", cursor_type="row", zebra_stripes=True)
                         with Horizontal(classes="bar"):
                             for op, label, variant in BAN_OPS:
                                 yield Button(label, id=f"bl-{op}", variant=variant)
@@ -1498,6 +1698,10 @@ class OniApp(App):
                             yield Static(id="host")
                             yield Roster(id="containers", cursor_type="none", zebra_stripes=True)
                         yield Static(id="workaround")
+                with TabPane(f"[dim]{self.PLUGINS_KEY}[/] PLUG-INS" if self.PLUGINS_KEY else "PLUG-INS", id="plugins"):
+                    with Horizontal(id="plugins-main"):
+                        yield OptionList(id="plugin-list")
+                        yield VerticalScroll(id="plugin-panel")
         yield Footer()
 
     def compose_toolbar(self) -> ComposeResult:
@@ -1517,7 +1721,8 @@ class OniApp(App):
         self.theme = "oni"
         cols = {"#players": ["#", "CALLSIGN", "TEAM", "SCORE", "K", "D", "K/D", "PING", "HEALTH", "SHIELD", "FLAGS"],
                 "#rotation": ["#", "MAP", "MODE"], "#bans": ["TYPE", "TARGET", "NAME", "REASON", "EXPIRES", "BY"],
-                "#vpn": ["ALLOWED THROUGH VPN", "NOTE"],
+                "#vpn": ["ALLOWED THROUGH VPN", "NOTE"], "#vpnlists": ["VPN LIST", "SIZE", "AGE", "PROBLEM"],
+                "#kicks": ["KICKED", "PLAYER ID", "REASON", "BY", "OUT"], "#admins": ["ADMIN", "PLAYER ID", "ON", "FROM"],
                 "#listings": ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"],
                 "#versions": ["", "VERSION", "PUBLISHED", "NOTES"],
                 "#crashes": ["WHEN", "SERVER", "CLASS", "PLAYERS", "DETAIL", "RCON"],
@@ -1533,13 +1738,15 @@ class OniApp(App):
                            "#sitrep": "SITREP", "#theatre": "THEATRE", "#rotation": "ROTATION", "#bans": "BLACKLIST",
                            "#vpn": "VPN ALLOWANCES", "#console-log": "COMMAND LOG", "#listings": "FORGE CATALOG",
                            "#listing-box": "FORGE FILE", "#versions": "VERSIONS", "#host-box": "HOST",
-                           "#workaround": "WORKAROUND"}.items():
+                           "#workaround": "WORKAROUND", "#plugin-list": "PLUG-INS"}.items():
             self.query_one(sel).border_title = title
         for wid, tip in TIPS.items():  # escaped: "[Server]" in a tip is text, not a style
             self.query_one(f"#{wid}").tooltip = escape(tip)
         tabs = self.query_one(TabbedContent)
         for pane, tip in TAB_TIPS.items():
             tabs.get_tab(pane).tooltip = escape(tip)
+        if not self.PLUGINS_TAB:
+            tabs.hide_tab("plugins")
         self.log_cmd(Text("ONI remote console. Commands go to the selected station; `@all` prefixes run on every "
                           "station; `help` asks the server; `clear` clears this log.", DIM))
 
@@ -1582,6 +1789,10 @@ class OniApp(App):
                 if self.hsetup.source or not st.server.url:
                     self.service_at.setdefault(st.server.ssh, now + 1)
         self.set_interval(2, self.health_tick)
+        self.set_interval(2, self.plugin_tick)
+        for pg in self.plugins:  # each asked once soon after start, for its badge; one that needs approval never is
+            pg.due = now + 3
+        self.paint_plugins()
         self.set_interval(1, self.tick)
         self.set_interval(3, self.poll_fast)
         self.set_interval(1, self.poll_slow)
@@ -1602,6 +1813,9 @@ class OniApp(App):
         self.tick_super()  # reserve and fill the status strip before the first frame, not half a second later
         if self.updater:  # a thread of its own rather than a worker: a slow download must not hold up quitting
             threading.Thread(target=self.check_update, daemon=True).start()
+        if self.reclaimer:
+            self.check_reclaimer()
+            self.set_interval(3600, self.check_reclaimer)
 
     async def follow_pings(self, st: Station) -> None:
         await follow_join_pings(st.server, st.pings)
@@ -1984,6 +2198,276 @@ class OniApp(App):
             ("health_min_free_mb", CYAN), (" (default 1024) is the free memory below which it alerts.  ", DIM),
             ("health_service", CYAN), (" names a systemd service to watch.", DIM))
 
+    # --- plug-ins (F8) -------------------------------------------------------------------------------------------
+    def plugin_state(self, pg: Plugin) -> str:
+        """Why it won't run ("needs approval", a bad manifest), or "" when it will. A stand-in's own count as approved."""
+        return pg.m.error if self.psetup.source else pl.state(pg.m, self.prefs.plugins_trusted)
+
+    async def plugin_call(self, pg: Plugin, request: dict, timeout: float) -> dict:
+        return await (self.psetup.source or pl).call(pg.m, request, timeout)
+
+    def plugin_shown(self) -> bool:
+        return self.is_running and self.query_one(TabbedContent).active == "plugins"
+
+    def plugin_tick(self) -> None:
+        """Ask the plug-ins that are due: with the tab open every one that runs, every 30 s; shut, only one whose badge
+        feeds CONDITION, every 60 s (and each once after start, to learn whether it has a badge)."""
+        if not self.is_running:
+            return
+        now, shown = time.monotonic(), self.plugin_shown()
+        for pg in self.plugins:
+            if not (self.plugin_state(pg) or pg.busy) and now >= pg.due and (shown or not pg.asked or pg.badge):
+                pg.busy = True
+                self.run_worker(self.plugin_view(pg), group="plugins", exit_on_error=False)
+                self.paint_plugins()
+
+    async def plugin_view(self, pg: Plugin) -> None:
+        try:
+            v = pl.normalise_view(await self.plugin_call(pg, {"type": "view", "server": server_name(self.cur.server)},
+                                                          VIEW_TIMEOUT))
+            pg.view, pg.error = (pg.view, hc.scrub(v["error"])) if "error" in v else (v, "")
+        except PluginError as e:
+            pg.error = str(e)
+        except Exception as e:  # a stand-in that broke: said, never a traceback
+            pg.error = hc.scrub(f"{type(e).__name__}: {e}")
+        pg.busy, pg.asked = False, True
+        pg.due = time.monotonic() + (PLUGIN_EVERY if self.plugin_shown() else PLUGIN_BADGE_EVERY)
+        if self.is_running:
+            self.paint_plugins()
+            self.paint_masthead()
+
+    def plugin_line(self, pg: Plugin) -> Text:
+        """Its entry in the strip: a light, its name, its badge, and what's wrong if anything is."""
+        why, b = self.plugin_state(pg), pg.badge
+        light = (("◌", AMBER) if pg.busy else ("⊘", RED) if why and why != "needs approval" else ("?", AMBER) if why
+                 else ("○", RED) if pg.error else ("○", DIM) if not pg.view else ("●", BADGE[b["level"]] if b else GREEN))
+        line = Text.assemble((f"{light[0]} ", light[1]), (pg.m.title, DIM if why else WHITE))
+        if b and b["text"]:
+            line.append(f"  {b['text']}", BADGE[b["level"]])
+        if why:
+            line.append("\n  NEEDS APPROVAL" if why == "needs approval" else "\n  DISABLED",
+                        AMBER if why == "needs approval" else RED)
+        elif pg.error:
+            line.append("\n  NO ANSWER", RED)
+        return line
+
+    def paint_plugins(self) -> None:
+        """The strip of plug-ins, then the selected one's panel."""
+        if not self.is_running:
+            return
+        box = self.query_one("#plugin-list", OptionList)
+        lines = [self.plugin_line(pg) for pg in self.plugins]
+        if [o.prompt for o in box.options] != lines:
+            box.set_options(lines)
+            box.highlighted = min(self.psel, len(lines) - 1) if lines else None
+        self.paint_plugin()
+
+    @on(OptionList.OptionHighlighted, "#plugin-list")
+    def _plugin(self, e: OptionList.OptionHighlighted) -> None:
+        if e.option_index != self.psel:
+            self.psel = e.option_index
+            self.paint_plugin()
+
+    def paint_plugin(self) -> None:
+        """The selected plug-in's panel: its view drawn from blocks, or why it can't run. Rebuilt only when what it
+        shows has changed, so focus and a table's cursor stay put. Every string in it is the plug-in's data: Text,
+        never markup, and redacted like the rest of the console."""
+        panel = self.query_one("#plugin-panel", VerticalScroll)
+        pg = self.plugins[min(self.psel, len(self.plugins) - 1)] if self.plugins else None
+        why = self.plugin_state(pg) if pg else ""
+        key = pg and (pg.m.id, why, json.dumps(pg.view, sort_keys=True), pg.error, pg.note, self.redact)
+        if key == self.pdrawn and panel.children:
+            return
+        cursors = ({t.name: t.cursor_row for t in panel.query(DataTable)}
+                   if pg and self.pdrawn and self.pdrawn[0] == pg.m.id else {})
+        self.pdrawn = key
+        panel.remove_children()
+        if not pg:
+            panel.border_title = "PLUG-IN"
+            panel.mount(Static(self.plugins_howto()))
+            return
+        panel.border_title = Text(pg.m.title.upper())
+        if why:
+            panel.mount(*self.plugin_gate(pg, why))
+            return
+        def rt(s: str) -> Text:
+            return Text(redact_text(s, self.redact))
+        v = pg.view or {}
+        head = Text.assemble((v.get("title") or pg.m.title, AMBER), (f"  {pg.m.version}", DIM))
+        if (b := v.get("badge")) and b["text"]:
+            head.append("   ").append(f" {b['text']} ", f"{INK} on {BADGE[b['level']]}")
+        out: list = [Static(head, classes="plugin-head")]
+        if pg.error:
+            out.append(Static(Text(f"⚠ {redact_text(pg.error, self.redact)}"
+                                   + ("   ·   showing its last answer" if pg.view else ""), RED)))
+        if pg.note:
+            out.append(Static(Text(redact_text(pg.note, self.redact), DIM)))
+        if not pg.view and not pg.error:
+            out.append(Static(Text("asking…", DIM)))
+        acts = {a["id"]: a for a in v.get("actions", [])}
+        body: list = []
+        for i, blk in enumerate(v.get("blocks", [])):
+            kind = blk["type"]
+            if kind == "kv":
+                g = Table.grid(padding=(0, 2))
+                g.add_column(style=AMBER, no_wrap=True)
+                g.add_column(style=WHITE)
+                for k, val in blk["rows"]:
+                    g.add_row(rt(k), rt(val))
+                body.append(Static(g, classes="plugin-block"))
+            elif kind == "text":
+                body.append(Static(rt(blk["text"]), classes="plugin-block"))
+            elif kind == "log":
+                body.append(Static(Text("\n").join(Text(redact_text(x, self.redact), DIM) for x in blk["lines"])
+                                   or Text("—", DIM), classes="plugin-block plugin-log"))
+            elif kind == "table":
+                table = DataTable(cursor_type="row", zebra_stripes=True, name=str(i), classes="plugin-table")
+                width = len(blk["columns"]) or max((len(r["cells"]) for r in blk["rows"]), default=1)
+                table.add_columns(*([Text(c) for c in blk["columns"]] or [Text("")] * width))
+                for j, r in enumerate(blk["rows"]):
+                    cells = [rt(c) for c in r["cells"][:width]]
+                    table.add_row(*cells, *[Text("")] * (width - len(cells)), key=str(j))
+                if cursors.get(str(i)):
+                    table.call_after_refresh(table.move_cursor, row=cursors[str(i)])
+                body.append(table)
+                if blk["row_actions"] and blk["rows"]:
+                    body.append(Horizontal(*[
+                        Button(Text(acts[a]["label"] if a in acts else a.upper()), name=f"plugin:row:{i}:{a}", compact=True,
+                               variant="error" if acts.get(a, {}).get("danger") else "default")
+                        for a in blk["row_actions"]], classes="plugin-actions"))
+            else:
+                body.append(Static(Text(f"this version of Oni can't draw a '{blk['name']}' block", GREY),
+                                   classes="plugin-block"))
+            if blk.get("more"):
+                body.append(Static(Text(f"+{blk['more']} more", DIM)))
+        if v.get("actions"):
+            body.append(Horizontal(*[Button(Text(a["label"]), name=f"plugin:act:{a['id']}", compact=True,
+                                            variant="error" if a["danger"] else "primary") for a in v["actions"]],
+                                   classes="plugin-actions"))
+        out.append(Vertical(*body, classes="plugin-body -stale" if pg.error else "plugin-body"))
+        panel.mount(*out)
+
+    def plugin_gate(self, pg: Plugin, why: str) -> list:
+        """A plug-in that won't run: why it can't, or what approving it would allow."""
+        if why != "needs approval":
+            return [Static(Text.assemble(("DISABLED\n\n", RED), (why, WHITE),
+                                         (f"\n\n{pg.m.description}" if pg.m.description else "", DIM)))]
+        return [Static(Text.assemble(("NEEDS YOUR APPROVAL\n\n", AMBER), *self.plugin_terms(pg.m))),
+                Button("APPROVE…", name="plugin:approve", variant="warning", compact=True)]
+
+    def plugin_terms(self, m: Manifest) -> tuple:
+        """What a plug-in is and may do, as approval shows it."""
+        def rt(s: str) -> str:
+            return redact_text(s, self.redact)
+        return ((f"{m.title} {m.version}".strip(), WHITE), (f" by {m.author}" if m.author else "", DIM),
+                (f"\n{m.description}" if m.description else "", DIM),
+                ("\n\nRuns   ", CYAN), (rt(m.exec), WHITE),
+                ("\nOn     ", CYAN), (rt(m.host) if m.host else "this computer", WHITE),
+                ("\nMay have Oni send   ", CYAN), (", ".join(m.rcon) or "nothing", WHITE),
+                ("\nSees player addresses   ", CYAN), ("yes" if m.addresses else "no", RED if m.addresses else WHITE),
+                ("\n\nOni doesn't sandbox it: it runs as you and can do whatever you can. This approval holds until its "
+                 "manifest changes.", DIM))
+
+    @staticmethod
+    def plugins_howto() -> Text:
+        return Text.assemble(
+            ("NO PLUG-INS\n\n", AMBER),
+            ("A plug-in is a program that draws its own panel here, such as Gryphon's moderation log. Put its folder "
+             "in plugins/ next to the config file and turn it on at the top of the config, above the first [table]:"
+             "\n\n", WHITE), ("  plugins = ", CYAN), ('["gryphon"]\n\n', WHITE),
+            ("It asks for your approval before it ever runs. docs/PLUGINS.md says how to write one.", DIM))
+
+    def plugin_button(self, name: str) -> None:
+        if not self.plugins:
+            return
+        pg = self.plugins[min(self.psel, len(self.plugins) - 1)]
+        kind, _, rest = name.partition(":")
+        acts = {a["id"]: a for a in (pg.view or {}).get("actions", [])}
+        if kind == "approve":
+            self.plugin_approve(pg)
+        elif kind == "act" and rest in acts:
+            self.plugin_action(pg, acts[rest])
+        elif kind == "row":
+            i, _, aid = rest.partition(":")
+            rows = (pg.view or {}).get("blocks", [])[int(i)]["rows"]
+            table = next((t for t in self.query_one("#plugin-panel").query(DataTable) if t.name == i), None)
+            if rows and table:
+                row = rows[min(table.cursor_row, len(rows) - 1)]["id"]
+                self.plugin_action(pg, acts.get(aid) or {"id": aid, "label": aid, "danger": False, "confirm": "",
+                                                          "params": []}, row)
+
+    @work(exclusive=True, group="dialog")
+    async def plugin_approve(self, pg: Plugin) -> None:
+        if not await self.push_screen_wait(Confirm(f"RUN THE PLUG-IN {pg.m.title.upper()}?",
+                                                   Text.assemble(*self.plugin_terms(pg.m)).plain, verb="APPROVE")):
+            return
+        self.prefs.plugins_trusted[pg.m.id] = pg.m.hash
+        self.prefs.save()
+        pg.due = 0.0
+        self.paint_plugins()
+
+    @work(exclusive=True, group="dialog")
+    async def plugin_action(self, pg: Plugin, a: dict, row: str | None = None) -> None:
+        """Its params asked for, then its confirm if it has one (ABORT is the default), then run in the background.
+        Esc or ABORT at either step sends nothing."""
+        if self.plugin_state(pg):
+            return
+        params: dict = {}
+        if a["params"]:  # field keys are positions: a param's name needn't be a valid widget id
+            fields = [(f"p{i}", x["label"] + ("  (10m, 1d)" if x["type"] == "duration" else ""),
+                       [("No", "false"), ("Yes", "true")] if x["type"] == "bool"
+                       else [(Text(o), o) for o in x["options"]] if x["type"] == "choice" else "")
+                      for i, x in enumerate(a["params"])]
+            got = await self.push_screen_wait(Form(f"{pg.m.title} › {a['label']}".upper(), fields, verb="RUN",
+                                                   danger=a["danger"]))
+            if got is None:
+                return
+            for i, x in enumerate(a["params"]):
+                v = got[f"p{i}"]
+                if x["type"] == "number":
+                    try:
+                        v = int(v) if re.fullmatch(r"-?\d+", v) else float(v)
+                    except ValueError:
+                        self.notify(f"{x['label']} must be a number: nothing was sent.", severity="warning")
+                        return
+                params[x["name"]] = v == "true" if x["type"] == "bool" else v
+        if (a["danger"] or a["confirm"]) and not await self.push_screen_wait(Confirm(
+                f"{pg.m.title} › {a['label']}".upper(), a["confirm"] or f"Run {a['label']}?",
+                verb=a["label"].upper()[:24], danger=a["danger"])):
+            return
+        self.run_worker(self.plugin_run(pg, a, params, row), group="plugins", exit_on_error=False)
+
+    async def plugin_run(self, pg: Plugin, a: dict, params: dict, row: str | None) -> None:
+        """Run an action: toast what it said, send the RCON it asked for that its permissions allow, then show the
+        view it sent back, or ask for a fresh one."""
+        title = f"{pg.m.title} · {a['label']}"
+        try:
+            raw = await self.plugin_call(pg, {"type": "action", "id": a["id"], "params": params, "row": row,
+                                              "server": server_name(self.cur.server)}, ACTION_TIMEOUT)
+        except PluginError as e:
+            raw = {"ok": False, "error": str(e)}
+        except Exception as e:
+            raw = {"ok": False, "error": hc.scrub(f"{type(e).__name__}: {e}")}
+        if not self.is_running:
+            return
+        by_name = {server_name(st.server): st for st in self.stations}
+        r = pl.normalise_action(raw, pg.m, list(by_name))
+        words = redact_text(r["toast"] or r["error"] or ("done" if r["ok"] else "failed"), self.redact)
+        pg.note = f"{time.strftime('%H:%M:%S')}  {a['label']}: {words}"
+        self.notify(words, title=title, severity="information" if r["ok"] else "error")
+        for d in r["dropped"]:
+            self.notify(f"Not sent: {d}.", title=title, severity="warning")
+            self.log_cmd(Text(f"plug-in {pg.m.id} asked for {d}: not sent", AMBER))
+        for x in r["rcon"]:
+            await self.cmd(by_name[x["server"]], x["command"], *x["args"], via=f"plug-in {pg.m.id}")
+        if r["view"] and "error" not in r["view"]:
+            pg.view, pg.error = r["view"], ""
+        else:
+            pg.due = 0.0
+        if self.is_running:
+            self.paint_plugins()
+            self.paint_masthead()
+
     def check_update(self) -> None:
         try:
             msg = self.updater()
@@ -1992,6 +2476,33 @@ class OniApp(App):
         if msg:
             with contextlib.suppress(RuntimeError):  # quit in the meantime
                 self.call_from_thread(self.notify, msg, title="UPDATE", timeout=20)
+
+    def check_reclaimer(self) -> None:
+        """Hourly, in a thread: the newest Reclaimer release. Offline it stays quiet and asks again next hour."""
+        def ask() -> None:
+            with contextlib.suppress(Exception):  # best effort; quit in the meantime is a RuntimeError
+                if (v := self.reclaimer()) and v != self.reclaimer_latest:
+                    self.call_from_thread(self.got_reclaimer, v)
+        threading.Thread(target=ask, daemon=True).start()
+
+    def got_reclaimer(self, version: str) -> None:
+        self.reclaimer_latest = version
+        if self.is_running:
+            for st in self.stations:
+                self.paint_card(st)
+            self.paint_ops()
+
+    def lag(self, st: Station) -> str:
+        """The newer Reclaimer release an online station is behind, or empty."""
+        return behind(st.rcon.info.get("version"), self.reclaimer_latest) if st.online else ""
+
+    def note_mixed(self) -> None:
+        """One feed line when the connected stations run different versions: a player can join only those on theirs.
+        Said again only when the mix changes."""
+        mix = mixed_versions([(st.label, st.rcon.info.get("version")) for st in self.stations if st.online])
+        if mix and mix != self.mixed_said:
+            self.log_event(None, {"event": "uplink", "text": f"MIXED VERSIONS  {mix}"})
+        self.mixed_said = mix
 
     def welcome(self) -> None:
         """Once the boot screen is gone: a pointer for someone new, if __main__ asked for one."""
@@ -2121,9 +2632,10 @@ class OniApp(App):
             self.relabel()
             if st is self.cur:  # its version decides what fits it in the catalog
                 self.paint_forge()
-            self.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn")
+            self.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins")
             st.polled = time.monotonic()
             self.log_event(st, {"event": "uplink", "text": f"SECURE  {detail}"})
+            self.note_mixed()
         elif state == "denied":
             self.log_event(st, {"event": "uplink", "text": f"SIGN-IN REFUSED: {detail}"})
             self.notify(f"{explain(detail, state)}\nNot retried by itself. RECONNECT (F3) asks for the password again.",
@@ -2210,6 +2722,8 @@ class OniApp(App):
         replies = await asyncio.gather(*(st.rcon.call(w) for w in what), return_exceptions=True)
         changed = []
         for w, r in zip(what, replies):
+            if w == "admins" and isinstance(r, dict) and isinstance(r.get("data"), list):
+                r["data"] = {"admins": r["data"]}  # a bare list, as the desktop also takes it
             if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
                 if w == "players" or r["data"] != st.data.get(w):  # NEW badges and log-derived ping can age/change
                     changed.append(w)
@@ -2249,10 +2763,11 @@ class OniApp(App):
             self.fetch(st, "status", *(() if empty else ("players",)))
 
     async def cmd(self, st: Station, command: str, *args: str, toast: bool = True, show_data: bool = False,
-                  quiet: bool = False, brief: bool = False) -> dict:
+                  quiet: bool = False, brief: bool = False, via: str = "") -> dict:
         """Run one command, write it to the command log (the audit trail), toast the result. `ok` comes back None
         when no reply came in time: it may still have run. `quiet` keeps even a failure out of the toasts, and
-        `brief` logs only the station and its reply, for a fan-out that names the command once and sums up."""
+        `brief` logs only the station and its reply, for a fan-out that names the command once and sums up. `via`
+        names who asked for it when that wasn't the operator, e.g. "plug-in gryphon"."""
         try:
             r = await st.rcon.call(command, *args)
             r = {**r, "ok": bool(r.get("ok"))}  # None is kept for no reply at all
@@ -2260,7 +2775,8 @@ class OniApp(App):
             r = {"ok": None, "text": str(e)}
         except Exception as e:
             r = {"ok": False, "text": str(e) or type(e).__name__}
-        self.log_reply(st, None if brief else " ".join([command, *map(q, args)]), r, show_data)
+        line = " ".join([command, *map(q, args)])
+        self.log_reply(st, None if brief else f"{via} ▸ {line}" if via else line, r, show_data)
         ok = r.get("ok")
         if toast or not (ok or quiet):
             self.notify(self.reply_text(r), title=f"{st.label} · {command.upper()}",
@@ -2343,6 +2859,8 @@ class OniApp(App):
             while len(st.past) > 4000:
                 del st.past[next(iter(st.past))]
         raw_ids = [ev.get(k) for k in ("killer", "victim")]
+        if note_kick(st.kicks, ev) and st is self.cur:
+            self.paint_bans()
         ev = resolve(ev, names, st.ident)
         kind, text = ev.get("event"), str(ev.get("text", ""))
         if kind == "chat":
@@ -2363,10 +2881,12 @@ class OniApp(App):
                 if action == ev.get("action") and not verdict.done():
                     verdict.set_result(ev)
                     break
-        if kind in ("join", "leave", "refused", "kick", "ban", "mute", "unmute", "control"):
+        if kind in ("join", "leave", "refused", "kick", "ban", "mute", "unmute", "control", "admin_added", "admin_removed"):
             self.fetch(st, "players", "status")
         if kind in ("ban", "unban"):
             self.fetch(st, "bans")
+        if kind in ("admin_added", "admin_removed"):
+            self.fetch(st, "admins")
         if kind == "vote":
             self.fetch(st, "vote")
         if kind == "control":
@@ -2402,9 +2922,10 @@ class OniApp(App):
     def condition(self) -> tuple[str, str]:
         """RED while an alert is unseen and for a moment after any; AMBER while a station is down, the host is short
         of memory, or something installed from Forge has been withdrawn and nobody has acknowledged it; else GREEN."""
-        if self.unseen or time.monotonic() - self.alert_at < 15:
+        badges = {b["level"] for pg in self.plugins if (b := pg.badge)}  # a plug-in's warn or alert counts too
+        if self.unseen or time.monotonic() - self.alert_at < 15 or "alert" in badges:
             return "RED", RED
-        if not all(st.online for st in self.stations) or self.fstate.alarms() or self.mon.short():
+        if not all(st.online for st in self.stations) or self.fstate.alarms() or self.mon.short() or "warn" in badges:
             return "AMBER", AMBER
         return "GREEN", GREEN
 
@@ -2446,6 +2967,8 @@ class OniApp(App):
             self.paint_ops()
         if pane == "blacklist" and {"bans", "vpn"} & set(what):
             self.paint_bans()
+        if {"admins", "players"} & set(what):
+            self.paint_admins()
 
     def paint_all(self, feed: bool = True) -> None:
         for st in self.stations:
@@ -2453,8 +2976,10 @@ class OniApp(App):
         self.paint_players()
         self.paint_ops()
         self.paint_bans()
+        self.paint_admins()
         self.paint_forge()
         self.paint_uplink()
+        self.paint_plugins()
         self.paint_masthead()
         if feed:
             self.repaint_feed()
@@ -2536,7 +3061,7 @@ class OniApp(App):
             # what's been happening there, in 5 s steps across what the card has room for. A fleet's cards move on
             # a step at a time: redrawn with every event, a few busy servers keep the whole sidebar repainting
             steps = 10 if self.large_fleet else max(4, width - 13)
-            detail = (tuple(where), phase, tuple(st.rate(steps, 5, whole=self.large_fleet)))
+            detail = (tuple(where), phase, tuple(st.rate(steps, 5, whole=self.large_fleet)), self.lag(st))
         key = (state, glyph, color, st.label, st.alerts, n, mx, slow, width, self.large_fleet, detail,
                self.station_number(st))
         if key == st.drawn:
@@ -2557,15 +3082,18 @@ class OniApp(App):
                       Text(f"↻ {left}s", DIM) if left else Text("F3 ↻", DIM) if state == "denied" else Text())
             card.show(g)
             return
-        where, phase, trace = detail
+        where, phase, trace, lag = detail
         place = Text("   ") + Text(" · ").join(Text(str(x).replace("_", " "), CYAN if x == st.tag else DIM)
                                                 for x in where)
+        # behind the newest Reclaimer release: players who updated can't join, so it takes the phase's place
+        late = Text(f"▲ {lag} out", AMBER) if lag else None  # short: the card's columns are shared by its rows
         if self.large_fleet:  # two lines: who and how full, then where and what's been happening
-            g.add_row(place, chip + Text(" ") + spark(list(trace)) if chip else spark(list(trace)))
+            g.add_row(place, late or (chip + Text(" ") + spark(list(trace)) if chip else spark(list(trace))))
             card.show(g)
             return
-        g.add_row(place, chip if chip else Text("" if phase.lower() in QUIET_PHASES else phase.replace("_", " ").upper(),
-                                                GREEN if phase == "in_game" else DIM))
+        g.add_row(place, late or (chip if chip else Text("" if phase.lower() in QUIET_PHASES
+                                                          else phase.replace("_", " ").upper(),
+                                                          GREEN if phase == "in_game" else DIM)))
         full = n / mx if n is not None and mx else 0
         card.show(Group(g, Text("   ") + gauge(full, 8, RED if full >= 1 else AMBER if full >= .75 else GREEN)
                         + Text("  ") + spark(list(trace))))
@@ -2666,6 +3194,7 @@ class OniApp(App):
             return
         box.styles.text_align = "left"
         self.query_one("#pl-mute", Button).label = "UNMUTE" if p.get("muted") else "MUTE"
+        self.query_one("#pl-admin", Button).label = "REMOVE ADMIN" if p.get("admin") else "MAKE ADMIN"
         team, name = team_of(p), str(pick(p, "name", default="?"))
         color = TEAM_COLOR.get(team, WHITE)
         k, d = pick(p, "kills"), pick(p, "deaths")
@@ -2725,6 +3254,7 @@ class OniApp(App):
         g.add_column()
         for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), AMBER)),
                      ("UPLINK", f"{st.server.where}   v{info.get('version', '?')}"),
+                     *[("UPDATE", Text(f"▲ {lag} out", AMBER)) for lag in [self.lag(st)] if lag],
                      ("PUBLIC ADDRESS", Text(redact_addr(s.get("address"), self.redact), RED if self.redact else WHITE)),
                      ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)
                                 if str(s.get("phase") or "").lower() not in QUIET_PHASES else Text("—", DIM)),
@@ -2851,10 +3381,43 @@ class OniApp(App):
         t = self.query_one("#vpn", Roster)
         t.fill(rows)
         t.border_title = Text(f"VPN ALLOWANCES · blocking {'ON' if v.get('block_vpn') else 'OFF'}"
-                              + (f" · {v['ranges']} ranges" if isinstance(v.get("ranges"), int) else ""))
+                              + (f" · {v['ranges']} ranges" if isinstance(v.get("ranges"), int) else "")
+                              + (" · fail-closed" if v.get("fail_closed") else ""))
+        lists = vpn_lists(v)
+        t = self.query_one("#vpnlists", Roster)
+        t.fill([(str(i), [Text(x["name"], AMBER if x["stale"] or x["problem"] else WHITE), Text(x["size"], DIM),
+                          Text(x["age"], RED if x["stale"] else GREEN),
+                          Text(redact_text(x["problem"], self.redact) or "—", RED if x["problem"] else DIM)])
+                for i, x in enumerate(lists)])
+        bad = sum(bool(x["stale"] or x["problem"]) for x in lists)
+        t.border_title = Text("VPN LISTS" if not v else "VPN LISTS · needs server 0.9.22 or later" if "lists" not in v
+                              else "VPN LISTS · none fetched yet" if not v["lists"]
+                              else f"VPN LISTS · {len(lists)}" + (f" · {bad} need a look" if bad else ""),
+                              AMBER if bad else "")
+        self.kick_rows = dict(reversed(self.cur.kicks.items()))
+        t = self.query_one("#kicks", Roster)
+        t.fill([(key, [Text(k["name"] or "—", AMBER if k["name"] else DIM), k["id"] or redact_addr(k["ip"], self.redact) or "—",
+                       k["reason"], k["by"], Text(left := kick_left(k), AMBER if left.endswith("m") else DIM)])
+                for key, k in self.kick_rows.items()])
+        t.border_title = Text(f"KICKED · {len(self.kick_rows)}")
         for op, *_ in BAN_OPS:
             self.query_one(f"#bl-{op}", Button).disabled = not self.cur.online or (
-                op == "unban" and not self.ban_rows or op == "vpnrevoke" and not self.vpn_rows)
+                op == "unban" and not self.ban_rows or op == "vpnrevoke" and not self.vpn_rows
+                or op == "adminremove" and not self.admin_rows)
+
+    def paint_admins(self) -> None:
+        a = self.cur.data.get("admins")
+        rows = admin_rows(a or {}, (self.cur.data.get("players") or {}).get("players") or [])
+        self.admin_rows = {}
+        for e in rows:
+            key = e["target"] if e["target"] not in self.admin_rows else f"{e['target']}~{len(self.admin_rows)}"
+            self.admin_rows[key] = e
+        t = self.query_one("#admins", Roster)
+        t.fill([(key, [Text(e["name"] or "—", AMBER if e["name"] else DIM), e["id"] or "—",
+                       Text("ON" if e["on"] else "—" if e["on"] is False else "?", GREEN if e["on"] else DIM),
+                       Text(e["from"] or "—", DIM)]) for key, e in self.admin_rows.items()])
+        t.border_title = f"ADMINS · {len(rows)}" if a is not None else "ADMINS · needs server 0.9.16 or later"
+        self.query_one("#bl-adminremove", Button).disabled = not self.cur.online or not self.admin_rows
 
     def repaint_feed(self) -> None:
         self.feed_pending.clear()
@@ -2887,7 +3450,7 @@ class OniApp(App):
                 if t.row_count:
                     t.move_cursor(row=0)  # another station's lists: start at the top
             self.paint_all(feed=self.local_only)
-            self.fetch(self.cur, "status", "players", "nextmap", "vote", "bans", "vpn")
+            self.fetch(self.cur, "status", "players", "nextmap", "vote", "bans", "vpn", "admins")
 
     @on(DataTable.RowHighlighted, "#players")
     def _row(self, _) -> None:
@@ -2914,6 +3477,10 @@ class OniApp(App):
         elif e.pane.id == "health":
             self.hide_banner()
             self.paint_health()
+        if e.pane.id == "plugins":  # looked at now: every one that runs is asked afresh
+            for pg in self.plugins:
+                pg.due = 0.0
+            self.paint_plugins()
         if e.pane.id == "intercepts" and self.unseen:  # every station's alerts are in the feed: seen now
             for st in self.stations:
                 st.alerts = 0
@@ -2974,7 +3541,9 @@ class OniApp(App):
     @on(Button.Pressed)
     def _button(self, e: Button.Pressed) -> None:
         bid = e.button.id or ""
-        if bid == "op-broadcast":
+        if (e.button.name or "").startswith("plugin:"):
+            self.plugin_button(e.button.name[7:])
+        elif bid == "op-broadcast":
             self.action_broadcast()
         elif bid.startswith("op-"):
             self.op(bid[3:])
@@ -3044,6 +3613,9 @@ class OniApp(App):
         self.query_one("#say" if tabs.active == "intercepts" else "#cmd").focus()
 
     def action_refresh(self) -> None:
+        if self.query_one(TabbedContent).active == "plugins":
+            for pg in self.plugins:
+                pg.due = 0.0
         if self.query_one(TabbedContent).active == "health":  # every report and service check, now
             for st in self.stations:
                 st.check_at = 0.0
@@ -3052,7 +3624,7 @@ class OniApp(App):
             self.details.clear()
             self.detail_want = None
             self.forge_load(fresh=True)
-        self.fetch(self.cur, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn")
+        self.fetch(self.cur, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins")
         for st in self.stations:
             self.fetch(st, "status")
 
@@ -3087,6 +3659,11 @@ class OniApp(App):
         yield SystemCommand("Health: read the reports now", "crashes, memory and the workaround service  (F10, Ctrl+R)",
                             lambda: (setattr(self, "service_at", {h: 0.0 for h in self.service_at}),
                                      [setattr(st, "check_at", 0.0) for st in self.stations]))
+        for pg in self.plugins:  # one per action of each plug-in that runs; the names are the plug-in's: escaped
+            for a in [] if self.plugin_state(pg) else (pg.view or {}).get("actions", []):
+                where = self.PLUGINS_KEY or "PLUG-INS tab"
+                yield SystemCommand(escape(f"{pg.m.title} › {a['label']}"), escape(a["confirm"] or f"a plug-in action  ({where})"),
+                                    lambda pg=pg, a=a: self.plugin_action(pg, a))
         yield SystemCommand("Help: field manual", "what everything does, in plain words  (?)", self.action_help)
         yield SystemCommand("Add a server", "open the setup screen", self.action_add_server)
         yield SystemCommand("Forge: Load API key", "your own ReclaimerForge key, for F6", lambda: self.action_forge("key"))
@@ -3170,6 +3747,12 @@ class OniApp(App):
                                                  note="Lets them join through a VPN on every server sharing the ban list."))
             if f is not None:
                 self.send(st, "vpnallow", t, *opt(f["note"]), then=("vpn",))
+        elif what == "admin":
+            sub = "remove" if p.get("admin") else "add"
+            if await self.push_screen_wait(Confirm(f"{'REMOVE ADMIN' if p.get('admin') else 'MAKE ADMIN'} · {name}",
+                                                   ADMIN_NOTE[sub], verb="REMOVE" if p.get("admin") else "MAKE ADMIN",
+                                                   danger=bool(p.get("admin")))):
+                self.send(st, "admin", sub, t, then=("players", "admins"))
 
     async def move_team(self, st: Station, p: dict, team: str) -> None:
         """Move a player and say whether it happened. The server's reply ("Moving X to Red team.") only means it was
@@ -3570,11 +4153,45 @@ class OniApp(App):
                                                                ("note", "Note", "")], verb="ALLOW", required=("target",)))
             if f:
                 self.send(st, "vpnallow", f["target"], *opt(f["note"]), then=("vpn",))
+        elif name == "pardon":
+            note = ("Lets them rejoin this server now, and their next kick here starts at 10 minutes again. A ban needs "
+                    "UNBAN. Needs server 0.9.16 or later.")
+            kick = self.kick_rows.get(self.query_one("#kicks", Roster).selected)  # the row under the cursor, to edit
+            f = await self.push_screen_wait(Form("PARDON A KICK", [("target", "Name they were kicked under, player ID or IP",
+                                                                    pardon_target(kick) if kick else "")],
+                                                 verb="PARDON", required=("target",), note=note))
+            if f:
+                self.send(st, "pardon", f["target"].strip())
         elif name == "vpncheck":
             f = await self.push_screen_wait(Form("CHECK AN ADDRESS", [("ip", "IP address", "")], verb="CHECK",
                                                  required=("ip",)))
             if f:
-                self.send(st, "vpn", f["ip"])
+                r = await self.cmd(st, "vpn", f["ip"].strip(), toast=False)
+                if r.get("ok"):
+                    self.notify(vpn_check(self.reply_text(r), r.get("data")), title=f"{st.label} · CHECK IP")
+        elif name == "adminadd":
+            players = (st.data.get("players") or {}).get("players") or []
+            choices = [(str(pick(p, "name", default="?")), target_of(p)) for p in players if not p.get("admin")]
+            who = await self.push_screen_wait(Pick("MAKE ADMIN", [*choices, (Text("Someone not on: type their player ID…",
+                                                                                  DIM), "?")]))
+            if who == "?":
+                f = await self.push_screen_wait(Form("MAKE ADMIN", [("id", "Player ID", "")], verb="MAKE ADMIN",
+                                                     required=("id",), note=ADMIN_NOTE["add"]))
+                if f:
+                    self.send(st, "admin", "add", f["id"].strip(), then=("admins", "players"))
+            elif who and await self.push_screen_wait(Confirm(f"MAKE ADMIN · {dict(map(reversed, choices))[who]}",
+                                                             ADMIN_NOTE["add"], verb="MAKE ADMIN", danger=False)):
+                self.send(st, "admin", "add", who, then=("admins", "players"))
+        elif name == "adminremove":
+            e = self.admin_rows.get(self.query_one("#admins", Roster).selected)
+            if not e:
+                self.notify("Select an admin first.", severity="warning")
+            elif e["fixed"]:
+                self.notify(f"{e['name'] or e['id']} is written in dedicated.toml: take them out there, then reload.",
+                            title="REMOVE ADMIN", severity="warning")
+            elif await self.push_screen_wait(Confirm(f"REMOVE ADMIN  {e['name'] or e['id']}", ADMIN_NOTE["remove"],
+                                                     verb="REMOVE")):
+                self.send(st, "admin", "remove", e["target"], then=("admins", "players"))
 
     # --- forge: the ReclaimerForge catalog --------------------------------------------------------------------
     def on_unmount(self) -> None:

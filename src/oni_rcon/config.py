@@ -69,8 +69,8 @@ def load_config(path: Path) -> tuple[str, list[Server]]:
     except (OSError, tomllib.TOMLDecodeError) as e:
         raise SystemExit(f"{path}: {e}") from None
     base = data.get("defaults", {})
-    try:
-        servers = [Server(**{**base, **s}) for s in data.get("server", [])]
+    try:  # `plugins` belongs at the top level; one left in a server block is ignored rather than refused
+        servers = [Server(**{k: v for k, v in {**base, **s}.items() if k != "plugins"}) for s in data.get("server", [])]
     except (TypeError, ValueError) as e:
         raise SystemExit(f"{path}: {e}") from None
     if not servers:
@@ -181,6 +181,16 @@ def health_settings(path: Path | None) -> dict:
     except (OSError, TypeError, tomllib.TOMLDecodeError):
         return {}
     return {k: v for k, v in data.items() if k.startswith("health_") and k != "health_cmd"}
+
+
+def plugin_settings(path: Path | None) -> dict:
+    """The config file's top-level `plugins` and plugin_* keys, the same way: top level only."""
+    try:
+        with open(path, "rb") as f:
+            data = tomllib.load(f)
+    except (OSError, TypeError, tomllib.TOMLDecodeError):
+        return {}
+    return {k: v for k, v in data.items() if k == "plugins" or k.startswith("plugin_")}
 
 
 def write_atomic(path: Path, text: str, private: bool = False) -> None:
