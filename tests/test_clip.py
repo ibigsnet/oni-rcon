@@ -48,10 +48,10 @@ def test_copy_a_player_id_a_ban_and_a_map_reference():
             assert await copy(app, pilot, "Name") == p["name"]
             assert "CALLSIGN" in await copy(app, pilot, "The whole table (" + str(t.row_count) + " rows)")
 
-            app.redact = False
-            assert "203.0.113.7" in await copy(app, pilot, "Public address")
-            app.redact = True  # x: redacted, an address never reaches the clipboard
-            assert "203.0.113" not in await copy(app, pilot, "Public address")
+            app.redact = app.share_hidden = False
+            assert "203.0.113.7" in await copy(app, pilot, "Share / join address")
+            app.redact = app.share_hidden = True  # x: redacted, an address never reaches the clipboard
+            assert not dict(app.copy_extras())["Share / join address"]
 
             await pilot.press("f4")
             bans = app.query_one("#bans")
