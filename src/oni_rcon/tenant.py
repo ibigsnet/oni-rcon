@@ -158,8 +158,9 @@ class Notice(Dialog):
         self.dismiss(None)
 
 
-def checklist_text(items: list) -> tuple[str, bool]:
-    """(text, everything done) for the getting-started checklist from `oni checklist --json`."""
+def checklist_text(items: list, share: list | None = None) -> tuple[str, bool]:
+    """(text, everything done) for the getting-started checklist from `oni checklist --json`. share: (lobby, the
+    address players join it at) for each lobby that has said one."""
     lines, nxt = [], None
     for i in items:
         lines.append(('  [x] ' if i.get('ok') else '  [ ] ') + clean(str(i.get('text', ''))))
@@ -167,6 +168,8 @@ def checklist_text(items: list) -> tuple[str, bool]:
             nxt = clean(str(i.get('next', '')))
     if nxt:
         lines += ['', 'NEXT STEP:', '  ' + nxt]
+    lines += ['', 'SHARE / JOIN ADDRESS (what players use; F3 shows it, c copies it):']
+    lines += [f'  {clean(str(n))}:  {clean(str(a))}' for n, a in share or []] or ['  on F3 once a lobby is running']
     lines += ['', 'Step-by-step guide: https://ibigs.us/halo-3/guide   ·   F12 opens this again']
     return '\n'.join(lines), nxt is None
 
@@ -174,6 +177,7 @@ def checklist_text(items: list) -> tuple[str, bool]:
 class TenantApp(OniApp):
     TITLE = 'IBIGS Server Console'
     PLUGINS_KEY, PLUGINS_TAB = '', False  # customer consoles don't run plug-ins; F8 is AUTOMATION here
+    SHARE_SHOWN = True  # the address to give players shows from the start; x hides it (and player IPs) for a stream
     BINDINGS = [*[b for b in OniApp.BINDINGS if b.key != 'f8'], Binding('ctrl+f', 'goto', 'Find server', priority=True),
                 Binding('f7', 'power', 'Start/Stop', priority=True),
                 Binding('f8', 'jobs', 'Automation', priority=True), Binding('f9', 'updates', 'Updates', priority=True),
@@ -219,7 +223,8 @@ class TenantApp(OniApp):
             items = None
         if not items:
             return
-        text, done = checklist_text(items)
+        text, done = checklist_text(items, [(st.label, a) for st in self.stations
+                                            for a in [self.share(st)[0]] if a and not self.share_hidden])
         if always or not done:
             await self.push_screen_wait(Notice('GETTING STARTED', text))
 

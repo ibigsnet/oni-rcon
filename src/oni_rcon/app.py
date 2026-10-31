@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import json
 import re
 import shlex
@@ -489,6 +490,53 @@ def vpn_check(text: str, d) -> str:
 
 def redact_addr(v, on: bool) -> str:
     return "███.███.███.███" if on and v else str(v or "—")
+
+
+# IBIGS 2026-10-30: the address players join. A server's status names its game address, public_address:game_port
+# (the address the master lists it under). Where that is a machine's own or local network address (no public_address
+# set, or a server that reports the socket it's bound to), only its port is any use to players.
+NOT_PUBLIC = [ipaddress.ip_network(n) for n in (
+    "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16",
+    "::/128", "::1/128", "fc00::/7", "fe80::/10")]
+PUBLIC_ENV = "RECLAIMER_DEDICATED_PUBLIC_ADDRESS"
+
+
+def split_host_port(v) -> tuple[str, int | None]:
+    """("host", port) from HOST:PORT, [IPv6]:PORT, :PORT or a bare host. No port, or a bad one: None."""
+    s = str(v or "").strip()
+    if s.startswith("["):
+        host, _, rest = s[1:].partition("]")
+        port = rest[1:] if rest.startswith(":") else ""
+    elif s.count(":") == 1:
+        host, _, port = s.partition(":")
+    else:
+        host, port = s, ""
+    return host.strip(), int(port) if port.isdigit() and 0 < int(port) < 65536 else None
+
+
+def public_host(host: str) -> bool:
+    """Whether players elsewhere could reach host: a public IP, or a DNS name (not localhost)."""
+    if not host:
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return "." in host and host.lower() != "localhost" and not host.lower().endswith(".local")
+    return not any(ip in n for n in NOT_PUBLIC if n.version == ip.version)
+
+
+def share_address(reported, override: str = "") -> tuple[str, str]:
+    """(the address players join, or "" when it isn't known; why not, in plain words). The port is always the one the
+    server reports, its game port: on a NAT-shared address that's the same public port, one of its block."""
+    host, port = split_host_port(reported)
+    if port is None:
+        return "", "the server hasn't said its address yet"
+    if not public_host(host):
+        o_host = split_host_port(override)[0] if override else ""
+        if not public_host(o_host):
+            return "", f"your public IP, port {port} (the server reports {host or 'no address'}:{port})"
+        host = o_host
+    return (f"[{host}]:{port}" if ":" in host else f"{host}:{port}"), ""
 
 
 def redact_text(s: str, on: bool) -> str:
@@ -984,6 +1032,10 @@ GUIDE = [
                    "History and current health problems remain visible; new events still alert."),
     ]),
     ("F3  OPERATIONS  ·  running the match", [
+        ("Share / join", "The sitrep's SHARE / JOIN line is the address players join at: the one the server browser "
+                         "lists, and the one for direct connect. Paste that one into chats; c copies it (Ctrl+Y too). "
+                         "Without a public address set, it shows the port players use with your public IP. CONSOLE "
+                         "LINK below it is only this console's own RCON connection: no use to players."),
         ("Buttons", "Change map or mode, queue what plays next, end the round, shuffle teams, run votes, broadcast, "
                     "and server settings. Anything that ends a game asks first."),
         ("Credit", "When the map or gametype playing came from ReclaimerForge, the sitrep's FORGE line names it and "
@@ -1060,7 +1112,8 @@ GUIDE = [
         ("Turning it on", "Set health_cmd in the config: this tab says how when it's off. Ctrl+R reads everything now."),
     ]),
     ("SAFETY", [
-        ("Addresses", "Player IPs are hidden. Press x to show them, and again to hide them before you stream."),
+        ("Addresses", "Player IPs are hidden. Press x to show them, and again to hide them before you stream. "
+                      "Hidden hides F3's SHARE / JOIN address too."),
         ("Confirming", "Risky actions ask first, and the safe choice (ABORT) is already selected."),
         ("Passwords", "A refused password is never retried by itself: five wrong tries lock you out. RECONNECT on F3 "
                       "asks for it again."),
@@ -1256,6 +1309,11 @@ class Assets(Horizontal):
                 Binding("b", "app.player('ban')", "Ban"), Binding("m", "app.player('mute')", "Mute"),
                 Binding("j", "app.player('team')", "Team"), Binding("v", "app.player('vpnallow')", "VPN allow"),
                 Binding("p", "app.player('admin')", "Admin"), Binding("y", "app.player('copy')", "Copy ID")]
+
+
+class OpsPane(TabPane):
+    """F3. c copies the address players join (the sitrep's SHARE / JOIN line)."""
+    BINDINGS = [Binding("c", "app.copy_share", "Copy join address")]
 
 
 class Blacklist(Vertical):
@@ -1504,6 +1562,7 @@ class OniApp(App):
     FORGE_KEY = 'F6'
     PLUGINS_KEY = 'F8'  # '' where a console uses F8 for something else: the tab is still there to click
     PLUGINS_TAB = True  # False hides the plug-ins tab (IBIGS customer consoles don't run plug-ins)
+    SHARE_SHOWN = False  # True: F3's SHARE / JOIN address shows from the start (IBIGS customer consoles); x hides it
     TRACK_ROUNDS = True
     seen = range(1 << 30)  # the cards in view in the sidebar, once it's laid out: the rest aren't redrawn
     tabs_width = 0  # the tabs' width as last laid out, for the feeds written to while hidden
@@ -1562,6 +1621,7 @@ class OniApp(App):
         self.large_fleet = len(servers) > FLEET
         self.label_width = self.measure_labels()
         self.sel, self.redact, self.raw_events = 0, True, False
+        self.share_hidden = not self.SHARE_SHOWN  # F3's SHARE / JOIN address; x hides and shows it with the rest
         self.feed: deque = deque(maxlen=UI_LOG_LIMIT)
         self.feed_pending: deque = deque(maxlen=UI_LOG_LIMIT)
         self.filters, self.local_only = set(CATS), True  # F2 follows the selected server; ALL SERVERS widens it
@@ -1635,7 +1695,7 @@ class OniApp(App):
                     yield Feed(id="feed", wrap=True, max_lines=UI_LOG_LIMIT)
                     yield Input(id="say", placeholder="» type to chat as [Server] on this server   ·   start with @all "
                                                       "to reach every server")
-                with TabPane("F3 OPERATIONS", id="operations"):
+                with OpsPane("F3 OPERATIONS", id="operations"):
                     with Horizontal(id="ops-top"):
                         yield Static(id="sitrep")
                         with Vertical(id="ops-panel"):
@@ -3253,9 +3313,10 @@ class OniApp(App):
         g.add_column(style=DIM, no_wrap=True)
         g.add_column()
         for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), AMBER)),
-                     ("UPLINK", f"{st.server.where}   v{info.get('version', '?')}"),
+                     ("SHARE / JOIN", self.share_text(st)),
+                     ("CONSOLE LINK", Text.assemble((st.server.where, DIM), ("  RCON · not for players", DIM),
+                                                    (f"   v{info.get('version', '?')}", WHITE))),
                      *[("UPDATE", Text(f"▲ {lag} out", AMBER)) for lag in [self.lag(st)] if lag],
-                     ("PUBLIC ADDRESS", Text(redact_addr(s.get("address"), self.redact), RED if self.redact else WHITE)),
                      ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)
                                 if str(s.get("phase") or "").lower() not in QUIET_PHASES else Text("—", DIM)),
                      ("MAP", str(s.get("map") or "—")), ("MODE", str(s.get("mode") or "—")),
@@ -3296,6 +3357,36 @@ class OniApp(App):
             flag = lambda v: Text(v, style) + (Text("  ⚠ WITHDRAWN", RED) if norm(v) in pulled else Text())
             rows.append((str(i), [Text("▶" if now else str(i), style), flag(mp), flag(md)]))
         self.query_one("#rotation", Roster).fill(rows)
+
+    def share(self, st=None) -> tuple[str, str]:
+        """(the address players join this server at, or ""; why not). See share_address."""
+        st = st or self.cur
+        return share_address(st.data.get("status", {}).get("address"), environ.get(PUBLIC_ENV, ""))
+
+    def share_text(self, st) -> Text:
+        """F3's SHARE / JOIN line: the address to paste into a chat, unless addresses are hidden for a stream (x)."""
+        addr, why = self.share(st)
+        if not addr:
+            return Text(redact_text(why, self.share_hidden), AMBER if "port" in why else DIM)
+        if self.share_hidden:
+            return Text("███.███.███.███", RED) + Text("  hidden · x shows it", DIM)
+        return Text(addr, f"bold {GREEN}") + Text("  c copies", DIM)
+
+    def action_copy_share(self) -> None:
+        """c on F3: the SHARE / JOIN address onto the clipboard."""
+        if not self.stations:
+            return
+        addr, why = self.share()
+        if not addr:
+            self.notify(f"No public address to copy yet: {redact_text(why, self.share_hidden)}.",
+                        title="COPY · SHARE ADDRESS", severity="warning")
+        elif self.share_hidden:
+            self.notify("Addresses are hidden (x). Press x to show them, then c.", title="COPY · SHARE ADDRESS",
+                        severity="warning")
+        else:
+            self.copy_to_clipboard(addr)
+            self.notify(f"{addr}  ·  players join with this (server browser or direct connect)",
+                        title="COPIED · SHARE / JOIN ADDRESS", timeout=6)
 
     def paint_match_actions(self) -> None:
         self.query_one("#finding-context").display = getattr(self, "finding_station", None) == self.cur.index
@@ -3630,6 +3721,7 @@ class OniApp(App):
 
     def action_redact(self) -> None:
         self.redact = not self.redact
+        self.share_hidden = self.redact
         if self.redact:
             self.sup.last = ""  # what it last reacted to may have shown an address a moment ago
         self.paint_all()
@@ -3640,6 +3732,8 @@ class OniApp(App):
         yield from super().get_system_commands(screen)
         yield SystemCommand("Clear all alerts", "acknowledge every server, including hidden cards (Ctrl+L)", self.action_clear_alerts)
         yield SystemCommand("Superintendent findings", "recent observations and supporting evidence (F11)", self.action_findings)
+        yield SystemCommand("Copy the share / join address", "the address players join this server at  (c on F3)",
+                            self.action_copy_share)
         yield SystemCommand("Go to station", "every station, the busiest first  (g)", self.action_goto)
         for i, st in enumerate(self.stations):  # the palette reads titles as markup, and labels come from servers
             yield SystemCommand(escape(f"Station {i + 1}: {st.label}"), escape(st.server.where),
@@ -3827,7 +3921,7 @@ class OniApp(App):
             lines = [ln.text for ln in self.query_one("#console-log").lines][-200:]
             out.append(("The command log", "\n".join(lines)))
         out += [("Server name", str(s.get("name") or st.label)), ("Server connection", str(st.server.where)),
-                ("Public address", str(s.get("address") or "")), ("Map", str(s.get("map") or "")),
+                ("Share / join address", "" if self.share_hidden else self.share(st)[0]), ("Map", str(s.get("map") or "")),
                 ("Mode", str(s.get("mode") or ""))]
         return out
 
@@ -3840,7 +3934,8 @@ class OniApp(App):
         choices = widget_choices(screen.focused)
         if screen is self.screen_stack[0]:  # the main console, not a dialog over it
             choices += self.copy_extras()
-        choices = finish(choices, lambda t: redact_text(t, self.redact))
+        shown = "" if self.share_hidden else self.share()[0] if self.stations else ""
+        choices = finish(choices, lambda t: t if shown and t == shown else redact_text(t, self.redact))
         if not choices:
             self.notify("Nothing here to copy. Select a row first.", title="COPY", severity="warning")
             return
