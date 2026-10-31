@@ -155,7 +155,7 @@ class FleetRcon:
             row=self.fleet.rows.get(self.ident)
             state,detail=fleet_state(row,time.monotonic()-self.fleet.updated<=35)
             row=row or {}
-            self.info={'server':row.get('name',self.ident),'version':row.get('image','').rsplit(':',1)[-1]}
+            self.info={'server':row.get('name',self.ident),'version':(row.get('image') or '').rsplit(':',1)[-1]}
             self.ws=True if state=='online' else None
             if (state,detail)!=(self.state,self.detail):
                 self.state,self.detail=state,detail;self.on_state(self,state,detail)

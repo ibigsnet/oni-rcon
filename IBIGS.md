@@ -1,6 +1,6 @@
 # IBIGS Reclaimer terminal
 
-## SHARE / JOIN address on F3 (unreleased)
+## SHARE / JOIN address on F3 (0.9.0+ibigs.29)
 
 A customer posted the sitrep's UPLINK line as his server's address. That line was the console's own RCON connection
 on the same machine (127.0.0.1), and the address players join was hidden under the redaction blocks.

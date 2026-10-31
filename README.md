@@ -1,4 +1,4 @@
-## IBIGS fork: current release 0.9.0+ibigs.28 (17 October 2026)
+## IBIGS fork: current release 0.9.0+ibigs.29 (30 October 2026)
 
 This is IBIGS's public fork of [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 (GPL-3.0), the console
 behind the IBIGS fleet and every IBIGS customer server. `main` is the maintained source. Customer servers don't
@@ -6,6 +6,11 @@ pull from GitHub: they get signed releases through IBIGS's update channel (**F9*
 
 ### Latest releases
 
+- **0.9.0+ibigs.29** (30 Oct): brings in upstream oni-rcon (desktop 1.10.0 main + staging): **F4** kicked players with
+  PARDON, the admins list (add/remove, MAKE ADMIN) and VPN lists; a note on a card when its server is behind the latest
+  Project Reclaimer release. **F3** now leads with **SHARE / JOIN**, the address players join at (`c` copies it), and
+  the console's own RCON line reads **CONSOLE LINK**. Plug-ins are not shown or run on customer consoles. The fleet
+  view no longer stops with an error when a server row has no image.
 - **0.9.0+ibigs.28** (17 Oct): when oni runs on the same machine as the server, it signs in with the server's host
   key and uses the spot the server keeps for its own machine, so it is never turned away when 4 tools are already
   connected. A full console now reads **CONSOLE FULL** and oni keeps retrying, instead of looking like a wrong password.
