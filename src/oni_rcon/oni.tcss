@@ -52,7 +52,10 @@ VerticalScroll, RichLog, DataTable { scrollbar-gutter: stable; }
 .-narrow #player-actions { grid-size: 3; }
 /* 200 columns and up: room for whole server names */
 .-wide #sidebar { width: 46; }
-DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box, #host-box, #workaround, #health-setup {
+#tabs TabPane.-from { offset-x: 4; }
+#tabs TabPane.-slide { transition: offset 220ms out_cubic; }
+DataTable, RichLog, #sitrep, #dossier-box, #theatre, #listing-box, #host-box, #workaround, #health-setup, #plugin-list,
+#plugin-panel {
     border: round $primary 35%;
     border-title-color: $primary;
     background: $background;
@@ -96,6 +99,9 @@ Assets { height: 1fr; }
 Blacklist { height: 1fr; }
 #bans { height: 2fr; }
 #vpn { height: 1fr; }
+#vpnlists { height: auto; max-height: 7; }
+#kicks { height: 1fr; }
+#admins { height: 1fr; }
 .bar { height: auto; padding: 0 1; }
 .bar Button { margin-right: 1; min-width: 0; }
 
@@ -111,6 +117,19 @@ Blacklist { height: 1fr; }
 #containers { height: 1fr; scrollbar-size-horizontal: 0; }
 #workaround { width: 2fr; height: 1fr; padding: 0 1; }
 .-tight #health-bottom { layout: vertical; }
+
+#plugins-main { height: 1fr; }
+#plugin-list { width: 32; height: 1fr; }
+#plugin-list:focus { border: round $secondary; border-title-color: $secondary; }
+#plugin-panel { width: 1fr; height: 1fr; padding: 0 1; }
+.plugin-head { margin-bottom: 1; }
+.plugin-body { height: auto; }
+.plugin-body.-stale { opacity: 50%; }  /* the last answer, kept while it can't be reached */
+.plugin-block { margin-bottom: 1; }
+.plugin-table { height: auto; max-height: 20; border: round $primary 20%; }
+.plugin-actions { height: auto; margin-bottom: 1; }
+.plugin-actions Button { margin-right: 1; min-width: 0; }
+.-tight #plugin-list { width: 22; }
 
 ForgePane { height: 1fr; }
 #forge-bar { height: auto; }

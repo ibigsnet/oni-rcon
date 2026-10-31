@@ -51,6 +51,7 @@ class Fake:
                      "ips": [{"ip": "198.51.100.0/24", "reason": "ban evasion", "expires": time.time() + 86400 * 6}],
                      "devices": []}
         self.allowed = [{"target": "192.0.2.44", "note": "mobile hotspot"}]
+        self.kicked = {}  # player ID -> name, until a pardon
         self.vote, self.vote_at = None, 0.0
         self.hot = (None, 0.0)  # the last killer and when: some go on a roll, for multi-kills
 
@@ -120,10 +121,32 @@ class Fake:
         finally:
             self.clients.discard(ws)
 
+    @staticmethod
+    def vpn_lists() -> dict:
+        """The 0.9.22 `vpn` lists: one fresh, one a week and a half old that failed its last fetch."""
+        t = int(time.time())
+        return {"refreshed_at": t - 600, "sources": [
+            {"list": "x4bnet", "ranges": 37958, "asns": 0, "fetched_at": t - 600, "problem": None},
+            {"list": "hosting-asns", "ranges": 3854, "asns": 212, "fetched_at": t - 10 * 86400,
+             "problem": "HTTP 404 from the list's address; kept the last copy"}],
+            "table": {"table": "ip2asn", "rows": 512340, "fetched_at": t - 2 * 86400, "asns": 212, "announced": 3854,
+                      "blocks": 3854}}
+
     async def command(self, cmd: str, args: list[str], by: str) -> dict:
         ok = lambda text, data=None: {"ok": True, "text": text, **({"data": data} if data is not None else {})}
         no = lambda text: {"ok": False, "text": text}
         self._renumber()
+        if cmd == "vpn" and args:  # CHECK IP, the 0.9.22 shape: the list an address matched
+            listed = args[0].startswith("45.")
+            return ok(f"{args[0]} is refused: it is on a VPN list." if listed else f"{args[0]} doesn't look like a VPN.",
+                      {"address": args[0], "local": False, "listed": listed, "list": "x4bnet" if listed else None,
+                       "allowed": False, "refused": listed, "fail_closed": False})
+        if cmd in ("admin", "admins") and args[:1] in ([], ["list"]):  # a bare list of IDs and objects: the shape is
+            return ok("admins: see data", [  # undocumented, so the demo answers in both forms the clients take
+                {"name": "Overseer", "player_id": "0d57c0ffee0d57c0ffee0d57c0ffee00", "source": "dedicated.toml",
+                 "online": False},
+                *({"name": p["name"], "player_id": p["player_id"], "source": "rcon", "online": True}
+                  for p in self.players if p.get("admin"))])
         if cmd in ("players", "status", "maps", "modes", "bans", "vpn", "vote", "nextmap"):
             return ok(f"{cmd}: see data", {
                 "players": lambda: {"count": len(self.players), "max_players": self.status["max_players"],
@@ -139,7 +162,8 @@ class Fake:
                                   + [{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MODE_VARIANTS]
                                   + self.installed(".gt")},
                 "bans": lambda: self.bans,
-                "vpn": lambda: {"allowed": self.allowed, "block_vpn": True, "ranges": 41812},
+                "vpn": lambda: {"allowed": self.allowed, "block_vpn": True, "ranges": 41812, "fail_closed": False,
+                                "lists": self.vpn_lists()},
                 "vote": lambda: {"vote": self.vote, "playlist": None,
                                  "subjects": ["kick", "endround", "endgame", "shuffle", "playlist"]},
                 "nextmap": lambda: {"next": self.status["next"],
@@ -163,7 +187,11 @@ class Fake:
                 if cmd == "ban":
                     self.bans["players"].append({"id": p["player_id"], "name": p["name"], "reason": " ".join(args[1:]),
                                                  "banned_by": by, "expires": None})
-                await self.emit(cmd, player=p["name"], by=by, reason=" ".join(args[1:]))
+                if cmd == "kick":
+                    self.kicked[p["player_id"]] = p["name"]
+                    await self.emit("kick", name=p["name"], id=p["player_id"], by=by, reason=" ".join(args[1:]), seconds=600)
+                else:
+                    await self.emit(cmd, player=p["name"], by=by, reason=" ".join(args[1:]))
                 return ok(f"{p['name']} was {cmd}{'n' if cmd == 'ban' else ''}ed by {by}.")
             if cmd in ("mute", "unmute"):
                 p["muted"] = cmd == "mute"
@@ -193,6 +221,24 @@ class Fake:
                         lst.remove(e)
                         return ok(f"{cmd} {args[0]} done.")
             return no(f"Nothing matches '{args[0] if args else ''}'.")
+        if cmd == "pardon":
+            pid = next((i for i, n in self.kicked.items() if args and args[0] in (i, n)), None)
+            if pid is None:
+                return no(f"Nobody kicked here matches '{args[0] if args else ''}'.")
+            name = self.kicked.pop(pid)
+            await self.emit("pardon", target=args[0], name=[name], by=by)
+            return ok(f"{name} may rejoin now.")
+        if cmd == "admin" and len(args) > 1 and args[0] in ("add", "remove"):
+            p = next((p for p in self.players if args[1] in (p["name"], p["player_id"])), None)
+            if p:
+                p["admin"] = args[0] == "add"
+            name = p["name"] if p else args[1]
+            await self.emit(f"admin_{args[0]}{'ed' if args[0] == 'add' else 'd'}", name=name,
+                            id=p["player_id"] if p else args[1], by=by)
+            return ok(f"{name} {'is now an admin' if args[0] == 'add' else 'is no longer an admin'}.")
+        if cmd == "reload":
+            await self.emit("control", action="reload", ok=True, text="Nothing changed.")
+            return ok("Nothing changed.")
         if cmd in ("map", "mode", "load", "nextmap"):
             self.status["next"] = " / ".join(args)
             if cmd != "nextmap":
@@ -422,3 +468,64 @@ def start_in_thread(password: str = "demo", content_dirs: list | None = None, ho
     threading.Thread(target=asyncio.run, args=(main(),), daemon=True).start()
     ready.wait(10)
     return ports
+
+
+class DemoPlugin:
+    """A pretend Gryphon for --demo's F10, answered in this process: the same requests and replies a real plug-in
+    sends over stdin and stdout, so the tab works with nothing installed."""
+    WORDS = ("nazi", "slur")
+
+    def __init__(self):
+        self.live, self.log = False, ["daemon started", "word list loaded: 412 words"]
+        now = time.time()
+        self.rows = [{"id": "%032x" % random.getrandbits(128), "at": now - m * 60, "server": s, "what": w, "who": n, "why": y}
+                     for m, s, w, n, y in [(12, 0, "mute 10m", "Rook", "chat [hate] 'n***'"),
+                                           (47, 1, "kick", "Static", "name [slur]"),
+                                           (95, 0, "ban 1d", "Cinder", "chat [hate], third strike")]]
+
+    @classmethod
+    def setup(cls):
+        from .plugins import Manifest, PluginSetup
+        m = Manifest("gryphon-demo", name="Gryphon (demo)", version="0.1.0", author="Arche Labs",
+                     description="Automated moderation, pretend.", exec="(answered inside oni-rcon for --demo)",
+                     rcon=["unmute", "unban", "pardon"])
+        return PluginSetup([m], source=cls())
+
+    def view(self) -> dict:
+        return {"title": "Gryphon", "badge": {"level": "warn" if self.live else "ok", "text": "LIVE" if self.live else "DRY-RUN"},
+                "blocks": [
+                    {"type": "kv", "rows": [["Mode", "live" if self.live else "dry-run"], ["Servers online", "3 / 3"],
+                                            ["Last action", f"{int((time.time() - self.rows[0]['at']) // 60)} min ago"
+                                             if self.rows else "none"]]},
+                    {"type": "table", "id": "actions", "columns": ["Time", "Server", "Action", "Player", "Why"],
+                     "rows": [{"id": r["id"], "cells": [time.strftime("%H:%M", time.localtime(r["at"])),
+                                                        str(r["server"] + 1), r["what"], r["who"], r["why"]]}
+                              for r in self.rows], "row_actions": ["undo"]},
+                    {"type": "log", "lines": self.log[-8:]},
+                    {"type": "text", "text": "A pretend plug-in: nothing here runs as a program. See docs/PLUGINS.md "
+                                             "for how a real one is written."}],
+                "actions": [
+                    {"id": "check", "label": "Check a message", "params": [{"name": "text", "label": "Message", "type": "text"}]},
+                    {"id": "go-dry", "label": "Go dry-run"} if self.live else
+                    {"id": "go-live", "label": "Go live", "danger": True, "confirm": "Gryphon will really kick, mute and ban."}]}
+
+    async def call(self, m, request: dict, timeout: float) -> dict:
+        await asyncio.sleep(0.2)  # a real one takes a moment
+        if request.get("type") == "view":
+            return self.view()
+        act, params = request.get("id"), request.get("params") or {}
+        if act == "check":
+            text = str(params.get("text", ""))
+            hit = next((w for w in self.WORDS if w in text.lower()), None)
+            return {"ok": True, "toast": f"Would act: hate [{hit}]" if hit else "Nothing in the list matches that."}
+        if act in ("go-live", "go-dry"):
+            self.live = act == "go-live"
+            self.log.append(f"mode set to {'live' if self.live else 'dry-run'}")
+            return {"ok": True, "toast": "Gryphon is live." if self.live else "Gryphon is in dry-run.", "view": self.view()}
+        if act == "undo" and (row := next((r for r in self.rows if r["id"] == request.get("row")), None)):
+            self.rows.remove(row)
+            self.log.append(f"undid {row['what']} on {row['who']}")
+            cmd = "unmute" if row["what"].startswith("mute") else "unban" if row["what"].startswith("ban") else "pardon"
+            ask = [{"server": request["server"], "command": cmd, "args": [row["id"]]}] if request.get("server") else []
+            return {"ok": True, "toast": f"Undid {row['who']}'s {row['what'].split()[0]}.", "rcon": ask}
+        return {"ok": False, "error": "pick a row first" if act == "undo" else f"no action {act!r}"}

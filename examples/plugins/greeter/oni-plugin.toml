@@ -1,0 +1,19 @@
+# A session plug-in: Oni starts it with the console and keeps it running. Copy this folder to plugins/greeter next to
+# your config file (or git clone its repository there, to be offered its updates), and add
+#   plugins = ["greeter"]
+# at the top of the config (above the first [table]). docs/PLUGINS.md has the protocol.
+api         = 1
+name        = "Greeter"
+version     = "1.0.0"
+author      = "oni-rcon"
+description = "An example session plug-in: welcomes each player who joins, answers !rules in chat, and keeps its own panel live."
+
+[run]
+mode = "session"
+exec = "python greeter.py"  # runs in this folder; python3 where that's the name, or ssh to a host with `host`
+host = ""
+
+[permissions]
+events    = ["join", "chat"]  # the only events Oni pushes to it
+rcon      = ["say", "status"] # what it may have Oni send: status's reply comes back to it
+addresses = false

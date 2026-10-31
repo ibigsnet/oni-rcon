@@ -1,0 +1,2 @@
+# run by sh on a game box: a CR would break them
+*.sh text eol=lf

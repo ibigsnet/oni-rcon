@@ -11,3 +11,7 @@ oni-rcon.toml
 bans*.json
 *.bak*
 ibigs/fleet-rules/tests/pkg/
+# local runtime state: vault.key and vault.enc are secrets, never commit them
+data/
+# frontend/ holds only installed packages and build output
+frontend/

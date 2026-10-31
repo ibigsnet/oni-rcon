@@ -1,0 +1,17 @@
+# The smallest working Oni plug-in: copy this folder to plugins/hello next to your config file, and add
+#   plugins = ["hello"]
+# at the top of the config (above the first [table]). F10 shows it, after you approve it. docs/PLUGINS.md has the rest.
+api         = 1
+name        = "Hello"
+version     = "1.0.0"
+author      = "oni-rcon"
+description = "An example: every block, every param type, and a greeting sent through Oni's RCON."
+
+[run]
+mode = "service"
+exec = "python hello.py"    # runs in this folder; python3 where that's the name, or ssh to a host with `host`
+host = ""
+
+[permissions]
+rcon      = ["say"]         # the one command it may ask Oni to send
+addresses = false

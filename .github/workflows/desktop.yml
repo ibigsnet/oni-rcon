@@ -1,0 +1,110 @@
+name: desktop
+on:
+  push:
+    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+    tags: ["desktop-v*"]
+  pull_request:
+    paths: ["desktop/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+defaults:
+  run:
+    working-directory: desktop
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - run: npm ci
+      - run: npm test
+      - run: npm run build  # typechecks, and the backend embeds what it builds
+      - run: cargo test --locked
+        working-directory: desktop/src-tauri
+  bundle:
+    # installers for each platform, on a desktop-v* tag or by hand
+    if: startsWith(github.ref, 'refs/tags/desktop-v') || github.event_name == 'workflow_dispatch'
+    needs: test
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+      - if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash  # the tag names the version the app reports, or the release would announce itself as an update
+        run: |
+          v="${GITHUB_REF_NAME#desktop-v}"
+          test "$(node -p "require('./package.json').version")" = "$v"
+          grep -q "\"version\": \"$v\"" src-tauri/tauri.conf.json
+          grep -q "^version = \"$v\"" src-tauri/Cargo.toml
+          # RELEASE-NOTES.md is rewritten for each release: its heading names this version, or last release's notes would ship
+          [[ "$(head -1 ../RELEASE-NOTES.md | tr -d '\r')" == *" $v" ]] || { echo "::error::RELEASE-NOTES.md's heading must end with $v"; exit 1; }
+      - run: npm ci
+      - run: npx tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}  # signs the updater artifacts; the app holds the public half
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oni-rcon-desktop-${{ matrix.os }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**/*.deb
+            desktop/src-tauri/target/release/bundle/**/*.AppImage
+            desktop/src-tauri/target/release/bundle/**/*.rpm
+            desktop/src-tauri/target/release/bundle/**/*.msi
+            desktop/src-tauri/target/release/bundle/**/*-setup.exe
+            desktop/src-tauri/target/release/bundle/**/*.dmg
+            desktop/src-tauri/target/release/bundle/**/*.app.tar.gz
+            desktop/src-tauri/target/release/bundle/**/*.sig
+  release:
+    # the newest desktop release is the latest one: the README's /releases/latest links point at the installers
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    needs: bundle
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4  # the release notes alone: the app shows them before and after it updates
+        with:
+          sparse-checkout: /RELEASE-NOTES.md
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: latest.json, the signed update the app installs
+        shell: bash
+        run: |
+          cd dist
+          find . -mindepth 2 -type f -exec mv -t . {} +  # each bundle target comes down in a folder of its own
+          for f in *\ *; do [ -e "$f" ] && mv "$f" "${f// /.}"; done  # GitHub turns spaces in asset names into dots
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME"
+          entry() { test -f "$1.sig" && jq -n --arg s "$(cat "$1.sig")" --arg u "$base/$1" '{signature: $s, url: $u}'; }
+          nsis=$(entry *-setup.exe); msi=$(entry *.msi); appimage=$(entry *.AppImage); mac=$(entry *.app.tar.gz)
+          jq -n --arg v "${GITHUB_REF_NAME#desktop-v}" --argjson nsis "$nsis" --argjson msi "$msi" --argjson appimage "$appimage" --argjson mac "$mac" '{version: $v, pub_date: (now | todate), platforms: {"windows-x86_64": $nsis, "windows-x86_64-nsis": $nsis, "windows-x86_64-msi": $msi, "linux-x86_64": $appimage, "darwin-aarch64": $mac}}' > latest.json
+          cat latest.json
+      - run: find dist -type f -print0 | xargs -0 gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "ONI RCON desktop ${GITHUB_REF_NAME#desktop-v}" --notes-file RELEASE-NOTES.md --latest
+        env:
+          GH_TOKEN: ${{ github.token }}

@@ -1,12 +1,15 @@
-Copyright (c) 2026 ibigs, LLC
+oni-rcon
+Copyright (c) 2026 Arche Labs
+Portions copyright (c) 2026 ibigs, LLC
 SPDX-License-Identifier: GPL-3.0-or-later
 
 This project is released under the GNU General Public License, version 3
 or any later version. See LICENSE.
 
-Upstream oni-rcon from https://github.com/viik2k/oni-rcon, through
-release 0.3.0, is copyright (c) 2026 Arche Labs and remains available
-under the MIT license that follows.
+Upstream oni-rcon is https://github.com/viik2k/oni-rcon (Arche Labs).
+Its releases up to and including v0.9.0 and desktop-v1.4.1 were published
+under the MIT license that follows, and those releases remain available
+under it.
 
 MIT License
 

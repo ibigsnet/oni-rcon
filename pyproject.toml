@@ -5,7 +5,7 @@ description = "An ONI-themed terminal admin console for Project Reclaimer (Halo 
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "ibigs, LLC" }]
+authors = [{ name = "Arche Labs" }, { name = "ibigs, LLC" }]
 requires-python = ">=3.11"
 dependencies = ["textual>=8.0", "websockets>=15"]
 keywords = ["halo", "reclaimer", "rcon", "tui", "textual", "server-admin"]

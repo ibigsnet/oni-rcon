@@ -1,5 +1,20 @@
 # IBIGS Reclaimer terminal
 
+## SHARE / JOIN address on F3 (unreleased)
+
+A customer posted the sitrep's UPLINK line as his server's address. That line was the console's own RCON connection
+on the same machine (127.0.0.1), and the address players join was hidden under the redaction blocks.
+
+- **SHARE / JOIN** leads F3's sitrep: the address players join at, the server's own `public_address:game_port` from
+  its status (what the master lists). When the server reports a local address (no `public_address` set), the line
+  gives the port to use with your public IP instead; `RECLAIMER_DEDICATED_PUBLIC_ADDRESS` in oni's environment fills
+  in the host then. The port is always the game port the server reports, never the RCON port.
+- **c** on F3 copies it; Ctrl+Y lists it as "Share / join address"; Ctrl+P has "Copy the share / join address".
+- **CONSOLE LINK** replaces UPLINK: the RCON address, dimmed and marked "RCON · not for players", then the version.
+- Customer console: the share address shows from the start. x still toggles all addresses; once hidden (for a
+  stream), the share line is hidden too and c won't copy it. Player IPs stay hidden by default, as before.
+- The help (?) and the getting-started checklist name the share address.
+
 ## Host key sign-in, CONSOLE FULL (0.9.0+ibigs.28)
 
 A Reclaimer server takes 4 RCON tools plus one spot kept for its own machine. On a busy server the 4 fill up

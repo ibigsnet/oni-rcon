@@ -1,0 +1,34 @@
+{
+  "plugins": [
+    {
+      "id": "gryphon",
+      "name": "Gryphon",
+      "description": "Automated hate-speech moderation. Needs Gryphon running on a host; point the manifest's exec at your gryphon.toml.",
+      "url": "https://github.com/viik2k/gryphon",
+      "path": "examples",
+      "commit": "ad5a569386eb793054d75eb80a7f9b01e063f35e",
+      "author": "Arche Labs",
+      "tags": ["moderation", "service"]
+    },
+    {
+      "id": "greeter",
+      "name": "Greeter",
+      "description": "Welcomes each player who joins, answers !rules in chat, and keeps its own panel live. Needs Python.",
+      "url": "https://github.com/viik2k/oni-rcon",
+      "path": "examples/plugins/greeter",
+      "commit": "285218a6bd4ab140ce7c0449c1330726f603a25c",
+      "author": "oni-rcon",
+      "tags": ["example", "session"]
+    },
+    {
+      "id": "hello",
+      "name": "Hello",
+      "description": "Every block, every param type, and a greeting sent through Oni's RCON: a starting point for your own. Needs Python.",
+      "url": "https://github.com/viik2k/oni-rcon",
+      "path": "examples/plugins/hello",
+      "commit": "285218a6bd4ab140ce7c0449c1330726f603a25c",
+      "author": "oni-rcon",
+      "tags": ["example", "service"]
+    }
+  ]
+}

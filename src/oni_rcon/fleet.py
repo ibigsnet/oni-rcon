@@ -177,8 +177,9 @@ class FleetRcon:
 class FleetApp(FleetHealthMixin, OniApp):
     TITLE='IBIGS Reclaimer Fleet'
     FORGE_KEY='F9'
+    PLUGINS_KEY=''  # F8 filters servers here; the plug-ins tab is clicked
     TRACK_ROUNDS=False  # Cached overview phases cannot prove completed rounds; fleet stats remain authoritative.
-    BINDINGS=[*[b for b in OniApp.BINDINGS if b.key not in ('f6', 'ctrl+r', *map(str,range(1,10)))],
+    BINDINGS=[*[b for b in OniApp.BINDINGS if b.key not in ('f6', 'f8', 'ctrl+r', *map(str,range(1,10)))],
               Binding('f6','lifecycle','Container'),Binding('ctrl+r','refresh_fleet','Refresh fleet'),
               Binding('f9',"tab('forge')",'Forge catalog'),
               Binding('ctrl+f','search_servers','Search',priority=True),
