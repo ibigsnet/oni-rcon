@@ -21,6 +21,9 @@ NEW_HINT = "You're in. Click a player for what you can do, or press ? for a guid
 
 
 def main() -> None:
+    if sys.argv[1:] == ["--edit-settings"]:  # the IBIGS helper's way in: JSON on stdin and stdout (serverconf.py)
+        from .serverconf import main as edit_settings
+        sys.exit(edit_settings())
     if sys.argv[1:2] == ['--ibigs-jobs']:
         from .jobs import main as jobs_main
         raise SystemExit(jobs_main(sys.argv[2:]))
