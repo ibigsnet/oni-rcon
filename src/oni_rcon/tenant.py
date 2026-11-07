@@ -13,6 +13,7 @@ from textual.widgets import Button, Select, Static
 
 from .app import OniApp, Confirm, Dialog, Form, Pick
 from .safety import clean
+from .serverconf import supports
 
 # IBIGS 2026-10-09: F7 = start / stop / restart this VM's lobbies. The work is done by the `oni` wrapper
 # (IBIGS_ONI_POWER, `oni status --json` / `oni stop h3-01 --yes --force`): `docker compose stop` with the stack's own
@@ -188,7 +189,8 @@ class TenantApp(OniApp):
         super().welcome()
         self.notify('Managing this VM’s lobbies. F7 starts or stops servers; F3 PLAYLISTS deploys playlists. F8 '
                     'AUTOMATION: rules (sprees, !admin, server alerts), schedules, roles, votes and Discord. On F1, e '
-                    'gives the selected player a role. F6 opens ReclaimerForge. F12: settings and Workshop mods.',
+                    'gives the selected player a role. F6 opens ReclaimerForge. F12: settings and Workshop mods. '
+                    'Ctrl+T: what Project Reclaimer 0.10 adds (roles, vote rules, the join queue, polls, panels).',
                     title='IBIGS', timeout=10)
         self.run_worker(self.first_run_checklist(), exclusive=False, group='checklist')
 
@@ -232,11 +234,15 @@ class TenantApp(OniApp):
     async def action_settings_menu(self) -> None:
         what = await self.push_screen_wait(Pick('SETTINGS & MODS', [
             ('Lobby settings: name, player limit, map, game type', 'settings'),
+            ('Server features (0.10): roles, votes, join queue, polls, models, Forge', 'features'),
             ('Install a Workshop mod (Steam link)', 'workshop'),
             ('Installed Workshop mods', 'mods'),
             ('Getting-started checklist', 'checklist')]))
         if what == 'settings':
             await self.lobby_settings()
+        elif what == 'features':
+            from .features_ui import features_hub
+            await features_hub(self)
         elif what == 'workshop':
             await self.workshop_install()
         elif what == 'mods':
@@ -351,6 +357,11 @@ class TenantApp(OniApp):
         if not p or len(pid) != 64:
             self.notify('Choose a player on F1 first (their ID must be known).', title='Roles', timeout=6)
             return
+        st = self.cur
+        if supports(st.rcon.info.get('version') if st and st.rcon else None):  # 0.10: the server's own roles
+            from .features_ui import role_for_player
+            await role_for_player(self, st, pid, clean(str(p.get('name') or '')))
+            return
         try:
             await add_role(self, RuleStore(), await self.lobby_names(), (pid, clean(str(p.get('name') or ''))))
         except (OSError, ValueError) as exc:
@@ -365,6 +376,10 @@ class TenantApp(OniApp):
     def _power_button(self, e: Button.Pressed) -> None:
         e.stop()
         self.action_power()
+
+    async def player_role(self, st, target: str, name: str) -> None:
+        """F1's ROLE button: the same as e, whatever the server's version."""
+        self.action_give_role()
 
     def playlist_tool(self) -> str:
         return os.environ.get('IBIGS_ONI_POWER', '')  # the oni wrapper: `oni playlist ...` as well as start/stop

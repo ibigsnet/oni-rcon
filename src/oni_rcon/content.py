@@ -222,6 +222,15 @@ class PlaylistError(ValueError):
     """Why a playlist can't be saved, in plain words."""
 
 
+OLD_MODE_HINT = ("Project Reclaimer 0.10 plays a built-in game mode by its title now, not by the old file path under Game "
+                 "Modes/Project Reclaimer: edit the playlist, take that game out and ADD GAME to pick the mode by name.")
+
+
+def old_mode_hint(text: str) -> str:
+    """What to add when the server's answer about a playlist names one of the old built-in mode paths."""
+    return "\n\n" + OLD_MODE_HINT if "Project Reclaimer/" in str(text) else ""
+
+
 def new_playlist(name: str = "New playlist") -> dict:
     return {"version": 2, "name": name, "vote_seconds": 20, "games": []}
 
