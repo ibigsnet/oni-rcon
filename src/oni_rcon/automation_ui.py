@@ -25,8 +25,8 @@ ROLE_CHOICES = [("ADMIN", ["admin"]), ("VIP", ["vip"]), ("MOD", ["mod"]), ("ADMI
                 ("ADMIN + MOD", ["admin", "mod"]), ("VIP + MOD", ["vip", "mod"]), ("ADMIN + VIP + MOD", list(R.ROLES)),
                 ("No role (remove)", [])]
 ROLE_WORDS = {"admin": "ADMIN: can use admin commands in game. Applied to the server the next time it's empty.",
-              "vip": "VIP: can't be vote-kicked (active now). More VIP perks arrive with future Reclaimer builds.",
-              "mod": "MOD: saved now; takes effect when Project Reclaimer adds moderators."}
+              "vip": "VIP: can't be vote-kicked (active now). On Reclaimer 0.10, F8 ROLES uses the server's own VIP.",
+              "mod": "MOD: saved now; on Reclaimer 0.10, F8 ROLES uses the server's own Mod."}
 
 
 class WidePick(Pick):
@@ -207,7 +207,7 @@ def live_engine(app, rules_=(), roles=None) -> R.Engine:
 
 # --- the hub -------------------------------------------------------------------------------------------------------
 HUB_TEXT = ("Automation runs on this server even when oni is closed.\n\n"
-            "RULES      When something happens (a killing spree, a !command, a server going down), do something.\n"
+            "RULES      When something happens (a killing spree, a !command, a kick on 0.10), do something.\n"
             "SCHEDULES  Do something at set times: messages, restarts, updates.\n"
             "ROLES      Make players ADMIN, VIP or MOD.\n"
             "VOTES      Turn player voting on or off for each server.\n"
@@ -330,9 +330,10 @@ async def rules_dialog(app, store, targets):
         action, ident = choice
         rule = next((r for r in rules_ if r["id"] == ident), None)
         if action == "template":
+            new = any_010(app)
             pick = await app.push_screen_wait(WidePick("START FROM A TEMPLATE", [
                 (Text.assemble((s["name"], WHITE), ("  " + R.describe_block("when", R._block("when", s["when"])), DIM)), i)
-                for i, s in enumerate(R.STARTERS)]))
+                for i, s in enumerate(R.STARTERS) if new or not R.needs_010({"if": [], **s})]))
             if pick is not None:
                 await edit_rule(app, store, targets, dict(R.STARTERS[pick], id=None))
         elif action == "new":
@@ -380,8 +381,15 @@ async def fill_block(app, part, kind, targets, webhooks, current=None):
     return block
 
 
+def any_010(app) -> bool:
+    """Whether a connected server can run 0.10's blocks: nothing is offered that no server here could do."""
+    return any(st.online and R.at_least_010(st.rcon.info.get("version")) for st in app.stations)
+
+
 async def pick_kind(app, part, title, extra=()):
-    opts = [*extra, *[(Text.assemble((lbl, WHITE), ("  " + hint, DIM)), k) for k, (lbl, hint, _) in R.CATALOG[part].items()]]
+    new = any_010(app)
+    opts = [*extra, *[(Text.assemble((lbl, WHITE), ("  " + hint, DIM)), k) for k, (lbl, hint, _) in R.CATALOG[part].items()
+                      if new or k not in R.NEEDS_010]]
     return await app.push_screen_wait(WidePick(title, opts))
 
 
@@ -489,20 +497,39 @@ async def test_rule(app, store, rule):
     engine = live_engine(app, [rule], players)
     servers = [n for n in (engine.lobbies if rule["servers"] == "all" else rule["servers"])] or ["h3-01"]
     steps = R.plan(engine, R.sample(engine, rule, servers[0]))
-    lines = [R.describe(rule), "", f"If it fired now on {servers[0]} (with an example player):"]
+    version = next((st.rcon.info.get("version") for st in app.stations if lobby_id(st) == servers[0] and st.rcon), None)
+    checks = R.explain(engine, rule, servers[0], version)
+    mark = {True: "yes", False: "NO ", None: " ? "}
+    lines = [R.describe(rule), ""]
+    if checks:
+        lines += [f"Right now on {servers[0]}:"] + [f"  {mark[v]}  {w}" for w, v in checks]
+        lines += ["  It wouldn't fire right now." if any(v is False for _, v in checks) else
+                  "  It would fire, as far as anything but the player goes (?)." if any(v is None for _, v in checks) else
+                  "  It would fire.", ""]
+    lines += [f"If it fired on {servers[0]} (with an example player):"]
     lines += ["  • " + s.words() for s in steps] or ["  • nothing: nobody to tell right now"]
-    lines += ["", "Nothing was sent. Conditions, cooldowns and limits are skipped in a test."]
+    lines += ["", "Nothing was sent. Cooldowns and limits aren't counted in a test."]
     await app.push_screen_wait(Confirm("TEST · " + rule["name"], "\n".join(lines), verb="OK", danger=False))
 
 
 # --- roles ---------------------------------------------------------------------------------------------------------
 ROLES_TEXT = ("ADMIN  admin commands in game. Written to the server the next time it's empty (nobody gets kicked).\n"
-              "VIP    can't be vote-kicked (works now). More perks come with future Reclaimer builds.\n"
-              "MOD    saved now; works when Project Reclaimer adds moderators.\n"
+              "VIP    can't be vote-kicked (works now).\n"
+              "MOD    counts for rules here. A server on Reclaimer 0.10 has real Mods: Ctrl+T → ROLES.\n"
               "Pick someone who's online, or paste a player ID (F1 → the player's dossier shows it).")
 
 
+def on_010(app, store) -> bool:
+    """A customer console on a 0.10 server: roles and votes are the server's own now, so F8 opens those screens."""
+    st = getattr(app, "cur", None)
+    return not getattr(store, "fleet_mode", False) and bool(st and st.online and R.at_least_010(st.rcon.info.get("version")))
+
+
 async def roles_dialog(app, store, targets):
+    if on_010(app, store):
+        from .features_ui import roles_screen
+        await roles_screen(app, app.cur)
+        return
     while True:
         players, _ = store.roles()
         rc, out = await app.power_run("roles", "apply", "--check", "--json") if not getattr(store, "fleet_mode", False) \
@@ -591,6 +618,10 @@ async def set_role(app, store, targets, pid, name, current=None):
 
 # --- votes ---------------------------------------------------------------------------------------------------------
 async def votes_dialog(app, store, targets):
+    if on_010(app, store):
+        from .features_ui import setting_screen
+        await setting_screen(app, app.cur, "votes")
+        return
     _, votes = store.roles()
     opts = [(Text.assemble((t.ljust(10), WHITE), ({True: ("players can vote", GREEN), False: ("voting is off", AMBER)}
                                                  .get(votes.get(t), ("as the server is set", DIM)))), t) for t in targets]

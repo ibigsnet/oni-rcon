@@ -10,9 +10,10 @@ scheduled jobs, so rules keep working while nobody has oni open:
      "cooldown": 0, "per_hour": 120}
 
 Everything a rule can do is in CATALOG below: one place, with the words the menus show. A rule can talk (say, tell,
-Discord), cancel a vote, shuffle teams or start a stopped server. It can't kick, ban, mute, restart a busy server or run
-commands, and nothing reacts to what people say except "!commands" typed on purpose: IBIGS moderates cheating, not
-speech, and kicks and bans stay with a person.
+Discord), cancel a vote, shuffle teams or start a stopped server, and on Project Reclaimer 0.10 ask a poll, show or hide a
+panel, or pause and open joins. It can't kick, ban, mute, give roles, restart a busy server or run other commands, and
+nothing reacts to what people say except "!commands" typed on purpose: IBIGS moderates cheating, not speech, and kicks
+and bans stay with a person. A rule can report a moderation action; it can't take one.
 
 The engine is pure: the worker feeds it events, status and roster readings and gets back Firings to carry out.
 """
@@ -35,13 +36,20 @@ SPREES = {5: "Killing Spree", 10: "Killing Frenzy", 15: "Running Riot", 20: "Ram
           30: "Invincible"}
 MULTIS = {2: "Double Kill", 3: "Triple Kill", 4: "Overkill", 5: "Killtacular", 6: "Killtrocity", 7: "Killimanjaro",
           8: "Killtastrophe", 9: "Killpocalypse", 10: "Killionaire"}
+JOIN_WAIT = 120.0  # how long a join (0.10) waits for the player's name before it's dropped
+MODERATION = {"kick", "ban", "unban", "mute", "unmute", "role_added", "role_removed"}
 CHAIN = 4.0  # seconds between kills that still chain into a multi-kill (Halo 3's window)
 MEDALS = [*SPREES.values(), *MULTIS.values(), "Killjoy", "Perfection"]
 MAX_RULES = 128
 # A server's name: h3-01 / server-2 on customer VPSes, the lobby ID (node-a-49178) on the IBIGS fleet
 SERVER = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
 INSTANT = {"medal", "spree", "multikill", "join", "leave", "match_start", "match_end", "before_match", "every", "at",
-           "vote", "weapon_kill", "first_blood", "kills_reached"}
+           "vote", "weapon_kill", "first_blood", "kills_reached", "moderation", "staff_command", "poll_decided",
+           "panel_press", "server_phase", "queue_called", "refused"}
+SERVER_PHASES = ["lobby", "voting", "countdown", "loading", "in_game", "post_game"]
+# Blocks only a 0.10 server has the events or commands for: the menus offer them only when one is connected.
+NEEDS_010 = {"moderation", "staff_command", "poll_decided", "panel_press", "server_phase", "queue_called", "refused",
+             "phase_is", "start_poll", "show_panel", "hide_panel", "set_joins", "tell_staff"}
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 MAX_LINE = 240
 
@@ -78,6 +86,19 @@ CATALOG = {
         "vote": ("A vote starts", "A player calls a vote.",
                  [F("kind", "Kind of vote", "choice", "any", options=["any", "kick", "endround", "endgame", "shuffle",
                                                                      "playlist"])]),
+        "moderation": ("A player is kicked, banned or muted", "Or unmuted, or given a role: anything staff or a vote "
+                       "did. {player}, {by} and {reason} say who and why.",
+                       [F("action", "What happened", "choice", "any", options=["any", "kick", "ban", "unban", "mute",
+                                                                              "unmute", "role_added", "role_removed"])]),
+        "staff_command": ("A staff member uses a command", "A Mod's /kick, an Admin's /map and so on: {player} and "
+                          "{command}.", []),
+        "poll_decided": ("A poll ends", "{question} and {winner} say what was asked and what won.", []),
+        "panel_press": ("A player presses a panel's button", "From a panel you showed: leave these empty for any.",
+                        [F("panel", "Panel ID", "text", "", max=32), F("button", "Button", "text", "", max=32)]),
+        "server_phase": ("The server reaches a phase", "Lobby, voting, countdown, loading, in game or post game.",
+                         [F("phase", "Phase", "choice", "lobby", options=SERVER_PHASES)]),
+        "queue_called": ("A waiting player is called in", "Someone reached the front of the join queue.", []),
+        "refused": ("A player is turned away", "A ban, a VPN, a full server: {player} and {reason} say why.", []),
         "match_start": ("A match starts", "The game goes live.", []),
         "match_end": ("A match ends", "The game finishes (not a round break).", []),
         "before_match": ("Voting or loading begins", "Between matches, before the next one starts.", []),
@@ -123,6 +144,8 @@ CATALOG = {
                          [F("start", "From (HH:MM)", "text", "18:00", max=5), F("end", "To (HH:MM)", "text", "23:59",
                                                                                  max=5),
                           F("timezone", "Timezone", "text", "America/New_York", max=48)]),
+        "phase_is": ("The server is in a phase", "Right now.",
+                     [F("phase", "Phase", "choice", "in_game", options=SERVER_PHASES)]),
         "server_state": ("Another server is", "Up, down, full or empty right now.",
                          [F("server", "Server", "server", ""),
                           F("state", "State", "choice", "up", options=["up", "down", "full", "empty"])]),
@@ -140,6 +163,20 @@ CATALOG = {
                          F("message", "Message", "message", "")]),
         "tell_role": ("Message everyone with a role", "Privately, wherever they're playing.",
                       [F("role", "Role", "choice", "vip", options=list(ROLES)), F("message", "Message", "message", "")]),
+        "tell_staff": ("Message the staff privately", "Everyone online with a role that moderates (Mod, Admin or your "
+                       "own), wherever they're playing.", [F("message", "Message", "message", "")]),
+        "start_poll": ("Ask a poll", "Every player picks an answer; one shows at a time.",
+                       [F("question", "Question", "message", "Next map?"),
+                        F("answers", "Answers, by commas (2 to 6)", "text", "Guardian, Valhalla", max=200),
+                        F("seconds", "Open for (seconds)", "int", 30, min=10, max=300)]),
+        "show_panel": ("Show a panel", "A box on every player's screen, gone after the time you give.",
+                       [F("panel", "Panel ID (a short word)", "text", "notice", max=32),
+                        F("title", "Title", "message", "Heads up"), F("message", "Line of text", "message", ""),
+                        F("slot", "Where", "choice", "side", options=["side", "top", "centre"]),
+                        F("seconds", "Shown for (seconds)", "int", 30, min=5, max=3600)]),
+        "hide_panel": ("Hide a panel", "", [F("panel", "Panel ID", "text", "notice", max=32)]),
+        "set_joins": ("Pause or open joins", "Players already on stay. It holds until something changes it.",
+                      [F("joins", "New players", "choice", "open", options=["open", "closed", "queue"])]),
         "cancel_vote": ("Cancel the vote", "Stops the vote under way on that server.", []),
         "shuffle": ("Shuffle the teams", "Only while a match is being played.", []),
         "start_server": ("Start a stopped server", "Does nothing if it's already running.",
@@ -154,9 +191,11 @@ CATALOG = {
 TEMPLATE_HELP = ("{player} the player · {server} this server · {count} players on it · {max} its slots · {medal} the "
                  "medal · {kills} kill count · {weapon} · {victim} · {kd} K/D · {fps} frame rate · {map} · {mode} · "
                  "{admins} admins online · {target} a vote's target · {args} what followed a !command · {down} the "
-                 "server that went down · {time}")
+                 "server that went down · {time} · on 0.10: {by} who acted · {reason} · {action} · {command} · "
+                 "{question} · {winner} · {button} · {phase}")
 PLACEHOLDERS = {"player", "server", "count", "max", "medal", "kills", "map", "mode", "admins", "target", "args",
-                "down", "time", "weapon", "victim", "fps", "kd"}
+                "down", "time", "weapon", "victim", "fps", "kd", "by", "reason", "action", "command", "question",
+                "winner", "button", "phase"}
 
 # Starting points: copy one, change the words. Kept small and obviously useful.
 STARTERS = [
@@ -196,6 +235,21 @@ STARTERS = [
      "cooldown": 900},
     {"name": "Empty server: point people elsewhere", "when": {"type": "players_below", "count": 2},
      "then": [{"type": "say", "to": "this", "message": "Quiet here! Try our other servers."}], "cooldown": 1800},
+    {"name": "Moderation log to Discord", "when": {"type": "moderation", "action": "any"},
+     "then": [{"type": "discord", "webhook": "", "message": "{server}: {action} {player} by {by}. {reason}"}],
+     "cooldown": 0, "per_hour": 240},
+    {"name": "Staff commands to Discord", "when": {"type": "staff_command"},
+     "then": [{"type": "discord", "webhook": "", "message": "{server}: {player} used /{command} {args}"}],
+     "cooldown": 0, "per_hour": 240},
+    {"name": "Tell the staff when a vote kick passes", "when": {"type": "moderation", "action": "kick"},
+     "then": [{"type": "tell_staff", "message": "{player} was kicked on {server} by {by}."}],
+     "cooldown": 0, "per_hour": 120},
+    {"name": "Poll for the next map", "when": {"type": "server_phase", "phase": "post_game"},
+     "then": [{"type": "start_poll", "question": "Same again next?", "answers": "Yes, No", "seconds": 20}],
+     "cooldown": 600, "per_hour": 12},
+    {"name": "Rules panel for the lobby", "when": {"type": "server_phase", "phase": "lobby"},
+     "then": [{"type": "show_panel", "panel": "rules", "title": "Server rules", "message": "Be good. Type !admin for help.",
+               "slot": "side", "seconds": 45}], "cooldown": 900, "per_hour": 12},
     {"name": "VIP kick protection", "when": {"type": "vote", "kind": "kick"},
      "if": [{"type": "player_role", "role": "vip"}],
      "then": [{"type": "cancel_vote"}, {"type": "say", "to": "this", "message": "{target} is a VIP and can't be vote-kicked."}],
@@ -283,9 +337,32 @@ def _block(part, block, servers=()):
             for k in ("start", "end"):
                 if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", out[k]):
                     raise ValueError("Times look like 18:00 or 07:30.")
+    elif t == "start_poll":
+        answers = poll_answers(out["answers"])
+        if not 2 <= len(answers) <= 6:
+            raise ValueError("A poll has 2 to 6 answers, by commas.")
+    elif t in ("show_panel", "hide_panel") and not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", out["panel"]):
+        raise ValueError("A panel's ID is one short word, like rules.")
     elif t in ("players_between", "server_players") and out["min"] > out["max"]:
         raise ValueError("Player count: 'at least' is more than 'at most'.")
     return out
+
+
+def at_least_010(version) -> bool:
+    """Whether a server's version has the 0.10 events and commands. Unknown is no. (Kept here, with no imports: the
+    fleet's worker carries a copy of this file and rules_run.py alone.)"""
+    m = re.match(r"v?(\d+)\.(\d+)\.(\d+)", str(version or "").strip())
+    return bool(m) and tuple(map(int, m.groups())) >= (0, 10, 0)
+
+
+def poll_answers(text: str) -> list[str]:
+    return [a.strip() for a in text.split(",") if a.strip()]
+
+
+def needs_010(rule: dict) -> list[str]:
+    """What in a rule only a 0.10 server can do, in words: empty when it runs on any version."""
+    parts = [("when", rule["when"]), *(("if", c) for c in rule.get("if", [])), *(("then", a) for a in rule["then"])]
+    return [CATALOG[p][b["type"]][0] for p, b in parts if b["type"] in NEEDS_010]
 
 
 def validate(rule):
@@ -512,6 +589,9 @@ class Lobby:
     tally: dict = field(default_factory=dict)  # engine id -> [kills, deaths] this match
     blooded: bool = False  # first blood has been drawn this match
     fps: float | None = None  # the latest minute's frame rate, when something reports it
+    server_phase: str = ""  # 0.10: lobby, voting, countdown, loading, in_game, post_game
+    staff: dict = field(default_factory=dict)  # 0.10: player ID -> {"role", "rank"}, from `role list`
+    joining: dict = field(default_factory=dict)  # 0.10: a join names nobody yet: player ID -> when, until the roster does
 
 
 @dataclass
@@ -528,6 +608,38 @@ def fill(template: str, ctx: dict) -> str:
     return out[:MAX_LINE]
 
 
+def staff_of(data) -> dict:
+    """{player ID: {"role", "rank"}} from a `role list` reply; a holder reads "<id> <name> (added by …)"."""
+    out: dict = {}
+    for role in (data or {}).get("roles") or [] if isinstance(data, dict) else []:
+        for holder in role.get("holders") or [] if isinstance(role, dict) else []:
+            pid = str(holder).split(" ", 1)[0].lower()
+            if pid and role.get("rank", 0) > out.get(pid, {}).get("rank", -1):
+                out[pid] = {"role": str(role.get("name") or ""), "rank": role.get("rank", 0)}
+    return out
+
+
+def subject_words(subject: str) -> tuple[str, str | None]:
+    """A 0.10 vote's subject in the words rules use: ("kick", "Bravo"), ("endgame", None)..."""
+    s = subject.strip()
+    if s.lower().startswith("kick "):
+        return "kick", s[5:]
+    return {"end the round": "endround", "end the game": "endgame", "shuffle the teams": "shuffle"}.get(s.lower(), s.lower()), None
+
+
+VOTE_LINE = re.compile(r"vote (\d+) to (.+?) called by (.*?): (\d+) yes, (\d+) no, (\d+) needed of (\d+) voters, (\d+) s left \((\w+)\)")
+
+
+def vote_words(line: str) -> dict | None:
+    """status's vote on 0.10, a line of words, as the fields earlier versions gave."""
+    m = VOTE_LINE.match(line.strip())
+    if not m:
+        return None
+    kind, target = subject_words(m[2])
+    return {"id": int(m[1]), "kind": kind, "subject": m[2], "target": target, "caller": m[3], "yes": int(m[4]),
+            "no": int(m[5]), "needed": int(m[6]), "voters": int(m[7]), "seconds_left": int(m[8]), "state": m[9]}
+
+
 class Engine:
     def __init__(self, rules=(), roles=None, now=None):
         self.rules = list(rules)
@@ -542,8 +654,14 @@ class Engine:
     def lobby(self, name) -> Lobby:
         return self.lobbies.setdefault(name, Lobby(name))
 
-    def role_of(self, pid) -> list[str]:
-        return self.roles.get(str(pid), {}).get("roles", [])
+    def role_of(self, pid, server=None) -> list[str]:
+        """The roles saved here, and on 0.10 the one the server itself says they hold."""
+        roles = list(self.roles.get(str(pid), {}).get("roles", []))
+        for lob in [self.lobby(server)] if server else self.lobbies.values():
+            held = lob.staff.get(str(pid))
+            if held and held["role"] not in roles:
+                roles.append(held["role"])
+        return roles
 
     def admins(self, where=None) -> list[tuple[str, dict]]:
         """(server, player) for every online admin: the ADMIN role or the server's own admin flag."""
@@ -552,13 +670,23 @@ class Engine:
             if where is not None and name not in where or not lob.up:
                 continue
             for p in lob.roster.values():
-                if p.get("admin") is True or "admin" in self.role_of(p.get("id")):
+                if p.get("admin") is True or "admin" in self.role_of(p.get("id"), name):
                     out.append((name, p))
+        return out
+
+    def staff(self) -> list[tuple[str, dict]]:
+        """(server, player) for everyone online whose server role moderates: rank above VIP (0.10's `players` says
+        admin only for Admin and up, so this comes from `role list`), plus the admins."""
+        out = list(self.admins())
+        for name, lob in self.lobbies.items():
+            if lob.up:
+                out += [(name, p) for p in lob.roster.values() if lob.staff.get(p.get("id"), {}).get("rank", 0) > 10
+                        and (name, p) not in out]
         return out
 
     def with_role(self, role) -> list[tuple[str, dict]]:
         return [(n, p) for n, lob in self.lobbies.items() if lob.up for p in lob.roster.values()
-                if role in self.role_of(p.get("id"))]
+                if role in self.role_of(p.get("id"), n)]
 
     def context(self, server, **kw) -> dict:
         lob = self.lobby(server)
@@ -608,6 +736,11 @@ class Engine:
             out += self.fire("players_above", server, ctx, crossed=(before, lob.count))
             out += self.fire("players_below", server, ctx, crossed=(before, lob.count))
         vote = s.get("vote")
+        if isinstance(vote, str) and vote:  # 0.10: one line of words
+            vote = vote_words(vote)
+            vote = vote if vote and vote["state"] == "open" else None  # a decided one stays on screen 4 s
+        if isinstance(s.get("server_phase"), str):
+            lob.server_phase = s["server_phase"]
         if isinstance(vote, dict) and vote.get("id") is not None and vote.get("id") != lob.vote_id:
             seen = isinstance(lob.vote_id, tuple) and self.clock() - lob.vote_id[1] < 60
             lob.vote_id = vote.get("id")
@@ -619,15 +752,22 @@ class Engine:
             lob.vote_id = None
         return out
 
-    def players(self, server, players) -> None:
+    def server_roles(self, server, data) -> None:
+        """A `role list` reply (0.10): who holds what, for conditions and messages."""
+        self.lobby(server).staff = staff_of(data)
+
+    def players(self, server, players) -> list[Firing]:
+        """The roster. It returns the join rules that were waiting for a name: 0.10's join event comes before the
+        player's name is known."""
         lob = self.lobby(server)
         if not isinstance(players, list):
-            return
+            return []
         roster = {}
         for p in players[:128]:
             if not isinstance(p, dict):
                 continue
-            ident = p.get("engine_id", p.get("number"))
+            ident = p.get("engine_id")  # 0.10 says null for a player not in a game yet
+            ident = p.get("number") if ident is None else ident
             name = clean(str(p.get("name") or ""))[:40]
             if ident is None or not name:
                 continue
@@ -638,6 +778,15 @@ class Engine:
             lob.chains.pop(gone, None)
         lob.roster, lob.roster_at = roster, self.clock()
         lob.count = len(roster) if lob.count is None else lob.count
+        out = []
+        for pid, since in list(lob.joining.items()):
+            hit = self.find(lob, pid)
+            if hit and hit[1]["name"]:
+                del lob.joining[pid]
+                out += self.fire("join", server, self.context(server, player=hit[1]["name"]), player_id=pid)
+            elif self.clock() - since > JOIN_WAIT:
+                del lob.joining[pid]  # they left, or never got a name: nobody to welcome
+        return out
 
     def find(self, lob: Lobby, value) -> tuple[str, dict] | None:
         """A roster entry by engine id, player ID or name."""
@@ -661,6 +810,12 @@ class Engine:
         if kind == "join":
             pid = str(ev.get("player_id") or ev.get("id") or "")
             name = clean(str(ev.get("name") or ""))[:40]
+            if not name and pid:  # 0.10: the name comes with the roster
+                hit = self.find(lob, pid)
+                if not hit:
+                    lob.joining[pid] = self.clock()
+                    return out
+                name = hit[1]["name"]
             return self.fire("join", server, self.context(server, player=name), player_id=pid)
         if kind == "leave":
             pid = str(ev.get("player_id") or ev.get("id") or "")
@@ -669,6 +824,7 @@ class Engine:
             if hit:
                 lob.sprees.pop(hit[0], None)
                 lob.chains.pop(hit[0], None)
+            lob.joining.pop(pid, None)
             return self.fire("leave", server, self.context(server, player=name), player_id=pid)
         if kind == "chat":
             text = str(ev.get("text") or "").strip()
@@ -689,9 +845,57 @@ class Engine:
             name = hit[1]["name"] if hit else clean(str(ev.get("name") or ""))[:40]
             return self.fire("medal", server, self.context(server, player=name, medal=medal.title(), kills=""),
                              player_id=hit[1]["id"] if hit else "", medal=medal)
+        if kind in MODERATION:
+            pid = str(ev.get("id") or ev.get("player_id") or "")
+            hit = self.find(lob, pid) or self.find(lob, ev.get("name"))
+            name = clean(str(ev.get("name") or (hit[1]["name"] if hit else "") or ev.get("target") or pid[:12]))[:40]
+            action = kind + (" (shadow)" if ev.get("shadow") else "")
+            return self.fire("moderation", server, self.context(
+                server, player=name, by=clean(str(ev.get("by") or "the console"))[:60], reason=clean(str(ev.get("reason") or ev.get("role") or ""))[:120],
+                action=action), player_id=pid, moderation=kind)
+        if kind == "staff":
+            return self.fire("staff_command", server, self.context(
+                server, player=clean(str(ev.get("name") or ""))[:40], command=clean(str(ev.get("command") or ""))[:24],
+                args=clean(" ".join(map(str, ev.get("args") or [])))[:120]), player_id=str(ev.get("id") or ""))
+        if kind == "poll":
+            if ev.get("state") != "decided":
+                return out
+            answers, winner = ev.get("answers") or [], ev.get("winner")
+            word = "No answer"
+            if isinstance(winner, int) and not isinstance(winner, bool) and 0 <= winner < len(answers) \
+                    and isinstance(answers[winner], dict):
+                word = clean(str(answers[winner].get("answer") or ""))[:60]
+            return self.fire("poll_decided", server, self.context(
+                server, question=clean(str(ev.get("question") or ""))[:120], winner=word))
+        if kind == "panel_press":
+            name, button = clean(str(ev.get("name") or ""))[:40], clean(str(ev.get("button") or ""))[:32]
+            return self.fire("panel_press", server, self.context(server, player=name, button=button),
+                             player_id=str(ev.get("id") or ""), panel=str(ev.get("panel") or ""), button=button)
+        if kind == "server_phase":
+            phase = str(ev.get("phase") or "")
+            if phase == lob.server_phase:
+                return out
+            lob.server_phase = phase
+            return self.fire("server_phase", server, self.context(server, phase=phase.replace("_", " ")), phase=phase)
+        if kind == "queue":
+            pid = str(ev.get("called") or "")
+            hit = self.find(lob, pid)
+            return self.fire("queue_called", server, self.context(server, player=hit[1]["name"] if hit else pid[:12]),
+                             player_id=pid)
+        if kind == "refused":
+            pid = str(ev.get("id") or "")
+            hit = self.find(lob, pid)
+            name = clean(str(ev.get("name") or (hit[1]["name"] if hit else "") or pid[:12]))[:40]
+            return self.fire("refused", server, self.context(server, player=name, reason=clean(str(ev.get("reason") or ""))[:120]),
+                             player_id=pid)
         if kind == "vote":
             action = str(ev.get("action") or "")
             text = str(ev.get("text") or "")
+            if ev.get("state") is not None:  # 0.10: {"state": "called", "subject": "kick Bravo", "caller": "Alpha"}
+                if ev["state"] != "called":
+                    return out
+                vkind, target = subject_words(str(ev.get("subject") or ""))
+                return self.vote_started(server, vkind, target, None, clean(str(ev.get("caller") or ""))[:40], via_event=True)
             m = re.search(r"called a vote to (\w+)(?: (.+))?", text)
             if action == "start" or m:
                 vkind = str(ev.get("vote_type") or (m[1] if m else ""))
@@ -828,6 +1032,13 @@ class Engine:
             return before is not None and before < w["fps"] <= now
         if t == "vote":
             return w["kind"] == "any" or facts.get("vote") == w["kind"]
+        if t == "moderation":
+            return w["action"] == "any" or facts.get("moderation") == w["action"]
+        if t == "panel_press":
+            return (not w["panel"] or facts.get("panel") == w["panel"]) and \
+                (not w["button"] or str(facts.get("button", "")).casefold() == w["button"].casefold())
+        if t == "server_phase":
+            return facts.get("phase") == w["phase"]
         if t in ("players_above", "players_below"):
             before, now = facts.get("crossed", (None, None))
             if before is None or now is None:
@@ -845,8 +1056,10 @@ class Engine:
         if t == "no_admin_online":
             return not self.admins()
         if t == "player_role":
-            roles = self.role_of(facts.get("player_id"))
+            roles = self.role_of(facts.get("player_id"), server)
             return (not roles) if c["role"] == "none" else c["role"] in roles
+        if t == "phase_is":
+            return lob.server_phase == c["phase"]
         if t == "player_kd":
             hit = self.find(lob, facts.get("player_id"))
             k, d = lob.tally.get(hit[0], [0, 0]) if hit else (0, 0)
@@ -922,6 +1135,13 @@ class Step:
             return f"Say on {self.server}: {self.args[1]}"
         if cmd == "tell":
             return f"Tell {self.text} on {self.server}: {self.args[2]}"
+        if cmd == "poll":
+            return f"Ask on {self.server}: {self.args[1]} ({' / '.join(self.args[2:-1])}, {self.args[-1]} s)"
+        if cmd == "panel":
+            return f"Show panel {self.args[2]} on {self.server}: {self.args[3]}" if self.args[1] == "show" else \
+                f"Hide panel {self.args[2]} on {self.server}"
+        if cmd == "joins":
+            return f"New players on {self.server}: {self.args[1]}"
         return {"cancelvote": f"Cancel the vote on {self.server}", "shuffle": f"Shuffle teams on {self.server}"}.get(
             cmd, f"{cmd} on {self.server}")
 
@@ -952,6 +1172,19 @@ def plan(engine: Engine, firing: Firing) -> list[Step]:
             for server, p in engine.with_role(a["role"]):
                 if p.get("id"):
                     steps.append(Step("rcon", server, ("tell", p["id"], msg), text=p["name"]))
+        elif t == "tell_staff":
+            for server, p in engine.staff():
+                if p.get("id"):
+                    steps.append(Step("rcon", server, ("tell", p["id"], msg), text=p["name"]))
+        elif t == "start_poll":
+            steps.append(Step("rcon", here, ("poll", fill(a["question"], ctx), *poll_answers(a["answers"]), str(a["seconds"]))))
+        elif t == "show_panel":
+            steps.append(Step("rcon", here, ("panel", "show", a["panel"], fill(a["title"], ctx), f"line:{msg}",
+                                             f"slot:{a['slot']}", f"timeout:{a['seconds']}s")))
+        elif t == "hide_panel":
+            steps.append(Step("rcon", here, ("panel", "hide", a["panel"])))
+        elif t == "set_joins":
+            steps.append(Step("rcon", here, ("joins", a["joins"])))
         elif t == "cancel_vote":
             steps.append(Step("rcon", here, ("cancelvote",)))
         elif t == "shuffle":
@@ -981,4 +1214,35 @@ def sample(engine: Engine, rule: dict, server: str) -> Firing:
         ctx.update(weapon=w.get("weapon", "sniper rifle"), victim="ExampleVictim", kills=w.get("count", 1), kd="2.50")
     elif w["type"] in ("fps_below", "fps_recovered"):
         ctx.update(fps=w["fps"] - 1 if w["type"] == "fps_below" else w["fps"])
+    elif w["type"] == "moderation":
+        ctx.update(action="kick" if w["action"] == "any" else w["action"], by="ExampleAdmin", reason="example reason")
+    elif w["type"] == "staff_command":
+        ctx.update(command="kick", args="ExampleTarget griefing")
+    elif w["type"] == "poll_decided":
+        ctx.update(question="Next map?", winner="Guardian")
+    elif w["type"] == "panel_press":
+        ctx.update(button=w["button"] or "OK")
+    elif w["type"] == "server_phase":
+        ctx.update(phase=w["phase"].replace("_", " "))
+    elif w["type"] == "refused":
+        ctx.update(reason="example reason")
     return Firing(rule, server, {**ctx, "_player_id": "0" * 64})
+
+
+PLAYER_FACTS = {"player_role", "player_kd"}  # conditions about the player who set the rule off
+
+
+def explain(engine: Engine, rule: dict, server: str, version=None) -> list[tuple[str, bool | None]]:
+    """The sandbox's verdict on a rule, right now on this server: (what, true, false or None when only a real player can
+    tell). Limits and cooldowns aren't counted: a rule at rest always passes them."""
+    out: list[tuple[str, bool | None]] = []
+    needs = needs_010(rule)
+    if needs:
+        out.append((f"This server runs Project Reclaimer 0.10 or newer (needed for: {needs[0]})", at_least_010(version)))
+    if rule["servers"] != "all":
+        out.append((f"It watches {', '.join(rule['servers'])}", server in rule["servers"]))
+    ctx = engine.context(server)
+    for c in rule["if"]:
+        words = describe_block("if", c)
+        out.append((words, None if c["type"] in PLAYER_FACTS else engine.condition(c, server, ctx, {})))
+    return out
