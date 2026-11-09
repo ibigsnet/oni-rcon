@@ -15,6 +15,7 @@ from collections import deque
 from . import rules as R
 from .schedule import atomic_json
 
+NEEDS_010_COMMANDS = {"poll", "panel", "joins"}
 SAY_PER_MINUTE = 20  # per server, across every rule: a misjudged rule can't flood the chat
 DISCORD_GAP = 2.0  # seconds between Discord posts (Discord allows about 30 a minute per webhook)
 HISTORY = 200
@@ -82,7 +83,7 @@ class Runner:
             self.engine.rules = []
             return
         self.error = ""
-        if any("vip" in p["roles"] for p in roles.values()):
+        if any("vip" in p["roles"] for p in roles.values()):  # 0.9: VIPs of our own; 0.10's VIP has vote.exempt too
             rules = [R.validate(VIP_GUARD), *rules]
         self.engine.rules, self.engine.roles = rules, roles
 
@@ -98,7 +99,17 @@ class Runner:
 
     def on_players(self, server, data):
         players = data.get("players") if isinstance(data, dict) else data
-        self.engine.players(server, players)
+        self.carry_out(self.engine.players(server, players) or [])
+
+    def on_roles(self, server, data):
+        """A `role list` reply (0.10): rules read who holds what from the server itself."""
+        self.engine.server_roles(server, data)
+
+    @property
+    def wants_roles(self) -> bool:
+        return any(r["enabled"] and (any(c["type"] in ("player_role", "admin_online", "no_admin_online") for c in r["if"])
+                                     or any(a["type"] in ("tell_admins", "tell_role", "tell_staff") for a in r["then"]))
+                   for r in self.engine.rules)
 
     def on_inventory(self, states: dict):
         """service -> container state ('running', 'exited', ...): stopped on purpose isn't an outage."""
@@ -147,6 +158,8 @@ class Runner:
                 if len(window) >= SAY_PER_MINUTE:
                     return f"{step.words()}: skipped, {SAY_PER_MINUTE} messages a minute is the limit"
                 window.append(now)
+            if step.args[0] in NEEDS_010_COMMANDS and not R.at_least_010((getattr(client, "info", None) or {}).get("version")):
+                return f"{step.words()}: skipped, this server's version is before 0.10"
             if step.args[0] == "shuffle":
                 fresh = await client.call("status")
                 if (fresh.get("data") or {}).get("phase") not in ("playing", "in_game"):

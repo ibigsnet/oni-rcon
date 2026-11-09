@@ -23,6 +23,7 @@ from .safety import clean
 
 ACTIONS = {'broadcast', 'shuffle', 'start', 'stop', 'restart', 'update-game', 'update-console'}
 EVENTS = {'before_match', 'after_match', 'match_start'}
+from . import rules as R
 from .schedule import PHASES, ROOT, MatchEvents, atomic_json, cron_due, cron_fields  # noqa: F401 (re-exported)
 WRAPPER = '/usr/local/bin/oni'
 
@@ -168,6 +169,7 @@ class Worker:
         self.jobs = []
         self.pending = set()
         self.action_lock = asyncio.Lock()
+        self.roles_at = {}  # lobby -> when its `role list` was last read (0.10)
         self.stopping = False
         # Rules (rules.py) share these connections; they need one to every lobby while any rule is on.
         self.rules = Runner(RuleStore(store.root), self.clients, start=self.start_lobby, poster=poster or post_discord)
@@ -374,6 +376,12 @@ class Worker:
                     roster = await client.call('players', timeout=3)
                     if roster.get('ok'):
                         self.rules.on_players(name, roster.get('data'))
+                    if self.rules.wants_roles and R.at_least_010((getattr(client, 'info', None) or {}).get('version')) \
+                            and time.time() - self.roles_at.get(name, 0) >= 30:
+                        self.roles_at[name] = time.time()  # 0.10's `players` says admin only for Admin and up
+                        roles = await client.call('role', 'list', timeout=3)
+                        if roles.get('ok'):
+                            self.rules.on_roles(name, roles.get('data'))
             else:
                 self.trackers[name] = MatchEvents()
         except (OSError, ValueError, TimeoutError, ConnectionError):

@@ -83,7 +83,7 @@ def test_generic_console_hides_the_share_address_until_x(monkeypatch):
         text = plain(app.query_one("#sitrep"))
         share, link = line(text, "SHARE / JOIN"), line(text, "CONSOLE LINK")
         assert "███" in share and JOIN not in text and "hidden" in share
-        assert app.cur.server.where in link and "RCON · not for players" in link and "v0.9.7-demo" in link
+        assert app.cur.server.where in link and "RCON · not for players" in link and "v0.10.0-demo" in link
         assert "UPLINK" not in text and "PUBLIC ADDRESS" not in text
         await pilot.press("c")  # hidden: nothing copied, and the toast says why
         await pilot.pause()

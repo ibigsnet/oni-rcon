@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import re
 import threading
 import time
 from pathlib import Path
@@ -32,6 +33,12 @@ WEAPONS = ["battle rifle", "sniper rifle", "shotgun", "energy sword", "frag gren
 CHAT = ["gg", "nice shot", "who has sniper?", "lag on blue base", "rematch?", "ez", "push top mid",
         "anyone up for MLG after?", "wp all"]
 CALLS = ["admin someone is spawn camping", "is there a mod on? red is hacking"]  # raise the console's alert
+DEMO_VERSION = "0.10.0-demo"
+DEMO_EVERYONE = ["vote.call.kick", "vote.call.endround", "vote.call.endgame", "vote.call.shuffle"]
+DEMO_ROLES = [{"name": "host", "title": "HOST", "rank": 40, "can": ["*"], "ban_minutes": 10080},
+              {"name": "admin", "title": "ADMIN", "rank": 30, "can": ["kick", "ban.temp", "ban.perm", "mute.text"], "ban_minutes": 10080},
+              {"name": "mod", "title": "MOD", "rank": 20, "can": ["kick", "ban.temp", "mute.text", "mute.voice", "mute.shadow"], "ban_minutes": 60},
+              {"name": "vip", "title": "VIP", "rank": 10, "can": ["vote.exempt", "bypass.queue"], "ban_minutes": 0}]
 SERVERS = [("Demo Ops | Slayer", 16, 9), ("Demo Ops | Big Team Battle", 32, 17), ("Demo Ops | MLG 4v4", 8, 6)]
 
 
@@ -53,6 +60,8 @@ class Fake:
         self.allowed = [{"target": "192.0.2.44", "note": "mobile hotspot"}]
         self.kicked = {}  # player ID -> name, until a pardon
         self.vote, self.vote_at = None, 0.0
+        self.version = DEMO_VERSION
+        self.roles, self.role_names, self.panels, self.poll_now, self.joins = {}, {}, {}, None, "open"  # what 0.10 adds
         self.hot = (None, 0.0)  # the last killer and when: some go on a roll, for multi-kills
 
     def _player(self, name: str) -> dict:
@@ -108,7 +117,7 @@ class Fake:
                 await ws.send(json.dumps({"type": "auth", "ok": False, "error": "Wrong password."}))
                 return
             await ws.send(json.dumps({"type": "auth", "ok": True, "protocol": 1, "server": self.status["name"],
-                                      "version": "0.9.7-demo"}))
+                                      "version": self.version}))
             self.clients.add(ws)
             async for raw in ws:
                 msg = json.loads(raw)
@@ -132,6 +141,79 @@ class Fake:
             "table": {"table": "ip2asn", "rows": 512340, "fetched_at": t - 2 * 86400, "asns": 212, "announced": 3854,
                       "blocks": 3854}}
 
+    async def features(self, cmd: str, args: list[str], by: str) -> dict:
+        """What 0.10 adds, answering as a real 0.10 server does (`role list` and the rest were read from one), so the
+        console's menus can be tried on these pretend servers without touching anything real."""
+        ok = lambda text, data=None: {"ok": True, "text": text, "data": data}
+        bad = lambda text: {"ok": False, "text": text}
+        by_rcon = f"{by} (RCON)"
+        if cmd == "role":
+            if args[:1] in ([], ["list"]):
+                data = {"devs_as_vip": False, "groups": {"everyone": DEMO_EVERYONE, "members": []}, "roles": [
+                    {**r, "holders": [f"{i} {self.role_names.get(i, '')} (added by {by_rcon})".replace("  ", " ")
+                                      for i, role in self.roles.items() if role == r["name"]]} for r in DEMO_ROLES]}
+                return ok("the roles: see data", data)
+            if args[0] == "devs":
+                return ok("devs_as_vip is off.")
+            if args[0] == "add" and len(args) == 3:
+                p = self._find(args[1])
+                pid = p["player_id"] if p else args[1].lower()
+                if not p and not re.fullmatch(r"[0-9a-f]{32,64}", pid):
+                    return bad(f"No player is named '{args[1]}'; players lists them.")
+                if args[2] not in [r["name"] for r in DEMO_ROLES]:
+                    return bad(f"No role is named '{args[2]}': host, admin, mod, vip.")
+                self.roles[pid], self.role_names[pid] = args[2], p["name"] if p else ""
+                await self.emit("role_added", name=self.role_names[pid], id=pid, role=args[2], by=by_rcon)
+                return ok(f"{self.role_names[pid] or pid} holds {args[2].upper()} on every server sharing the ban list now.")
+            if args[0] == "remove" and len(args) == 2:
+                p = self._find(args[1])
+                pid = p["player_id"] if p else args[1].lower()
+                if pid not in self.roles:
+                    return bad(f"The console gave {args[1]} no role; role lists who it did.")
+                role = self.roles.pop(pid)
+                name = self.role_names.pop(pid, "")
+                await self.emit("role_removed", name=name, id=pid, role=role, by=by_rcon)
+                return ok(f"{name or pid} no longer holds {role} on any server sharing the ban list.")
+            return bad("Usage: role [list | add <player> <role> | remove <player> | devs [on|off]]")
+        if cmd == "mutes":
+            return ok("\n".join(f"{p['player_id']} {p['name']}" for p in self.players if p.get("muted")) or "No mutes.")
+        if cmd == "poll":
+            if not args:
+                return ok(json.dumps(self.poll_now), self.poll_now) if self.poll_now else ok("No poll yet.")
+            if args == ["cancel"]:
+                if not self.poll_now or self.poll_now.get("decided"):
+                    return bad("No poll is under way.")
+                self.poll_now = None
+                return ok("Poll cancelled.")
+            seconds = int(args[-1]) if args[-1].isdigit() and len(args) > 3 else 30
+            answers = args[1:-1] if args[-1].isdigit() and len(args) > 3 else args[1:]
+            if not 2 <= len(answers) <= 6:
+                return bad("A poll has 2 to 6 answers.")
+            self.poll_now = {"answers": [{"answer": a, "command": None} for a in answers], "by": by, "question": args[0],
+                             "counts": [random.randint(0, 4) for _ in answers], "decided": False, "id": 1, "seconds_left": seconds}
+            await self.emit("poll", state="opened", id=1, question=args[0], answers=answers, by=by)
+            return ok(f"Poll opened: {args[0]}")
+        if cmd == "panel":
+            if args[:1] in ([], ["list"]):
+                return ok("\n".join(f"{i}: {t} (1 lines)" for i, t in self.panels.items()) or "No panels show.")
+            if args[0] == "show" and len(args) > 2:
+                self.panels[args[1]] = args[2]
+                return ok(f"Panel {args[1]} shows.")
+            if args[0] == "hide" and len(args) > 1:
+                return ok(f"Panel {args[1]} hidden.") if self.panels.pop(args[1], None) else bad(f"No panel {args[1]}.")
+            return bad("Usage: panel show|update|hide|list")
+        if cmd == "joins":
+            if args and args[0] in ("open", "closed", "queue"):
+                self.joins = args[0]
+            data = {"called": [], "join_gates": [], "joins": self.joins, "open_now": self.joins != "closed", "phase": "in_game", "queue": []}
+            return ok(f"Joins {self.joins}.", data)
+        if cmd == "queue":
+            return ok("The queue is empty.", {"queue": [], "queue_mode": "play"})
+        return ok("demo health", {"version": DEMO_VERSION, "uptime_seconds": 3600, "phase": "in_game", "players": len(self.players),
+                                  "max_players": self.status["max_players"], "frame_rate": 60.0, "frame_ms_p50": 16.6,
+                                  "frame_ms_p99": 18.0, "frame_ms_max": 22.0, "upload_bytes_per_second": 30000.0,
+                                  "download_bytes_per_second": 12000.0})
+
     async def command(self, cmd: str, args: list[str], by: str) -> dict:
         ok = lambda text, data=None: {"ok": True, "text": text, **({"data": data} if data is not None else {})}
         no = lambda text: {"ok": False, "text": text}
@@ -147,6 +229,8 @@ class Fake:
                  "online": False},
                 *({"name": p["name"], "player_id": p["player_id"], "source": "rcon", "online": True}
                   for p in self.players if p.get("admin"))])
+        if cmd in ("role", "moderator", "mutes", "poll", "panel", "joins", "health", "queue"):
+            return await self.features(cmd, args, by)
         if cmd in ("players", "status", "maps", "modes", "bans", "vpn", "vote", "nextmap"):
             return ok(f"{cmd}: see data", {
                 "players": lambda: {"count": len(self.players), "max_players": self.status["max_players"],
@@ -439,12 +523,13 @@ class FakeHost:
 
 
 async def serve_fakes(password: str = "demo", tick: bool = True, specs=SERVERS, content_dirs: list | None = None,
-                      host: FakeHost | None = None) -> tuple[list[int], list]:
+                      host: FakeHost | None = None, version: str = DEMO_VERSION) -> tuple[list[int], list]:
     """Start the fake servers in the running loop; returns (ports, handles to keep alive). A `host` gets them
     attached, and its timeline started (unless it says it'll be started by hand)."""
     ports, keep, fakes = [], [], []
     for i, (name, max_players, crowd) in enumerate(specs):
         fake = Fake(name, password, max_players, crowd, str(content_dirs[i]) if content_dirs else "")
+        fake.version = version
         server = await serve(fake.handler, "127.0.0.1", 0)
         ports.append(server.sockets[0].getsockname()[1])
         fakes.append(fake)

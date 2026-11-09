@@ -1,5 +1,11 @@
 # IBIGS Reclaimer terminal
 
+## Project Reclaimer 0.10 (next release)
+
+SERVER FEATURES (Ctrl+T, F12) and the rules' 0.10 blocks: [docs/RECLAIMER-010.md](docs/RECLAIMER-010.md). Settings save through a
+new `oni config` command in the `oni` wrapper, which uses this package's `serverconf` for the edit; without it the screens
+show the lines to paste, so the console and the wrapper can ship in either order.
+
 ## SHARE / JOIN address on F3 (0.9.0+ibigs.29)
 
 A customer posted the sitrep's UPLINK line as his server's address. That line was the console's own RCON connection

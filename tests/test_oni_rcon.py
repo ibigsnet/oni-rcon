@@ -242,7 +242,7 @@ def test_reclaimer_drift():
     assert mixed_versions([("F1", "0.9.18"), ("F2", "v0.9.18"), ("F3", "?")]) == ""
 
     async def go():
-        ports, keep = await serve_fakes(tick=False)  # they report 0.9.7-demo
+        ports, keep = await serve_fakes(tick=False, version="0.9.7-demo")
         app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False,
                      reclaimer=lambda: "0.9.18")
         async with app.run_test(size=(160, 48)) as pilot:

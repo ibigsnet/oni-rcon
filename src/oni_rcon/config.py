@@ -23,6 +23,9 @@ class Server:
     password_env: str = ""
     password_command: str | list[str] = ""
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
+    # IBIGS 2026-11-09: the server's game folder on this machine (dedicated.toml `game`), for F9's game type upgrade:
+    # 0.10 reads JSON game types from its halo3/game_variants too. Empty: only content_dir is checked.
+    game_dir: str = ""
     # IBIGS 2026-10-17: the server's data folder on this machine. Its newest rcon-host.key lets oni take the spot
     # Reclaimer keeps for a console on the server's own machine, so it gets in even when 4 tools fill the rest.
     host_key_dir: str = ""

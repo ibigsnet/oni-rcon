@@ -4,6 +4,15 @@ This is IBIGS's public fork of [viik2k/oni-rcon](https://github.com/viik2k/oni-r
 behind the IBIGS fleet and every IBIGS customer server. `main` is the maintained source. Customer servers don't
 pull from GitHub: they get signed releases through IBIGS's update channel (**F9** → update now, or the nightly run).
 
+### Next release: Project Reclaimer 0.10 (not released yet)
+
+On `ibigs/reclaimer-0.10`. **Ctrl+T** opens SERVER FEATURES on a 0.10 server: roles, mutes and shadow mutes, polls, panels,
+the join queue and gates, vote rules, announcements, player models, Forge objects, co-op network and what the server can
+host. F8 RULES gains 0.10's events and actions, and TEST says why a rule would or wouldn't fire. Fixes for how 0.10 answers:
+the admins list, join and vote rules, F1 before a game starts. **F9 → Upgrade old game types** (and
+`oni-rcon --gametypes`) finds the game types 0.10 skips, such as `rounds.teams: 3`, and upgrades the ones with a safe
+value, keeping each original. See [docs/RECLAIMER-010.md](docs/RECLAIMER-010.md).
+
 ### Latest releases
 
 - **0.9.0+ibigs.29** (30 Oct): brings in upstream oni-rcon (desktop 1.10.0 main + staging): **F4** kicked players with

@@ -52,11 +52,13 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
 from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
-from .content import CATALOG_SORT, catalog_items, forge_entry, forge_index, items_for
+from .content import old_mode_hint, CATALOG_SORT, catalog_items, forge_entry, forge_index, items_for
 from .variants import clash_note
 from .install import SSH_OPTS, InstallError, place, plan, size_words, target_for, vet as install_vet
 from .pings import JOIN_PING, follow_join_pings
 from . import plugins as pl
+from .rules import staff_of
+from .serverconf import supports
 from .update import behind, mixed_versions
 from .plugins import ACTION_TIMEOUT, VIEW_TIMEOUT, Manifest, PluginError, PluginSetup, server_name
 from .medals import Medals
@@ -90,15 +92,19 @@ BAN_TIMES = [("Permanent", ""), ("30 minutes", "30m"), ("2 hours", "2h"), ("12 h
 MUTE_TIMES = [("Until restart", ""), ("10 minutes", "10m"), ("1 hour", "1h"), ("12 hours", "12h"), ("1 day", "1d")]
 COMMANDS = ["status", "players", "say", "tell", "kick", "ban", "banip", "unban", "bans", "vpn", "vpnallow", "vpnrevoke",
             "mute", "unmute", "endround", "endgame", "maps", "modes", "map", "mode", "load", "nextmap", "servername",
-            "password", "maxping", "teamcount", "shuffle", "team", "vote", "startvote", "passvote", "cancelvote", "pardon", "admin", "help"]
+            "password", "maxping", "teamcount", "shuffle", "team", "vote", "startvote", "passvote", "cancelvote", "pardon", "admin", "help",
+            "role", "mutes", "poll", "panel", "joins", "queue", "health", "bots", "immune", "moderator", "votegate", "reload"]
 
 CATS = {"chat": WHITE, "combat": RED, "traffic": CYAN, "moderation": AMBER, "ops": GREY}
 KIND = {"chat": "chat", "kill": "combat", "join": "traffic", "leave": "traffic", "refused": "traffic",
         "kick": "moderation", "ban": "moderation", "unban": "moderation", "mute": "moderation",
         "unmute": "moderation", "cheat": "moderation", "pardon": "moderation", "admin_added": "moderation",
-        "admin_removed": "moderation"}
+        "admin_removed": "moderation", "role_added": "moderation", "role_removed": "moderation", "staff": "moderation",
+        "command": "moderation", "vote_gate": "moderation", "poll": "moderation", "panel_press": "ops", "queue": "traffic",
+        "bot_join": "traffic", "bot_leave": "traffic", "server_phase": "ops"}
 GLYPH = {"health": "⚠", "chat": "»", "kill": "✕", "join": "▲", "leave": "▼", "refused": "⊘", "kick": "◆", "ban": "■", "unban": "□", "pardon": "↺",
-         "admin_added": "✦", "admin_removed": "✧", "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "control": "•", "uplink": "≡", "forge": "⬢"}
+         "admin_added": "✦", "admin_removed": "✧", "mute": "◈", "unmute": "◇", "cheat": "!", "vote": "◉", "role_added": "✦", "role_removed": "✧", "poll": "◉", "staff": "◆",
+         "command": "»", "queue": "▲", "control": "•", "uplink": "≡", "forge": "⬢"}
 STATE = {"online": ("◉", GREEN), "connecting": ("◌", AMBER), "offline": ("○", RED), "denied": ("⊘", RED)}
 SPIN = "◐◓◑◒"
 PANE_FOCUS = {"assets": "#players", "intercepts": "#feed", "operations": "#op-load", "blacklist": "#bans",
@@ -150,7 +156,7 @@ OP_GROUPS = [("MATCH", ["load", "map", "mode", "nextmap", "endround", "endgame"]
              ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect", "playlists"])]
 PLAYER_OPS = [("tell", "TELL", "t"), ("kick", "KICK", "k"), ("ban", "BAN", "b"), ("mute", "MUTE", "m"),
               ("team", "TEAM", "j"), ("vpnallow", "VPN OK", "v"), ("admin", "MAKE ADMIN", "p"),
-              ("copy", "COPY ID", "y")]
+              ("role", "ROLE", "e"), ("copy", "COPY ID", "y")]
 
 # What each control does, in plain words: shown when the mouse rests on it.
 TIPS = {
@@ -184,6 +190,7 @@ TIPS = {
     "pl-kick": "Remove them from the game. They can rejoin after a short wait.  Key: k",
     "pl-ban": "Keep them out, for a while or for good.  Key: b",
     "pl-mute": "Silence their text and voice chat (or lift it).  Key: m",
+    "pl-role": "Give them a role on this server, or take it away (Project Reclaimer 0.10 and newer).  Key: e",
     "pl-team": "Move them to another team.  Key: j",
     "pl-vpnallow": "Let them join through a VPN.  Key: v",
     "pl-admin": "Make them an admin (or take it back), on every server sharing the ban list.  Key: p",
@@ -446,7 +453,9 @@ def admin_rows(a: dict, players: list) -> list[dict]:
     desktop does."""
     online = {str(pick(p, "player_id", "id", default="")) for p in players}
     rows = []
-    for e in a.get("admins") or a.get("entries") or a.get("list") or []:
+    # the server's reply: IDs in dedicated.toml ("configured") and the console's own ("added"), as 0.10 answers
+    fixed = [{"id": x, "source": "dedicated.toml"} for x in a.get("configured") or []]
+    for e in fixed + list(a.get("added") or []) + list(a.get("admins") or a.get("entries") or a.get("list") or []):
         e = e if isinstance(e, dict) else {"id": e}
         pid, name = str(pick(e, "player_id", "id", default="")), str(pick(e, "name", default=""))
         if not (pid or name):
@@ -635,6 +644,47 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
         if ev.get("by"):
             line.append("  by ", DIM)
             line.append(str(ev["by"]))
+    elif kind in ("role_added", "role_removed"):
+        line.append("ROLE", AMBER)
+        line.append(f"  {ev['name'] if ev.get('name') else redact_text(clip_id(ev.get('id', '?')), redact)}", WHITE)
+        line.append(f"  {'now' if kind == 'role_added' else 'no longer'} {str(ev.get('role', '?')).upper()}", DIM)
+        if ev.get("by"):
+            line.append("  by ", DIM)
+            line.append(str(ev["by"]))
+    elif kind == "kick" and str(ev.get("by", "")).startswith("vote ("):  # 0.10: by "vote (<who called it>)"
+        line.append("KICK", CATS[cat])
+        line.append(f"  {who(pick(ev, 'name'), names)}", WHITE)
+        line.append("  by a vote called by ", DIM)
+        line.append(str(ev["by"])[6:].rstrip(")"))
+        if ev.get("reason"):
+            line.append(f"  {redact_text(str(ev['reason']), redact)}", DIM)
+    elif kind == "mute":
+        line.append("SHADOW MUTE" if ev.get("shadow") else "MUTE", CATS[cat])
+        line.append(f"  {who(pick(ev, 'name'), names)}", WHITE)
+        line.append(f"  {ev.get('kind') or 'all'}", DIM)
+        if ev.get("by"):
+            line.append("  by ", DIM)
+            line.append(str(ev["by"]))
+        if ev.get("reason"):
+            line.append(f"  {redact_text(str(ev['reason']), redact)}", DIM)
+    elif kind == "poll":
+        line.append("POLL", CATS[cat])
+        line.append(f"  {redact_text(str(ev.get('question', '')), redact)}", WHITE)
+        answers, winner = ev.get("answers") or [], ev.get("winner")
+        if ev.get("state") == "decided":
+            won = answers[winner] if isinstance(winner, int) and 0 <= winner < len(answers) else None
+            line.append("  won: " + str(won.get("answer")) if isinstance(won, dict) else "  no answer won", DIM)
+        else:
+            line.append(f"  {ev.get('state', '')}", DIM)
+    elif kind == "staff":
+        line.append("STAFF", CATS[cat])
+        line.append(f"  {who(pick(ev, 'name'), names)}", WHITE)
+        line.append(f"  /{ev.get('command', '?')} {' '.join(map(str, ev.get('args') or []))}".rstrip())
+        if ev.get("result"):
+            line.append(f"  {redact_text(str(ev['result']), redact)}", DIM)
+    elif kind == "server_phase":
+        line.append("PHASE", CATS[cat])
+        line.append(f"  {str(ev.get('phase', '?')).replace('_', ' ')}", DIM)
     elif kind in ("admin_added", "admin_removed"):
         line.append("ADMIN", AMBER)
         line.append(f"  {ev['name'] if ev.get('name') else redact_text(clip_id(ev.get('id', '?')), redact)}", WHITE)
@@ -742,6 +792,8 @@ def vote_text(v) -> Text:
     """The vote under way: what it's on, and the tally as a tug of war when the server gives one."""
     if not v:
         return Text("none under way", DIM)
+    if isinstance(v, str):  # 0.10 says it in a line of words
+        return Text(v)
     if not isinstance(v, dict):
         return Text(json.dumps(v))
     t = Text(str(pick(v, "subject", "type", "kind", default="vote")).upper(), AMBER)
@@ -1015,8 +1067,10 @@ GUIDE = [
                           "ban, mute, move or allow them through a VPN."),
         ("Ping", "PING is what a player joined with, read from the server's log (needs ping_log in the config; "
                   "RCON has no live ping). Over 200 is red."),
-        ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  p make admin  ·  y copy their ID"),
-        ("Flags", "ADM an admin  ·  MUT muted  ·  KIA dead right now  ·  NEW just joined  ·  ★5 on a killing spree"),
+        ("Keys", "t tell  ·  k kick  ·  b ban  ·  m mute  ·  j team  ·  v VPN allow  ·  p make admin  ·  e role  ·  y copy their ID"),
+        ("Server features", "Ctrl+T, on Project Reclaimer 0.10 or newer: roles, mutes and shadow mutes, polls, panels, the "
+                            "join queue and gates, vote rules, announcements, player models, Forge objects and more."),
+        ("Flags", "ADM an admin  ·  MOD, VIP or your own role's first letters  ·  MUT muted  ·  KIA dead right now  ·  NEW just joined  ·  ★5 on a killing spree"),
         ("Their file", "The glyph is drawn from their player ID: the same player always gets the same one. Medals and "
                        "their streak count what this console has seen since it connected."),
     ]),
@@ -1308,7 +1362,8 @@ class Assets(Horizontal):
     BINDINGS = [Binding("t", "app.player('tell')", "Tell"), Binding("k", "app.player('kick')", "Kick"),
                 Binding("b", "app.player('ban')", "Ban"), Binding("m", "app.player('mute')", "Mute"),
                 Binding("j", "app.player('team')", "Team"), Binding("v", "app.player('vpnallow')", "VPN allow"),
-                Binding("p", "app.player('admin')", "Admin"), Binding("y", "app.player('copy')", "Copy ID")]
+                Binding("p", "app.player('admin')", "Admin"), Binding("e", "app.player('role')", "Role"),
+                Binding("y", "app.player('copy')", "Copy ID")]
 
 
 class OpsPane(TabPane):
@@ -1571,7 +1626,7 @@ class OniApp(App):
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
         Binding("f5", "tab('console')", "Console"), Binding("f6", "tab('forge')", "Forge"),
         Binding("f10", "tab('health')", "Health"), Binding("f8", "tab('plugins')", "Plug-ins"),
-        Binding("ctrl+b", "broadcast", "Broadcast"),
+        Binding("ctrl+b", "broadcast", "Broadcast"), Binding("ctrl+t", "features", "Server features", priority=True),
         Binding("ctrl+l", "clear_alerts", "Clear alerts", show=False, priority=True),
         Binding("ctrl+y", "copy_menu", "Copy", priority=True),
         Binding("f11", "findings", "Findings", show=False),
@@ -2693,6 +2748,8 @@ class OniApp(App):
             if st is self.cur:  # its version decides what fits it in the catalog
                 self.paint_forge()
             self.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins")
+            if supports(st.rcon.info.get("version")):
+                self.fetch(st, "role")  # who holds a role here (0.10): F1's flags
             st.polled = time.monotonic()
             self.log_event(st, {"event": "uplink", "text": f"SECURE  {detail}"})
             self.note_mixed()
@@ -2943,6 +3000,8 @@ class OniApp(App):
                     break
         if kind in ("join", "leave", "refused", "kick", "ban", "mute", "unmute", "control", "admin_added", "admin_removed"):
             self.fetch(st, "players", "status")
+        if kind in ("role_added", "role_removed", "admin_added", "admin_removed") and supports(st.rcon.info.get("version")):
+            self.fetch(st, "role")
         if kind in ("ban", "unban"):
             self.fetch(st, "bans")
         if kind in ("admin_added", "admin_removed"):
@@ -3021,7 +3080,7 @@ class OniApp(App):
             return
         self.paint_match_actions()
         pane = self.query_one(TabbedContent).active
-        if pane == "assets" and "players" in what:
+        if pane == "assets" and {"players", "role"} & set(what):
             self.paint_players()
         if pane == "operations" and {"status", "nextmap", "vote", "players"} & set(what):
             self.paint_ops()
@@ -3201,6 +3260,7 @@ class OniApp(App):
         players = sorted(st.players, key=lambda p: (TEAM_ORDER.get(team_of(p), len(TEAMS)), team_of(p),
                                                     -(num(pick(p, "score")) or 0)))
         self.row_players, rows = {}, []
+        staff = staff_of(st.data.get("role"))
         for i, p in enumerate(players):
             team, name = team_of(p), str(pick(p, "name", default="?"))
             k, d = pick(p, "kills"), pick(p, "deaths")
@@ -3208,8 +3268,11 @@ class OniApp(App):
             flags = Text()
             if (spree := st.medals.spree.get(name, 0)) >= SPREE:
                 flags.append(f"★{spree} ", GOLD)
+            held = staff.get(str(pick(p, "player_id", "id", default="")))
             if p.get("admin"):
                 flags.append("ADM ", AMBER)
+            elif held:  # 0.10: a Mod, a VIP or a role of the host's own; `players` says admin only for Admin and up
+                flags.append(f"{held['role'].upper()[:3]} ", AMBER)
             if p.get("muted"):
                 flags.append("MUT ", RED)
             if p.get("alive") is False:
@@ -3273,6 +3336,8 @@ class OniApp(App):
             ("TEAM", Text(team.upper() or "—", TEAM_COLOR.get(team, DIM))),
             ("STATUS", " · ".join(["ALIVE" if p.get("alive") else "KIA" if p.get("alive") is False else "—"]
                                   + ["ADMIN"] * bool(p.get("admin")) + ["MUTED"] * bool(p.get("muted")))),
+            *([("ROLE", held_role.upper())] if (held_role := staff_of(self.cur.data.get("role")).get(
+                str(pick(p, "player_id", "id", default="")), {}).get("role")) else []),
             ("SCORE", f"{pick(p, 'score', default='—')}    K {k if k is not None else '—'} / D {d if d is not None else '—'}"),
             ("STREAK", Text(f"★ {spree} without dying", GOLD) if spree >= SPREE
              else Text(f"{spree} without dying") if spree else Text("—", DIM))])
@@ -3789,6 +3854,20 @@ class OniApp(App):
                 self.notify(f"Transmitted to {targets[0].label}." if targets else "Not connected: nothing was sent.",
                             title="BROADCAST", severity="information" if targets else "warning")
 
+    async def player_role(self, st: Station, target: str, name: str) -> None:
+        """F1's ROLE on a server that has roles of its own (0.10). A customer console falls back for older servers."""
+        if supports(st.rcon.info.get("version") if st.rcon else None):
+            from .features_ui import role_for_player
+            await role_for_player(self, st, target, name)
+        else:
+            self.notify("Roles need Project Reclaimer 0.10 or newer on this server.", title="Roles", timeout=8)
+
+    @work(exclusive=True, group="dialog")
+    async def action_features(self) -> None:
+        """Ctrl+T: what 0.10 adds, in plain menus."""
+        from .features_ui import features_hub
+        await features_hub(self)
+
     @work(exclusive=True, group="dialog")
     async def action_player(self, what: str) -> None:
         st, p = self.cur, self.cur_player()
@@ -3818,9 +3897,17 @@ class OniApp(App):
                                                       "server sharing this ban list."))
             if f is not None:
                 self.send(st, "ban", t, *opt(f["time"]), *opt(f["reason"]), then=("players", "status", "bans"))
+        elif what == "role":
+            await self.player_role(st, t, name)
         elif what == "mute":
             if p.get("muted"):
                 self.send(st, "unmute", t, then=("players",))
+                return
+            if supports(st.rcon.info.get("version") if st.rcon else None):
+                from .features_ui import mute_form  # 0.10: voice or text alone, and shadow mutes
+                args = await mute_form(self, name)
+                if args is not None:
+                    self.send(st, "mute", t, *args, then=("players",))
                 return
             f = await self.push_screen_wait(Form(f"MUTE · {name}", [("time", "Duration", MUTE_TIMES),
                                                                     ("reason", "Reason", "")], verb="MUTE",
@@ -4033,7 +4120,7 @@ class OniApp(App):
                     verdict = {0: "Every game can be played.", 3: "It can't be checked while the lobby is stopped."}
                     await self.push_screen_wait(Confirm(f"CHECK  {path} ON {services[0]}",
                                                         f"{verdict.get(rc, 'Some games cannot be played:')}\n\n"
-                                                        f"{scrub(out.strip())[-1500:]}", verb="OK", danger=rc == 1))
+                                                        f"{scrub(out.strip())[-1500:]}{old_mode_hint(out)}", verb="OK", danger=rc == 1))
                     continue
                 if what == "single":
                     st = self.cur
@@ -4083,7 +4170,7 @@ class OniApp(App):
                 text = scrub(out.strip())
                 if rc == 6:
                     await self.push_screen_wait(Confirm("NOT CHANGED", "The server says some games can't be "
-                                                        f"played:\n\n{text[-1500:]}", verb="OK", danger=True))
+                                                        f"played:\n\n{text[-1500:]}{old_mode_hint(text)}", verb="OK", danger=True))
                     continue
                 if rc == 4:
                     note = "Changed; not restarted, because players are on. It takes effect at the next restart (F7)."
