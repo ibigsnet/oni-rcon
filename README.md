@@ -9,7 +9,9 @@ pull from GitHub: they get signed releases through IBIGS's update channel (**F9*
 On `ibigs/reclaimer-0.10`. **Ctrl+T** opens SERVER FEATURES on a 0.10 server: roles, mutes and shadow mutes, polls, panels,
 the join queue and gates, vote rules, announcements, player models, Forge objects, co-op network and what the server can
 host. F8 RULES gains 0.10's events and actions, and TEST says why a rule would or wouldn't fire. Fixes for how 0.10 answers:
-the admins list, join and vote rules, F1 before a game starts. See [docs/RECLAIMER-010.md](docs/RECLAIMER-010.md).
+the admins list, join and vote rules, F1 before a game starts. **F9 → Upgrade old game types** (and
+`oni-rcon --gametypes`) finds the game types 0.10 skips, such as `rounds.teams: 3`, and upgrades the ones with a safe
+value, keeping each original. See [docs/RECLAIMER-010.md](docs/RECLAIMER-010.md).
 
 ### Latest releases
 

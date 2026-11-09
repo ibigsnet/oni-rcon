@@ -45,6 +45,51 @@ TEST says, without sending anything, whether each condition holds right now and 
 can report a kick, a ban or a mute. It can't do one: those stay with a person. `oni --demo` has three pretend 0.10 servers
 to try all of this on.
 
+## Old game types 0.10 skips
+
+0.10 checks every setting of a JSON game type against its own table as the server starts, and leaves out the whole file
+for one value it hasn't, with a line in the log:
+
+    Skipped content file .../halo3/game_variants/KOTH ....json: Teams enabled (rounds.teams) has no value 3. Valid choices: "Off" (0), "On" (1).
+
+The game type is then simply missing. oni finds these and upgrades them to 0.10's standard:
+
+- **F9 → Check & fix** adds a line: `old game types the server skips: N, fixable: M`. It changes nothing.
+- **F9 → Upgrade old game types** lists each file and what would change, and upgrades only after UPGRADE. It reads the
+  folders of the servers on this machine: `content_dir` (Maps, Game Modes, Mods) and `game_dir`, the server's game folder
+  (its `halo3/game_variants` and the other variant folders), a `[[server]]` key of its own.
+- From a shell: `oni-rcon --gametypes doctor --game GAME --content CONTENT` reports (`--json` gives `oni doctor`'s
+  `{"fixed", "results": [{"check", "state", "text"}]}` plus each file), and `oni-rcon --gametypes upgrade ...` asks
+  before it changes anything (`--dry-run` never does, `--yes` doesn't ask). `--log FILE` (or `-` for stdin) reads the
+  server's log too, so files it skipped for any reason are named, under the server's own paths; a container's paths
+  are matched to the folders here by their last folders and name.
+
+Each file changed keeps its original beside it, byte for byte, as `NAME.json.oni-backup` (`-2`, `-3`... for a newer
+original of the same name). The game never lists that file. The new file keeps its name, its date (lists sort by it),
+its order of keys and everything but the values that change; it's checked again once written and put back if it
+doesn't pass. A second run finds nothing to do.
+
+What changes, from 0.10.1's table (`dedicated gametype-catalog`, kept in `gametype_catalog_010.json`), and only where
+the value has one meaning:
+
+| Written | Becomes | Why |
+| --- | --- | --- |
+| An Off/On setting above 1 (`rounds.teams: 3`, `2`) | On (1) | every Off/On setting has its own key, so nothing else was packed into it, and every value but 0 was written to turn it on |
+| `rounds.teams` out of range in Capture the Flag, Assault, Territories, VIP / Infection, Juggernaut | On / Off | the engine always plays those modes in teams / without (`fixed_teams`) |
+| `true` / `false` in an Off/On setting | 1 / 0 | 0.10 reads only numbers and labels |
+| a whole number written `3.0` | 3 | the same |
+| `null` | left out | how a 0.10 file says "the game type's own value" |
+| a label 0.10 calls ambiguous across modes | this mode's number | as 0.10's own message asks |
+| a byte-order mark at the start | removed | the game can't read past it |
+
+Labels 0.10 reads itself (`"On"`, `"Battle rifle"`, an earlier editor's `"Allies"`) are left as they are. Anything else
+(a number out of its range, such as `rounds.limit: 0`, an unknown option, a choice that doesn't exist) has no safe
+value: the file stays exactly as it is and the report says why. `--game-type-value` leaves those settings out instead,
+so the game type's own value plays: what 0.10.2 does by itself as it loads such a file.
+
+The IBIGS `oni` helper's `oni doctor` and `oni gametypes` are lines away: `oni-rcon --gametypes doctor --json` with the
+lobby's host folders, its `results` added to the doctor's; `oni gametypes upgrade` runs `oni-rcon --gametypes upgrade`.
+
 ## What's different on 0.10, for anyone reading the code
 
 - `admins` answers `{"configured": [...], "added": [...]}`. `players` says `admin` only for Admin and up, so staff come from

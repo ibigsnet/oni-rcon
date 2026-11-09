@@ -13,6 +13,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Button, Input, Label, ProgressBar, Select, Static
 
 from .app import Confirm, Dialog, Form
+from . import gametypes
 from .jobs import Store, validate
 from .safety import clean
 
@@ -170,7 +171,8 @@ class UpdatesPanel(Dialog):
                           ('Check Oni update channel', 'console-check'), ('Update Oni now', 'console-update'),
                           ('Turn automatic game updates ' + ('OFF' if game else 'ON'), 'game-auto'),
                           ('Turn automatic Oni updates ' + ('OFF' if console else 'ON'), 'console-auto'),
-                          ('Check & fix this server (oni doctor)', 'doctor-run')],
+                          ('Check & fix this server (oni doctor)', 'doctor-run'),
+                          ('Upgrade old game types for Project Reclaimer 0.10', 'gametypes-upgrade')],
                          allow_blank=False, id='update-choice')
             with Horizontal(classes='dialog-buttons'):
                 yield Button('CLOSE', id='update-close')
@@ -201,8 +203,15 @@ async def updates_dialog(app):
             rc, output = await app.power_run('doctor')
             lines = [ANSI.sub('', l).strip() for l in output.splitlines() if l.strip()]
             shown = [l for l in lines if not l.startswith('[ OK ]') and l != 'oni doctor'] or lines[-1:]
+            # IBIGS 2026-11-09: and the game types 0.10 skips, from this console's own servers' folders
+            note = await gametypes_note(app)
+            if note:
+                shown.append(note)
             app.notify(clean('\n'.join(shown)[-1400:]) or ('All good.' if rc == 0 else f'Failed (exit {rc}).'),
                        title='Check & fix', severity='information' if rc == 0 else 'warning', timeout=25)
+            return
+        if kind == 'gametypes':
+            await gametypes_dialog(app)
             return
         if verb == 'auto':
             identity = 'auto-' + kind
@@ -244,6 +253,50 @@ async def updates_dialog(app):
                    title='Updates', severity='information' if rc == 0 else 'warning', timeout=20)
     except (OSError, ValueError) as exc:
         app.notify(clean(str(exc)), title='Updates', severity='error')
+
+
+def _servers(app):
+    return [st.server for st in getattr(app, 'stations', [])]
+
+
+async def gametypes_note(app) -> str:
+    """One line for Check & fix: how many old game types this machine's servers skip, or "" for none (or no folder)."""
+    folders = gametypes.local_folders(_servers(app))
+    if not folders:
+        return ''
+    findings, _ = await asyncio.to_thread(gametypes.scan, folders)
+    n, m = gametypes.summary(findings)
+    return f'[ !! ] old game types the server skips: {n}, fixable: {m} (F9: Upgrade old game types)' if n else ''
+
+
+async def gametypes_dialog(app):
+    """IBIGS 2026-11-09: F9's game type upgrade: what 0.10 skips and why, then UPGRADE only once confirmed. Each
+    original stays beside it (NAME.json.oni-backup); a value with no safe meaning is left alone and named."""
+    folders = gametypes.local_folders(_servers(app))
+    if not folders:
+        app.notify('No server here says where its files are: set content_dir (and game_dir) in its [[server]] block, '
+                   'or run  oni gametypes doctor', title='Old game types', severity='warning', timeout=15)
+        return
+    app.notify('Checking the game types…', title='Old game types', timeout=6)
+    findings, elsewhere = await asyncio.to_thread(gametypes.scan, folders)
+    n, m = gametypes.summary(findings)
+    if not n and not elsewhere:
+        app.notify('Every game type is in Project Reclaimer 0.10\'s format.', title='Old game types', timeout=10)
+        return
+    body = f'Old game types the server skips: {n}, fixable: {m}\n\n' + gametypes.short(findings)
+    if not m:
+        app.notify(clean(body[:1400]), title='Old game types', severity='warning', timeout=25)
+        return
+    if not await app.push_screen_wait(Confirm('UPGRADE OLD GAME TYPES', clean(body[:2400]) + '\n\nEach original is '
+                                              'kept beside it as NAME.json.oni-backup. Players aren\'t affected.',
+                                              verb=f'UPGRADE {m}', danger=False)):
+        return
+    done, failed = await asyncio.to_thread(gametypes.upgrade_all, findings)
+    words = [f'Upgraded {len(done)} game type' + ('s' if len(done) != 1 else '') + '. The server lists them at its '
+             'next content refresh or restart.'] if done else []
+    words += [f"Couldn't upgrade {f.path.name}: {why}" for f, why in failed]
+    app.notify(clean('\n'.join(words)[:1400]), title='Old game types',
+               severity='warning' if failed else 'information', timeout=20)
 
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")

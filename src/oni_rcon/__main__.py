@@ -24,6 +24,9 @@ def main() -> None:
     if sys.argv[1:] == ["--edit-settings"]:  # the IBIGS helper's way in: JSON on stdin and stdout (serverconf.py)
         from .serverconf import main as edit_settings
         sys.exit(edit_settings())
+    if sys.argv[1:2] == ['--gametypes']:  # the IBIGS helper's `oni gametypes`: old game types 0.10 skips
+        from .gametypes import main as gametypes_main
+        raise SystemExit(gametypes_main(sys.argv[2:]))
     if sys.argv[1:2] == ['--ibigs-jobs']:
         from .jobs import main as jobs_main
         raise SystemExit(jobs_main(sys.argv[2:]))
