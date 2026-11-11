@@ -1,4 +1,4 @@
-## IBIGS fork: current release 0.9.0+ibigs.29 (30 October 2026)
+## IBIGS fork: current release 0.9.0+ibigs.30 (10 November 2026)
 
 This is IBIGS's public fork of [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 (GPL-3.0), the console
 behind the IBIGS fleet and every IBIGS customer server. `main` is the maintained source. Customer servers don't
@@ -6,6 +6,11 @@ pull from GitHub: they get signed releases through IBIGS's update channel (**F9*
 
 ### Latest releases
 
+- **0.9.0+ibigs.30** (10 Nov): **custom maps and game types are back in the pickers on Project Reclaimer 0.10.** A 0.10
+  server tells a console about its base maps and built-in game types only, so Forge saves, map variants and custom
+  game types had gone from SELECT MAP, SELECT MODE and the playlist editor, though the server still had and played
+  them. The console now reads the server's content folder and the game's variant folders itself and lists what it
+  finds there. Servers before 0.10 are untouched. See [IBIGS.md](IBIGS.md#custom-content-on-project-reclaimer-010-090ibigs30).
 - **0.9.0+ibigs.29** (30 Oct): brings in upstream oni-rcon (desktop 1.10.0 main + staging): **F4** kicked players with
   PARDON, the admins list (add/remove, MAKE ADMIN) and VPN lists; a note on a card when its server is behind the latest
   Project Reclaimer release. **F3** now leads with **SHARE / JOIN**, the address players join at (`c` copies it), and

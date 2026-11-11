@@ -36,6 +36,10 @@ SERVERS = [("Demo Ops | Slayer", 16, 9), ("Demo Ops | Big Team Battle", 32, 17),
 
 
 class Fake:
+    # A test sets these to stand in for Project Reclaimer 0.10, whose maps and modes name no variants.
+    VERSION = "0.9.7-demo"
+    LISTS_VARIANTS = True
+
     def __init__(self, name: str, password: str, max_players: int, crowd: int, content_dir: str = ""):
         self.password, self.clients, self.engine, self.skill = password, set(), 0, {}
         self.content = Path(content_dir) if content_dir else None  # Forge installs land here, and get listed
@@ -108,7 +112,7 @@ class Fake:
                 await ws.send(json.dumps({"type": "auth", "ok": False, "error": "Wrong password."}))
                 return
             await ws.send(json.dumps({"type": "auth", "ok": True, "protocol": 1, "server": self.status["name"],
-                                      "version": "0.9.7-demo"}))
+                                      "version": self.VERSION}))
             self.clients.add(ws)
             async for raw in ws:
                 msg = json.loads(raw)
@@ -155,12 +159,12 @@ class Fake:
                 "maps": lambda: {"entries": [{"kind": "map", "name": m.replace("_", " ").title(), "reference": m}
                                              for m in MAPS]
                                  + [{"kind": "map", "name": n, "reference": r} for n, r in DEMO_MODS]
-                                 + [{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MAP_VARIANTS]
-                                 + self.installed(".map")},
+                                 + ([{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MAP_VARIANTS]
+                                    + self.installed(".map") if self.LISTS_VARIANTS else [])},
                 "modes": lambda: {"entries": [{"kind": "mode", "name": m, "reference": m.lower().replace(" ", "_")}
                                               for m in MODES]
-                                  + [{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MODE_VARIANTS]
-                                  + self.installed(".gt")},
+                                  + ([{"kind": "variant", "name": n, "reference": r} for n, r in DEMO_MODE_VARIANTS]
+                                     + self.installed(".gt") if self.LISTS_VARIANTS else [])},
                 "bans": lambda: self.bans,
                 "vpn": lambda: {"allowed": self.allowed, "block_vpn": True, "ranges": 41812, "fail_closed": False,
                                 "lists": self.vpn_lists()},

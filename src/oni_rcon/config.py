@@ -23,6 +23,9 @@ class Server:
     password_env: str = ""
     password_command: str | list[str] = ""
     content_dir: str = ""  # where the server loads Forge content from; with ssh, a path on the ssh destination
+    # IBIGS 2026-11-10: the server's game folder (halo3/map_variants and the like). Empty = the folder named game
+    # beside content_dir. Read with content_dir to list the variants a 0.10 server no longer names (local_content.py).
+    game_dir: str = ""
     # IBIGS 2026-10-17: the server's data folder on this machine. Its newest rcon-host.key lets oni take the spot
     # Reclaimer keeps for a console on the server's own machine, so it gets in even when 4 tools fill the rest.
     host_key_dir: str = ""

@@ -1,5 +1,37 @@
 # IBIGS Reclaimer terminal
 
+## Custom content on Project Reclaimer 0.10 (0.9.0+ibigs.30)
+
+**What was wrong.** Up to 0.9 a server's `maps` and `modes` replies named every variant it could load. From 0.10 they
+name the base maps and the built-in game types only (38 and 11 on a stock server). The console showed what the server
+said, so every Forge save, map variant and custom game type disappeared from SELECT MAP, SELECT MODE, ONE MAP + MODE
+and the playlist editor, and a ReclaimerForge install ended with "installed, but the server doesn't list it yet". The
+server itself was fine: it still had the files and played them from playlists.
+
+**What the console does now** (`local_content.py`). When a server is 0.10 or later, its reply names no variants, and
+the console runs where the server's files are (`content_dir` set, no `ssh`, no `url`), it reads the folders the
+server's own content library reads and adds what it finds:
+
+| Where the file is | Listed under | The reference sent to the server |
+| --- | --- | --- |
+| `content_dir`/`Maps`, `content_dir`/`Game Modes` (any depth, not `Deleted`) | ReclaimerForge downloads (a `Forge` folder or an installed listing), else Your content folder | its path inside the content folder, e.g. `Maps/Forge/Pit Stop.json` |
+| the game folder's `halo3/map_variants`, `hopper_map_variants`, `game_variants`, `hopper_game_variants`, and Reach's two game variant folders: `.mvar` and `.bin` | Halo 3 & Matchmaking variants | its file name, e.g. `default_guardian_012.mvar` |
+| the same game folders: a `.json` file (someone uploaded it there) | Your content folder | its file name |
+
+Those are references 0.10 resolves (a content folder file by its path first, a game folder file by its file name), and
+the same ones a 0.9 server used to give. Checked against a real 0.10.2 server with its own `dedicated check`.
+
+The game folder is the folder named `game` beside `content_dir` (how IBIGS customer servers are laid out), or
+`game_dir = "..."` in the server's `[[server]]` block or `[defaults]`.
+
+**Limits.**
+- A `.json` file shows its own title. A `.mvar` or `.bin` file shows its file name (`default_guardian_012`), not the
+  title a 0.9 server gave ("Guardian"): the console does not decode Halo's variant files.
+- A file the server would refuse (an old game type with a setting 0.10 dropped, say) is still listed; the server says
+  why when it is asked to load it.
+- A server reached over `ssh` or a `url` is listed as the server reports it, base maps and built-in game types only.
+- At most 4,000 files are read per list; a file's title is read again only when the file changes.
+
 ## SHARE / JOIN address on F3 (0.9.0+ibigs.29)
 
 A customer posted the sitrep's UPLINK line as his server's address. That line was the console's own RCON connection

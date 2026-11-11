@@ -42,6 +42,7 @@ from .archive import FILES, TOTAL, frame as archive_frame
 from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, blend, decrypt, emblem, fit, gauge, hbar,
                   pixels, spark, split_bar)
 from . import fuzzy
+from . import local_content
 from . import health as hc
 from . import perf as pf
 from .perf_view import chart as frame_chart, explain as frame_advice
@@ -2784,6 +2785,10 @@ class OniApp(App):
         for w, r in zip(what, replies):
             if w == "admins" and isinstance(r, dict) and isinstance(r.get("data"), list):
                 r["data"] = {"admins": r["data"]}  # a bare list, as the desktop also takes it
+            if w in ("maps", "modes") and isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
+                # Project Reclaimer 0.10 names base maps and built-in game types only: add the server's own files
+                r["data"] = await asyncio.to_thread(local_content.fill, st.server, w, r["data"],
+                                                     (st.rcon.info or {}).get("version"))
             if isinstance(r, dict) and r.get("ok") and isinstance(r.get("data"), dict):
                 if w == "players" or r["data"] != st.data.get(w):  # NEW badges and log-derived ping can age/change
                     changed.append(w)

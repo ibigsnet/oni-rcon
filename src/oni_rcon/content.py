@@ -7,6 +7,8 @@ The server's `maps` and `modes` replies only say map, mode or variant; the refer
   {"kind": "variant", "reference": "Game Modes/Forge/rf-d70540eb57f22df48390.json"}       a file in the content folder
   {"kind": "variant", "reference": "default_guardian_012.mvar"}                          Halo 3 / Matchmaking, built in
   {"kind": "variant", "name": "MLG Guardian", "reference": "MLG Guardian"}                saved in MCC, or Workshop
+A Project Reclaimer 0.10 server names only the first two kinds; local_content.py adds the files it left out, in the
+same shapes, before anything here sees the reply.
 Nothing here talks to a server or to Forge: it's given what they said and returns rows to show.
 """
 from __future__ import annotations
@@ -144,6 +146,8 @@ def classify(e: dict, index: dict[str, dict]) -> Item:
         group = "forge" if hit else "saved"
     if hit and group != "forge":
         group = "forge"
+    if not hit and e.get("group") in ("folder", "builtin", "saved"):  # said by whoever read the file (local_content)
+        group = e["group"]
     item = Item(name, ref, group, folder, kind, detail, hit, stem=stem_of(ref))
     if hit:
         item.installed_at = str(hit.get("installed_at") or "")
