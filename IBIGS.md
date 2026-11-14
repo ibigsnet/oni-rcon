@@ -1,5 +1,41 @@
 # IBIGS Reclaimer terminal
 
+## Server settings (Ctrl+E)
+
+Customers could change a lobby's name, player limit, map and game type (F12), and nothing else without editing
+`dedicated.toml` by hand. **SERVER SETTINGS** (Ctrl+E, SETTINGS on F3, the first entry of F12) shows the selected
+server's settings in plain words and changes them safely (`server_settings.py`, `settings_ui.py`).
+
+| Group | Settings |
+| --- | --- |
+| PERFORMANCE | `tick_rate` (60 or 30: "30 holds big lobbies smooth on slower CPUs; 60 for competitive"), `channel_threads`, `node_threads`, `encode_once` |
+| NETWORK | `network_model` (classic, enhanced), `coop_network` (lockstep, lockstep30, host), `max_ping`, `anti_cheat`, `block_vpn`, `load_timeout` |
+| RENDER · HEADLESS | `draw_frames`, `film_recording`, `film_keep`, `film_max_mb` (a dedicated server always runs headless: there is no switch for it) |
+| PLAYERS | `name`, `host_name`, `max_players`, `min_players`, `password` (masked), `hidden`, `joins`, `post_game_seconds`, `start_countdown_seconds`, `welcome`, `voice_quality` |
+| GAME RULES | `friendly_fire`, `team_changing`, `camera`, `force_model`, `round_outlasts_leavers`, `stock_map_defaults`, `map_hud`, `forge_edit` |
+| BOTS | `allow_bots`; ADD / REMOVE BOT ID (a `[roles.bots]` with `bots.run`, rank 1, made the first time); the server's `bots` list |
+| ALL SETTINGS | every key in this server's block, `[defaults]` and the file's top, the rest as raw values; addresses, ports, what it plays, admins, roles and secrets are shown locked |
+
+- **Where the file is:** `dedicated_toml` in the server's config, else beside its data folder (`host_key_dir`, up to
+  two folders up), else beside `content_dir`. The `[[server]]` block is the one whose `rcon_port` (else `port`) is
+  the station's. Only where the console runs beside the server (no `ssh`, no `url`), and only for 0.10 or later (an
+  older server is shown its settings, read-only: it refuses a file that has 0.10's keys).
+- **Which wins:** each row shows this server's own value, `[defaults]`' and the one in use. The server's own wins;
+  with neither, the server's default. In a file with several servers, an edit asks which of the two to change.
+- **Saving:** checked against the documented choices and ranges (`min_players` never above `max_players`). The file is
+  re-read and must be unchanged since the screen opened; it is copied to `dedicated.toml.oni-backup-<time>` (the
+  newest 10 kept) and written in place (owner, mode and inode kept), changing only the lines asked for: a new key goes
+  under its commented-out example or after its table's last setting. The result is parsed and compared with what was
+  asked; any other difference and nothing is written (an inline `roles = {...}` table, say).
+- **Applying:** the server is sent `reload` and its answer shown (*Applied now*, *Applied from the next game*,
+  *Restarts once it has no players*). For a setting that needs a restart (`network_model`, the thread counts,
+  `encode_once`) the console offers to wait for the server to restart itself once nobody plays (the default), or to
+  restart now: F7's restart through the `oni` helper when the file's folder is one of its lobbies, else RCON
+  `restart now`. A refused file can be put back from its backup.
+- **Not tested here:** a real 0.10 server's `reload` answer and restart (the tests use the demo server), and a
+  customer VM's file permissions: if the console's user can't write `dedicated.toml`, the screen says so and changes
+  nothing.
+
 ## Custom content on Project Reclaimer 0.10 (0.9.0+ibigs.30)
 
 **What was wrong.** Up to 0.9 a server's `maps` and `modes` replies named every variant it could load. From 0.10 they
