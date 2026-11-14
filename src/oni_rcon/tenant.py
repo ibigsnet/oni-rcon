@@ -188,7 +188,8 @@ class TenantApp(OniApp):
         super().welcome()
         self.notify('Managing this VM’s lobbies. F7 starts or stops servers; F3 PLAYLISTS deploys playlists. F8 '
                     'AUTOMATION: rules (sprees, !admin, server alerts), schedules, roles, votes and Discord. On F1, e '
-                    'gives the selected player a role. F6 opens ReclaimerForge. F12: settings and Workshop mods.',
+                    'gives the selected player a role. F6 opens ReclaimerForge. Ctrl+E: server settings (tick rate, netcode, '
+                    'bots). F12: settings and Workshop mods.',
                     title='IBIGS', timeout=10)
         self.run_worker(self.first_run_checklist(), exclusive=False, group='checklist')
 
@@ -231,11 +232,14 @@ class TenantApp(OniApp):
     @work(exclusive=True, group='dialog')
     async def action_settings_menu(self) -> None:
         what = await self.push_screen_wait(Pick('SETTINGS & MODS', [
+            ('Server settings: tick rate, netcode, headless, players, bots, all settings (Ctrl+E)', 'server'),
             ('Lobby settings: name, player limit, map, game type', 'settings'),
             ('Install a Workshop mod (Steam link)', 'workshop'),
             ('Installed Workshop mods', 'mods'),
             ('Getting-started checklist', 'checklist')]))
-        if what == 'settings':
+        if what == 'server':
+            await self.server_settings_screen(self.cur)
+        elif what == 'settings':
             await self.lobby_settings()
         elif what == 'workshop':
             await self.workshop_install()

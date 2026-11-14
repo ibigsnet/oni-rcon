@@ -43,6 +43,7 @@ from .art import (AMBER, CYAN, DIM, GOLD, GREEN, GREY, INK, RED, WHITE, biosig, 
                   pixels, spark, split_bar)
 from . import fuzzy
 from . import local_content
+from . import server_settings
 from . import health as hc
 from . import perf as pf
 from .perf_view import chart as frame_chart, explain as frame_advice
@@ -141,14 +142,14 @@ OPS = [("load", "LOAD MAP+MODE", "primary"), ("map", "CHANGE MAP", "default"), (
        ("cancelvote", "CANCEL VOTE", "default"), ("broadcast", "BROADCAST", "primary"),
        ("servername", "RENAME", "default"), ("password", "JOIN PASSWORD", "default"),
        ("maxping", "PING LIMIT", "default"), ("reconnect", "RECONNECT", "default"),
-       ("playlists", "PLAYLISTS", "primary")]
+       ("playlists", "PLAYLISTS", "primary"), ("settings", "SETTINGS", "primary")]
 BAN_OPS = [("newban", "NEW BAN", "error"), ("unban", "UNBAN  u", "warning"), ("vpnallow", "VPN ALLOW  a", "default"),
            ("vpnrevoke", "VPN REVOKE  r", "default"), ("vpncheck", "CHECK IP", "default"),
            ("pardon", "PARDON  o", "default"), ("adminadd", "ADD ADMIN  p", "primary"),
            ("adminremove", "REMOVE ADMIN  d", "warning")]
 OP_GROUPS = [("MATCH", ["load", "map", "mode", "nextmap", "endround", "endgame"]),
              ("TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]),
-             ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect", "playlists"])]
+             ("SERVER", ["broadcast", "servername", "password", "maxping", "reconnect", "playlists", "settings"])]
 PLAYER_OPS = [("tell", "TELL", "t"), ("kick", "KICK", "k"), ("ban", "BAN", "b"), ("mute", "MUTE", "m"),
               ("team", "TEAM", "j"), ("vpnallow", "VPN OK", "v"), ("admin", "MAKE ADMIN", "p"),
               ("copy", "COPY ID", "y")]
@@ -173,6 +174,9 @@ TIPS = {
     "op-reconnect": "Drop this connection and sign in again.",
     "op-playlists": "Make, edit and deploy playlists to your lobbies: ReclaimerForge's and your own. Needs the IBIGS "
                     "oni helper, which checks every game with the server first.",
+    "op-settings": "Tick rate, netcode, headless options, players, game rules, bots and every other setting in "
+                   "the server's dedicated.toml: shown in plain words, changed safely (backed up, checked by the "
+                   "server). Needs this console on the server's own machine.  Ctrl+E",
     "bl-newban": "Ban a player ID, an IP address or a whole range.",
     "bl-unban": "Lift the selected ban.  Key: u",
     "bl-vpnallow": "Let a player or address join through a VPN.  Key: a",
@@ -1059,7 +1063,28 @@ GUIDE = [
                   "asks for the name they were kicked under, a player ID or an IP. Needs server 0.9.16 or later."),
         ("Admins", "ADMINS lists every admin, who's on, and where each was made. ADD ADMIN (p) and REMOVE ADMIN (d) "
                    "apply at once on every server sharing the ban list (server 0.9.16 or later). An admin written in "
-                   "dedicated.toml changes there: oni-rcon doesn't edit it."),
+                   "dedicated.toml stays there: take it out in the file (SERVER SETTINGS leaves admins alone)."),
+    ]),
+    ("SERVER SETTINGS  ·  Ctrl+E, or SETTINGS on F3", [
+        ("What", "The selected server's dedicated.toml in plain words, by group: PERFORMANCE (tick rate: 30 holds big "
+                 "lobbies smooth on slower CPUs, 60 for competitive; network and animation threads), NETWORK "
+                 "(classic or enhanced netcode, co-op netcode, ping limit, anti-cheat, VPN block), RENDER · HEADLESS "
+                 "(drawing frames, films), PLAYERS (name, limits, join password, joins), GAME RULES, BOTS, and ALL "
+                 "SETTINGS for every other key, edited as a raw value."),
+        ("Which wins", "Each row shows this server's own value, [defaults]' and the one in use: the server's own wins "
+                       "over [defaults], and with neither the server's default applies. RESET (Del) takes the "
+                       "server's own out."),
+        ("Saving", "Each new value is checked first. dedicated.toml is copied beside itself "
+                   "(dedicated.toml.oni-backup-<time>, the newest 10 kept), only the changed line moves, and comments "
+                   "stay. The server is then asked to reload and its answer is shown: most settings apply at once or "
+                   "from the next game; netcode and thread counts restart the server once nobody is playing, or now "
+                   "if you choose. If the server refuses the file, PUT IT BACK restores the old one."),
+        ("Bots", "BOTS turns allow_bots on or off and lists the bots' player IDs (reclaimer-bot id prints one). ADD "
+                 "BOT ID puts one in a role with bots.run, made for you the first time; a server takes 8 bots at "
+                 "most at once. CONNECTED NOW is the server's own bots list."),
+        ("Where", "Only where this console runs on the server's own machine (no ssh or URL), and for Project "
+                  "Reclaimer 0.10 or newer. Passwords and keys are never shown; addresses, ports, what the server "
+                  "plays and its admins stay in the file, F3 PLAYLISTS and F4."),
     ]),
     ("F5  CONSOLE  ·  typing commands", [
         ("Commands", "For anything without a button. Type help for the server's list; ↑ ↓ bring back earlier ones."),
@@ -1572,7 +1597,7 @@ class OniApp(App):
         Binding("f3", "tab('operations')", "Ops"), Binding("f4", "tab('blacklist')", "Blacklist"),
         Binding("f5", "tab('console')", "Console"), Binding("f6", "tab('forge')", "Forge"),
         Binding("f10", "tab('health')", "Health"), Binding("f8", "tab('plugins')", "Plug-ins"),
-        Binding("ctrl+b", "broadcast", "Broadcast"),
+        Binding("ctrl+b", "broadcast", "Broadcast"), Binding("ctrl+e", "server_settings", "Settings"),
         Binding("ctrl+l", "clear_alerts", "Clear alerts", show=False, priority=True),
         Binding("ctrl+y", "copy_menu", "Copy", priority=True),
         Binding("f11", "findings", "Findings", show=False),
@@ -3341,9 +3366,10 @@ class OniApp(App):
         self.query_one("#sitrep", Static).update(g)
         voting = bool(vote.get("vote")) if "vote" in st.data else None  # unknown until the first fetch: leave on
         for op, *_ in OPS:  # greyed out when it can't work right now, so nobody wonders why nothing happened
-            off = (op not in ("reconnect", "playlists") and not st.online
+            off = (op not in ("reconnect", "playlists", "settings") and not st.online
                    or op in ("passvote", "cancelvote") and voting is False or op == "startvote" and voting is True
-                   or op == "playlists" and not self.playlist_tool())
+                   or op == "playlists" and not self.playlist_tool()
+                   or op == "settings" and not server_settings.is_local(st.server))
             self.query_one(f"#op-{op}", Button).disabled = off
         why = self.query_one("#ops-offline", Static)
         why.display = not st.online
@@ -3781,6 +3807,14 @@ class OniApp(App):
 
     # --- actions with dialogs (workers, so they can await the dialog) -----------------------------------------
     @work(exclusive=True, group="dialog")
+    async def action_server_settings(self) -> None:
+        await self.server_settings_screen(self.cur)
+
+    async def server_settings_screen(self, st: Station, tab: str = "performance") -> None:
+        from .settings_ui import server_settings as screen
+        await screen(self, st, tab)
+
+    @work(exclusive=True, group="dialog")
     async def action_broadcast(self) -> None:
         f = await self.push_screen_wait(Form("BROADCAST", [("text", "Message ([Server] line in chat)", ""),
                                                            ("scope", "Transmit to", [("Every station", "all"),
@@ -4149,6 +4183,9 @@ class OniApp(App):
             return
         if name == "playlists":
             await self.playlists()
+            return
+        if name == "settings":
+            await self.server_settings_screen(st)
             return
         if not st.online:
             self.notify(self.offline_hint(st), title=f"{st.label} is not connected", severity="warning", timeout=10)
@@ -4786,7 +4823,7 @@ class OniApp(App):
                 await self._fetch(o, ("maps", "modes"))
         if kind_of(entry) == "playlist":
             after = ("l, or F3 PLAYLISTS, puts it on your lobbies." if self.playlist_tool() else
-                     "Point the server's playlist setting at it to use it: oni-rcon doesn't edit dedicated.toml.")
+                     "Point the server's playlist setting in dedicated.toml at it to use it.")
         elif self.listed(st, entry) or await self.wait_listed(st, entry, seconds=20):
             after = "The server lists it now: l loads it, p deploys it."
         else:

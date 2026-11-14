@@ -1,13 +1,18 @@
 """SERVER SETTINGS: a 0.10 server's dedicated.toml read, checked, edited in place (comments and order kept), backed
-up, with secrets never shown."""
+up, with secrets never shown; and the screen that does it (Ctrl+E)."""
+import asyncio
 import os
 import tomllib
 from pathlib import Path
 
 import pytest
 
+from oni_rcon import demo
 from oni_rcon import server_settings as ss
+from oni_rcon.app import Confirm, OniApp, Pick
 from oni_rcon.config import Server
+from oni_rcon.demo import serve_fakes
+from oni_rcon.settings_ui import SettingsView
 
 BOT = "ab" * 32
 OTHER_BOT = "cd" * 32
@@ -345,3 +350,162 @@ def test_reload_answers():
                                                                                                            False)
     assert ss.reload_words("Applied from the next game: tick_rate.") == (False, False)
     assert ss.reload_words("Restart the supervisor to apply: public_address.") == (False, True)
+
+
+# --- the screen ------------------------------------------------------------------------------------------------
+async def until(pilot, cond, n=160):
+    for _ in range(n):
+        await pilot.pause(0.05)
+        if cond():
+            return True
+    return False
+
+
+def test_ctrl_e_changes_the_tick_rate_with_a_backup_and_a_reload(tmp_path, monkeypatch):
+    monkeypatch.setattr(demo.Fake, "VERSION", "0.10.3")
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=demo.SERVERS[:1])
+        path = tmp_path / "dedicated.toml"
+        path.write_text(FILE.replace("port = 49176", f"port = {ports[0]}"))
+        before = path.read_text()
+        app = OniApp([Server(port=ports[0], password="demo", dedicated_toml=str(path))], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            assert await until(pilot, lambda: all(st.online for st in app.stations))
+            await pilot.press("f3")
+            await pilot.pause(0.2)
+            assert not app.query_one("#op-settings").disabled
+            await pilot.press("ctrl+e")
+            assert await until(pilot, lambda: isinstance(app.screen, SettingsView))
+            view = app.screen
+            assert view.editable and "No bots are in." in view.bots
+            perf = view.query_one("#set-performance")
+            assert perf.row_count == len(ss.group_rows(view.loaded, "performance"))
+            await pilot.pause(0.2)
+            assert "30 holds big lobbies" in str(view.query_one("#set-hint").render())
+            view.act("edit")  # the first row: tick_rate
+            assert await until(pilot, lambda: isinstance(app.screen, Pick))
+            assert "WHERE" in app.screen.t  # two servers in the file: this one, or [defaults]?
+            assert [v for _, v in app.screen.opts] == ["server", "defaults"]
+            app.screen.dismiss("server")
+            assert await until(pilot, lambda: isinstance(app.screen, Pick) and "TICK RATE" in app.screen.t)
+            assert [v for _, v in app.screen.opts] == [60, 30]
+            app.screen.dismiss(30)
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and app.screen.verb == "SAVE")
+            assert "from the next game" in app.screen.b
+            app.screen.dismiss(True)
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and app.screen.t == "SAVED")
+            assert "Nothing changed." in app.screen.b
+            app.screen.dismiss(True)
+            assert await until(pilot, lambda: isinstance(app.screen, SettingsView))
+            assert app.screen.loaded.block["tick_rate"] == 30
+            app.screen.dismiss(None)
+        data = tomllib.loads(path.read_text())
+        assert data["server"][0]["tick_rate"] == 30
+        backups = ss.backups(path)
+        assert len(backups) == 1 and backups[0].read_text() == before
+        del keep
+    asyncio.run(go())
+
+
+def test_an_older_server_shows_its_settings_without_changing_them(tmp_path):
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=demo.SERVERS[:1])  # the demo says 0.9.7
+        path = tmp_path / "dedicated.toml"
+        path.write_text(FILE.replace("port = 49176", f"port = {ports[0]}"))
+        app = OniApp([Server(port=ports[0], password="demo", dedicated_toml=str(path))], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            assert await until(pilot, lambda: all(st.online for st in app.stations))
+            await pilot.press("ctrl+e")
+            assert await until(pilot, lambda: isinstance(app.screen, SettingsView))
+            assert not app.screen.editable and "0.10 or newer" in app.screen.note
+            assert app.screen.query_one("#edit").disabled
+            app.screen.dismiss(None)
+        assert ss.backups(path) == []
+        del keep
+    asyncio.run(go())
+
+
+def test_a_server_over_ssh_is_told_where_to_run_it():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=demo.SERVERS[:1])
+        app = OniApp([Server(port=ports[0], password="demo")], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            assert await until(pilot, lambda: all(st.online for st in app.stations))
+            app.stations[0].server.ssh = "admin@box"  # as if reached over ssh: its files are elsewhere
+            await pilot.press("ctrl+e")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm))
+            assert "another machine" in app.screen.b
+            app.screen.dismiss(False)
+        del keep
+    asyncio.run(go())
+
+
+def one_server(port: int) -> str:
+    return FILE[:FILE.index("\n[[server]]\nname = \"Second\"")].replace("port = 49176", f"port = {port}") + "\n"
+
+
+def test_bots_and_a_setting_that_needs_a_restart(tmp_path, monkeypatch):
+    from oni_rcon import settings_ui
+    monkeypatch.setattr(demo.Fake, "VERSION", "0.10.3")
+    restarted = []
+
+    async def fake_restart(app, st, loaded):
+        restarted.append(loaded.path)
+    monkeypatch.setattr(settings_ui, "restart", fake_restart)
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=demo.SERVERS[:1])
+        path = tmp_path / "dedicated.toml"
+        path.write_text(one_server(ports[0]))
+        app = OniApp([Server(port=ports[0], password="demo", dedicated_toml=str(path))], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            assert await until(pilot, lambda: all(st.online for st in app.stations))
+            await pilot.press("ctrl+e")
+            assert await until(pilot, lambda: isinstance(app.screen, SettingsView))
+            app.screen.dismiss(("addbot", "", "bots"))
+            assert await until(pilot, lambda: getattr(app.screen, "t", "") == "ADD A BOT")
+            assert "8 bots at most" in app.screen.note
+            app.screen.dismiss({"id": BOT})
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and app.screen.verb == "SAVE")
+            assert "allow_bots turned on" in app.screen.b
+            app.screen.dismiss(True)
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and app.screen.t == "SAVED")
+            app.screen.dismiss(True)
+            assert await until(pilot, lambda: isinstance(app.screen, SettingsView))
+            assert app.screen.tab == "bots" and BOT in str(app.screen.query_one("#set-botlist").render())
+            # one server in the file: the netcode is changed where it's in force, without asking where
+            app.screen.dismiss(("edit", "network_model", "network"))
+            assert await until(pilot, lambda: isinstance(app.screen, Pick) and "NETCODE" in app.screen.t)
+            app.screen.dismiss("enhanced")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and app.screen.verb == "SAVE")
+            assert ss.RESTART in app.screen.b
+            app.screen.dismiss(True)
+            assert await until(pilot, lambda: isinstance(app.screen, Pick) and "RESTART" in app.screen.t)
+            assert [v for _, v in app.screen.opts] == ["wait", "now"]
+            app.screen.dismiss("now")
+            assert await until(pilot, lambda: isinstance(app.screen, Confirm) and app.screen.t == "RESTART NOW")
+            assert "disconnected" in app.screen.b  # the demo server has players on it: asked once more
+            app.screen.dismiss(True)
+            assert await until(pilot, lambda: isinstance(app.screen, SettingsView))
+            app.screen.dismiss(None)
+        data = tomllib.loads(path.read_text())
+        assert data["defaults"]["allow_bots"] is True and data["roles"]["bots"]["players"] == [BOT]
+        assert data["server"][0]["network_model"] == "enhanced" and restarted == [path]
+        assert len(ss.backups(path)) == 2
+        del keep
+    asyncio.run(go())
+
+
+def test_the_customer_consoles_restart_names_the_lobby_by_its_folder(tmp_path):
+    from types import SimpleNamespace
+    from oni_rcon.settings_ui import lobby_of
+
+    async def names():
+        return ["h3-07"]
+    app = SimpleNamespace(playlist_tool=lambda: "oni", lobby_names=names)
+    here = ss.Loaded(tmp_path / "h3-07" / "dedicated.toml", "", {}, 0)
+    elsewhere = ss.Loaded(tmp_path / "other" / "dedicated.toml", "", {}, 0)
+    assert asyncio.run(lobby_of(app, here)) == "h3-07"
+    assert asyncio.run(lobby_of(app, elsewhere)) == ""
+    assert asyncio.run(lobby_of(SimpleNamespace(playlist_tool=lambda: ""), here)) == ""
