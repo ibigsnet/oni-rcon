@@ -786,6 +786,11 @@ def test_admin_and_reload_events_get_a_layout():
         == "RELOAD FAILED  dedicated.toml: line 4"
     assert d({"event": "control", "action": "reload_applied", "ok": True, "text": "playlist"}) == "RELOAD APPLIED  playlist"
     assert d({"event": "control", "action": "kill_feed", "ok": True, "text": "x"}).startswith("CONTROL  x")
+    assert d({"event": "saved", "kind": "state", "by": "RCON", "result": "data/s1/state.json"}) \
+        == "SAVED  game state  data/s1/state.json  by RCON"
+    assert d({"event": "save_failed", "kind": "map", "by": "Alice", "result": "No Forge game is being played"}) \
+        == "SAVE FAILED  Forge map  No Forge game is being played  by Alice"
+    assert d({"event": "state_restored"}) == "STATE RESTORED"
 
 
 def test_f4_pardons_a_kick():
@@ -878,5 +883,46 @@ def test_f4_adds_and_removes_admins():
             await until(pilot, lambda: isinstance(app.screen, Confirm))
             app.screen.query_one("#yes").press()
             assert await until(pilot, lambda: admins.row_count == before) and not new["admin"]
+
+    asyncio.run(go())
+
+
+def test_game_queue_on_010():
+    assert appmod.queued({"next_games": [{"map": "guardian", "mode": "oddball"}, {"map": "valhalla"}, "The Pit"]}) == \
+        [("guardian", "oddball"), ("valhalla", ""), ("The Pit", "")]
+    assert appmod.queued({}) == [] and appmod.queued({"next_games": None}) == []
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "status", "maps", "modes")
+            st, btn = app.stations[0], app.query_one("#op-queue", appmod.Button)
+            app.paint_ops()
+            assert btn.disabled  # the demo says 0.9.7: no queue
+            st.rcon.info["version"] = "0.10.1"
+            app.paint_ops()
+            assert not btn.disabled
+
+            async def choose(*values):  # answer each dialog the op opens, in turn
+                for v in values:
+                    assert await until(pilot, lambda: isinstance(app.screen, (Pick, appmod.Confirm)))
+                    app.screen.dismiss(v)
+                    await pilot.pause()
+
+            rotation = lambda: [str(app.query_one("#rotation").get_row_at(r)[1])
+                                for r in range(app.query_one("#rotation").row_count)]
+            for mp, md in (("guardian", "oddball"), ("valhalla", "")):
+                app.op("queue")
+                await choose("add", mp, md)
+                assert await until(pilot, lambda: mp in rotation())
+            assert appmod.queued(st.data["status"]) == [("guardian", "oddball"), ("valhalla", "")]
+            assert rotation()[:2] == ["guardian", "valhalla"]  # queued games list first
+            app.op("queue")
+            await choose("1")  # remove the first
+            assert await until(pilot, lambda: appmod.queued(st.data["status"]) == [("valhalla", "")])
+            app.op("queue")
+            await choose(None)  # Esc: nothing sent
+            assert appmod.queued(st.data["status"]) == [("valhalla", "")]
 
     asyncio.run(go())

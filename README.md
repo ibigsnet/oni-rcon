@@ -34,7 +34,7 @@ resolution, and lighter on a big fleet. Installers are on the [releases page](ht
 | **F4 Blacklist** | Bans by player, IP and device; new ban (timed or permanent), unban, VPN allow and revoke, check an IP (on the desktop with server 0.9.22 or later, which list it matched). On the desktop with server 0.9.22 or later, each VPN list's size, age and last fetch problem, flagged when older than a week or failing, and whether the server refuses everyone while no list is loaded (fail-closed). The admins, with who's on and where each was made: add or remove one at once on every server sharing the ban list (server 0.9.16 or later), or, on the desktop, of one server only through its `dedicated.toml` (from the next restart). Who was kicked and how long they're still out: pardon one so they can rejoin now (server 0.9.16 or later). `p` add admin · `d` remove admin · `o` pardon |
 | **F5 Console** | Type any RCON command (`help` lists them) with ↑/↓ history. The command log records everything sent from this session and its replies. The message in `say`, `tell`, `kick` and `servername` is the rest of the line as typed, sent as one argument, so it needs no quotes |
 | **F6 Forge** | The [ReclaimerForge](https://www.reclaimerforge.net) catalog of community maps, gametypes and playlists, read with your own API key. Order it by trending, rising, latest, updated, downloads, rated, unrated or overlooked (trending and rising over the last 24 hours, 7 days or 30 days), or see the collections ReclaimerForge is featuring now, and search it. Each listing shows its type, authors, thumbs up and down, recent downloads, and whether it runs on the selected server's version; its file lists every version, and any of them installs on the selected server, every file checked against Forge's manifest. In the desktop app, `p` publishes your own files to Forge, and MINE lists your listings to update, edit, withdraw or delete. `i` install on this server · `l` load it now · `s` sort · `w` window · `/` search · `n` more · `k` key · `y` copy ID · `p` publish · `u` new version · `e` edit · `x` withdraw (desktop) |
-| **F7 Health** | Whether the servers are crashing and the box is coping. CRASHES lists each server's latest crashes read from its log (time, server, class, how many players were on, whether the RCON connection dropped with it); HOST shows free memory, swap, the kernel's `oom_kill` counter and each container's start time and OOMKilled flag; WORKAROUND shows whether an optional systemd service is running. A new crash, an OOM kill or memory falling under your limit flashes a banner over every tab, goes in the feed and beeps. Needs `health_cmd` in the config: [see below](#health-watch) |
+| **F7 Health** | Whether the servers are crashing and the box is coping. CRASHES lists each server's latest crashes read from its log (time, server, class, how many players were on, whether the RCON connection dropped with it); HOST shows free memory, swap, the kernel's `oom_kill` counter and each container's start time and OOMKilled flag; WORKAROUND shows whether an optional systemd service is running; on Reclaimer 0.10+ servers, FRAME RATE · RCON shows each server's frame rate, P50/P99/longest frame time and upload/download from RCON `health`, with no `health_cmd`. A new crash, an OOM kill or memory falling under your limit flashes a banner over every tab, goes in the feed and beeps. Needs `health_cmd` in the config: [see below](#health-watch) |
 | **F10 Plug-ins** | Panels drawn by programs you add, such as Gryphon's moderation log: each one's status, tables and buttons, and a badge that can turn CONDITION amber or red. Off until you name one in the config and approve it: [see below](#plug-ins) |
 
 Also:
@@ -97,6 +97,9 @@ Also:
   order by name, install date, downloads or rating (click a button again to turn it round), and a ● marks what is
   playing now. With a ReclaimerForge key loaded, a last group offers maps and game types the server doesn't have yet:
   choosing one asks, then installs it. (From ibigs/oni-rcon, by RifleJock.)
+- **Game queue.** On a Reclaimer 0.10 server, GAME QUEUE (F3) lines up to 16 games to play after this one: add a map and
+  mode, remove one, or clear the lot. The queued games show first in ROTATION as Q1, Q2 and so on. A playlist server set to
+  `queue_mode = "ballot"` puts them on the ballots instead of playing them in turn.
 - **Playlists.** PLAYLISTS (F3, desktop) lists the server folder's `playlists`, the ones made here and any other, with
   the playlists installed from F6. NEW and EDIT open an editor: a name, the seconds players get to vote (5 to 120) and
   its games, a map and a game type each, with a weight for how often it comes up. Three games at least, each map and game
@@ -130,7 +133,7 @@ Also:
 
 ## Install
 
-You need a Project Reclaimer dedicated server with RCON turned on (tested against 0.9.18), or let the desktop app
+You need a Project Reclaimer dedicated server with RCON turned on (written against 0.10.1; 0.9 servers work too, and features that need a newer server name the version above), or let the desktop app
 [host one](#host-a-server) for you.
 
 **Windows:** download [`oni-rcon-windows-x64.exe`](https://github.com/viik2k/oni-rcon/releases/download/v0.9.0/oni-rcon-windows-x64.exe) and double-click it. The build
@@ -260,7 +263,10 @@ no player saw it. It sends no live feed, so F2 stays quiet.
 RESTART SERVER on F3 (desktop app) runs the server's `restart_cmd` where the server is: on its `ssh` host, or on
 this machine without one. While a game is on it asks NOW or AFTER THIS GAME: after the game, players are told in
 chat, the server's card shows `↻ AFTER GAME`, and it restarts once the game ends (or at once if everyone leaves); RESTART
-SERVER again calls it off. The console has to stay open until then. The setup screen writes it for the servers it finds or hosts, and a server on this Windows
+SERVER again calls it off. The console has to stay open until then. On Reclaimer 0.10.3 or later it first sends
+`state save` and restarts only once the server says the game is on disk (if the save fails it says why and asks);
+with `restore_state` on in the server's dedicated.toml, the next start plays on from that game, rotation and live
+settings. The setup screen writes it for the servers it finds or hosts, and a server on this Windows
 machine that its server folder lists gets one without any config; for others, add it to the
 `[[server]]` block (or `[defaults]`; `{port}` is the server's RCON port):
 

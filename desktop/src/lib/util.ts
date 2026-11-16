@@ -16,6 +16,13 @@ export function pick(d: unknown, ...keys: string[]): any {
   return undefined;
 }
 
+/** Server 0.10's games a next-game queue holds. */
+export const QUEUE_MAX = 16;
+/** The 0.10 next-game queue from status's `next_games`, as [map, mode]; mode is "" when the entry names none. */
+// ponytail: RCON.md names the field but not its entries; takes {map, mode} objects or bare strings until a capture
+export const queued = (status: Dict | undefined): [string, string][] =>
+  ((status?.next_games ?? []) as unknown[]).map((e) => (e && typeof e === "object" ? [String(pick(e, "map", "base_map") ?? "?"), String(pick(e, "mode", "game") ?? "")] : [String(e), ""]));
+
 /** v as a number, or undefined. A count may come as the list of what it counts. */
 export function num(v: unknown): number | undefined {
   if (typeof v === "number") return v;
@@ -504,6 +511,14 @@ export function describe(ev: Dict, redact = true): Line {
     const failed = ev.ok === false; // a reload that changed nothing says why
     line.push([failed ? "RELOAD FAILED" : ev.action === "reload" ? "RELOAD" : "RELOAD APPLIED", failed ? RED : CYAN]);
     if (ev.text) line.push([`  ${redactText(String(ev.text), redact)}`]);
+  } else if (kind === "saved" || kind === "save_failed" || kind === "state_restored") { // 0.10.3: `state save`, `forge save`
+    const failed = kind === "save_failed";
+    line.push([kind === "state_restored" ? "STATE RESTORED" : failed ? "SAVE FAILED" : "SAVED", failed ? RED : CYAN]);
+    const what = ev.kind === "state" ? "game state" : ev.kind === "map" ? "Forge map" : ev.kind;
+    if (what) line.push([`  ${what}`, WHITE]);
+    const said = pick(ev, "result", "text");
+    if (said !== undefined) line.push([`  ${typeof said === "object" ? JSON.stringify(redactData(said, redact)) : redactText(String(said), redact)}`]);
+    if (ev.by) line.push(["  by ", DIM], [String(ev.by)]);
   } else if (kind === "health") {
     line.push(["HEALTH  " + String(ev.text ?? ""), ev.level === "crit" ? RED : AMBER]);
   } else {

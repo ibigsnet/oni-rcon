@@ -92,6 +92,7 @@ Blacklist { height: 1fr; }
 
 #health-setup { height: 1fr; padding: 1 2; }
 #crashes { height: 1fr; }
+#rconframes { height: auto; max-height: 12; }
 #health-bottom { height: 1fr; min-height: 12; }
 #host-box { width: 3fr; height: 1fr; padding: 0 1; }
 #host { height: auto; }
