@@ -22,12 +22,12 @@ export const COMMANDS = ["status", "players", "say", "tell", "kick", "ban", "ban
 export const OPS: [string, string, string][] = [["load", "LOAD MAP+MODE", "primary"], ["map", "CHANGE MAP", ""], ["mode", "CHANGE MODE", ""],
   ["nextmap", "QUEUE NEXT", ""], ["queue", "GAME QUEUE", ""], ["endround", "END ROUND", "warning"], ["endgame", "END GAME", "error"], ["next", "NEXT GAME", "warning"], ["replay", "REPLAY", "warning"], ["shuffle", "SHUFFLE TEAMS", ""],
   ["teamcount", "TEAM COUNT", ""], ["startvote", "CALL VOTE", ""], ["passvote", "PASS VOTE", "success"], ["cancelvote", "CANCEL VOTE", ""],
-  ["broadcast", "BROADCAST", "primary"], ["servername", "RENAME", ""], ["password", "JOIN PASSWORD", ""], ["maxping", "PING LIMIT", ""], ["capacity", "PLAYER CAPACITY", ""], ["camera", "CAMERA", ""],
+  ["broadcast", "BROADCAST", "primary"], ["servername", "RENAME", ""], ["password", "JOIN PASSWORD", ""], ["maxping", "PING LIMIT", ""], ["capacity", "PLAYER CAPACITY", ""], ["camera", "CAMERA", ""], ["restorestate", "RESTORE STATE", ""],
   ["charmods", "CHARACTER MODS", ""], ["playlist", "SWITCH PLAYLIST", ""], ["playlists", "PLAYLISTS", ""], ["newplaylist", "NEW PLAYLIST", ""], ["newgametype", "NEW GAME TYPE", ""], ["reconnect", "RECONNECT", ""], ["restart", "RESTART SERVER", "error"], ["remove", "REMOVE SERVER", "warning"]];
 /** What F3 does through a Project Reclaimer server's own files and formats: offered only on one. */
-export const RECLAIMER_OPS = ["capacity", "camera", "charmods", "playlist", "playlists", "newplaylist", "newgametype"];
+export const RECLAIMER_OPS = ["capacity", "camera", "restorestate", "charmods", "playlist", "playlists", "newplaylist", "newgametype"];
 export const OP_GROUPS: [string, string[]][] = [["MATCH", ["load", "map", "mode", "nextmap", "queue", "endround", "endgame", "next", "replay"]],
-  ["TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]], ["SERVER", ["broadcast", "servername", "password", "maxping", "capacity", "camera", "charmods", "playlist", "playlists", "newplaylist", "newgametype", "reconnect", "restart", "remove"]]];
+  ["TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]], ["SERVER", ["broadcast", "servername", "password", "maxping", "capacity", "camera", "restorestate", "charmods", "playlist", "playlists", "newplaylist", "newgametype", "reconnect", "restart", "remove"]]];
 export const BAN_OPS: [string, string, string][] = [["newban", "NEW BAN", "error"], ["unban", "UNBAN  u", "warning"], ["vpnallow", "VPN ALLOW  a", ""],
   ["vpnrevoke", "VPN REVOKE  r", ""], ["vpncheck", "CHECK IP", ""], ["adminadd", "ADD ADMIN  p", "primary"], ["adminremove", "REMOVE ADMIN  d", "warning"],
   ["pardon", "PARDON  o", ""]];
@@ -56,6 +56,7 @@ export const TIPS: Record<string, string> = {
   "op-maxping": "Stop players with a high ping from joining.",
   "op-capacity": "How many players the server takes at once. Saved in its dedicated.toml, so it holds after a restart. Server 0.9.18 or later applies it at once; an older one needs a restart.",
   "op-camera": "First person, third person, or each player's choice, for players on foot. Saved in its dedicated.toml; server 0.9.20 or later applies it from the next game.",
+  "op-restorestate": "Whether a restart plays on from the game the server saved (map, mode, rotation, Forge map and settings changed from here) or starts a fresh one. Saved in its dedicated.toml and applied at once; needs server 0.10.3 or later.",
   "op-charmods": "Which character mods (cosmetic mods with a customization.json) its games include, whether players must accept them or play only as them, and whether players can download mods they're missing from it. Saved in its dedicated.toml; needs server 0.9.18 or later.",
   "op-reconnect": "Drop this connection and sign in again.",
   "op-playlist": "Pick the playlist the server plays, from its playlists folder or installed from F6. Saved in its dedicated.toml: server 0.9.18 or later takes it up without a restart; an older one needs one.",
@@ -225,6 +226,23 @@ async function saveSetting(st: Station, key: string, value: unknown, what: strin
   }
   if (st.canRestart) return op("restart", st); // the server just saved, even if the selection moved meanwhile
   return oni.notify(`Saved: ${saved} once the server restarts.`, `${what} · ${st.label}`);
+}
+
+/** RESTORE STATE (0.10.3): dedicated.toml's restore_state. RESTART saves the game first either way (`state save`);
+ *  with this on, the next start plays on from it. */
+async function restoreState(st: Station) {
+  const what = `RESTORE STATE · ${st.label}`;
+  if (!savesState(st)) return oni.notify(`${st.label} runs ${st.info.version}: restoring its game after a restart needs server 0.10.3 or later.`, what, "warning");
+  let on: boolean;
+  try {
+    on = await invoke<boolean>("server_flag", { index: st.index, key: "restore_state" });
+  } catch (e) {
+    return oni.notify(String(e), what, "error", 15);
+  }
+  const choices: [string, string][] = [["On · a restart plays on from the saved game", "on"], ["Off · a restart starts a fresh game", "off"]];
+  const f = await oni.form("RESTORE STATE", [["v", "After a restart", on ? choices : [choices[1], choices[0]]]], { verb: "SAVE",
+    note: `It's ${on ? "on" : "off"} now. Saved in the server's dedicated.toml and applied at once. RESTART SERVER saves the game either way; with this on, the next start brings back its map, mode, rotation, Forge map and the settings changed from here.` });
+  if (f) return saveSetting(st, "restore_state", f.v === "on", "RESTORE STATE", `restore state ${f.v}`);
 }
 
 /** CHARACTER MODS (0.9.18): the character mods its games include, from its content folder's Mods, whether players must
@@ -419,6 +437,7 @@ export async function op(name: string, st = oni.cur) {
     if (f) return saveSetting(st, "camera", f.c, "CAMERA", CAMERAS.find(([, v]) => v === f.c)![0].toLowerCase());
     return;
   }
+  if (name === "restorestate") return restoreState(st);
   if (name === "charmods") return characterMods(st);
   if (name === "newgametype") return newGameType(st);
   if (name === "playlists") return playlistsManager(st);
