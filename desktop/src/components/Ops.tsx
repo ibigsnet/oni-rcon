@@ -6,7 +6,7 @@ import { BAN_OPS, OPS, OP_GROUPS, RECLAIMER_OPS, TIPS, bl, op, v010 } from "../a
 import { projectOf, reclaimerOnly } from "../lib/projects";
 import { norm, refsOf } from "../lib/forge";
 import { LEVEL_COLOR, TARGET, level } from "../lib/perf";
-import { behind, kickLeft, num, pick, redactAddr, redactText, sides, teamOf, until, voteText, vpnLists, type Dict, type Kick, type Line } from "../lib/util";
+import { behind, kickLeft, num, pick, queued, redactAddr, redactText, sides, teamOf, until, voteText, vpnLists, type Dict, type Kick, type Line } from "../lib/util";
 import { Btn, L, Panel, Table, useSize, type Row } from "./ui";
 
 const QUIET = new Set(["", "unknown", "none"]);
@@ -85,7 +85,7 @@ export function Operations() {
     ["VPN BLOCK", yesNo(s.block_vpn)], ["TEXT CHAT", yesNo(s.text_chat)], ["VOICE", yesNo(s.voice)], ["HIDDEN", yesNo(s.hidden, "YES", "NO")],
   ];
   const voting = "vote" in st.data ? !!vote.vote : null;
-  const off = (o: string) => (RECLAIMER_OPS.includes(o) && !game.reclaimer) || (o === "restart" ? !st.canRestart : o === "remove" ? false : ["capacity", "camera", "charmods", "playlist", "playlists", "newgametype"].includes(o) ? !st.contentDir : o === "newplaylist" ? !st.contentDir || !st.online : o !== "reconnect" && !st.online) || (["passvote", "cancelvote"].includes(o) && voting === false) || (o === "startvote" && voting === true) || (["next", "replay"].includes(o) && !v010(st));
+  const off = (o: string) => (RECLAIMER_OPS.includes(o) && !game.reclaimer) || (o === "restart" ? !st.canRestart : o === "remove" ? false : ["capacity", "camera", "charmods", "playlist", "playlists", "newgametype"].includes(o) ? !st.contentDir : o === "newplaylist" ? !st.contentDir || !st.online : o !== "reconnect" && !st.online) || (["passvote", "cancelvote"].includes(o) && voting === false) || (o === "startvote" && voting === true) || (["next", "replay", "queue"].includes(o) && !v010(st));
   const ops = Object.fromEntries(OPS.map(([o, l, v]) => [o, [l, v]]));
   const here = norm(s.map);
   const pulledRefs = new Set<string>();
@@ -101,6 +101,8 @@ export function Operations() {
     const flag = (v: string): Line => [[v, now ? AMBER : undefined], ...(pulledRefs.has(norm(v)) ? [["  ⚠ WITHDRAWN", RED]] as Line : [])];
     return { id: String(i), cells: [[[now ? "▶" : String(i + 1), now ? AMBER : undefined]], flag(mp), flag(md)] };
   });
+  // the queue plays before the rotation
+  rot.unshift(...queued(s).map(([mp, md], i): Row => ({ id: `q${i}`, cells: [[[`Q${i + 1}`, CYAN]], [[mp, CYAN]], [[md || "(current rules)", DIM]]] })));
   return (
     <div className="vsplit grow">
       <div className="hsplit" style={{ flex: "none", flexWrap: "wrap" }}>

@@ -16,6 +16,13 @@ export function pick(d: unknown, ...keys: string[]): any {
   return undefined;
 }
 
+/** Server 0.10's games a next-game queue holds. */
+export const QUEUE_MAX = 16;
+/** The 0.10 next-game queue from status's `next_games`, as [map, mode]; mode is "" when the entry names none. */
+// ponytail: RCON.md names the field but not its entries; takes {map, mode} objects or bare strings until a capture
+export const queued = (status: Dict | undefined): [string, string][] =>
+  ((status?.next_games ?? []) as unknown[]).map((e) => (e && typeof e === "object" ? [String(pick(e, "map", "base_map") ?? "?"), String(pick(e, "mode", "game") ?? "")] : [String(e), ""]));
+
 /** v as a number, or undefined. A count may come as the list of what it counts. */
 export function num(v: unknown): number | undefined {
   if (typeof v === "number") return v;
