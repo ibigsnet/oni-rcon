@@ -1,7 +1,8 @@
 // Server frame rate, as F7, F3 and the station cards show it. From ibigs/oni-rcon's perf.py and perf_view.py, by
 // RifleJock. The backend reads the lag reports out of each server's log (health.rs); this is what they mean.
 import { AMBER, GREEN, RED } from "../art/palette";
-import type { Dict } from "./util";
+import { projectOf } from "./projects";
+import { semver, since, type Dict } from "./util";
 
 export const TARGET = 60; // the server's frame rate when it keeps up
 export const SLOW = 54; // what the server calls falling behind
@@ -10,6 +11,25 @@ export const TARGET_MS = 1000 / TARGET;
 
 export const level = (fps: number): "ok" | "warn" | "crit" => (fps >= SLOW ? "ok" : fps >= BAD ? "warn" : "crit");
 export const LEVEL_COLOR = { ok: GREEN, warn: AMBER, crit: RED };
+
+/** RCON `health` (frame rate, traffic) is Reclaimer 0.10's. Asked too when the sign-in named no version: the reply
+ *  names one. */
+export const asksHealth = (info: Dict) => projectOf(info).reclaimer && (since(info.version, "0.10.0") || !semver(info.version));
+
+/** Reclaimer 0.10+'s RCON `health` reply as F7's row: fps null while idle (an empty lobby reports 0), frame times in
+ *  ms, traffic in bytes a second. null when the reply has no frame rate (0.9, another game). */
+export function rconFrames(d: unknown) {
+  if (!d || typeof d !== "object") return null;
+  const n = (k: string) => { const v = (d as Dict)[k]; return typeof v === "number" && Number.isFinite(v) ? v : null; };
+  const fps = n("frame_rate");
+  if (fps === null) return null;
+  return { fps: fps > 0 ? fps : null, p50: n("frame_ms_p50"), p99: n("frame_ms_p99"), max: n("frame_ms_max"),
+    up: n("upload_bytes_per_second"), down: n("download_bytes_per_second"), players: n("players") };
+}
+
+/** Bytes a second, the way a person reads them: 950 B/s, 12.3 KB/s, 1.2 MB/s. */
+export const rate = (bps: number | null) => (bps === null ? "—" : bps >= 1e6 ? `${(bps / 1e6).toFixed(1)} MB/s`
+  : bps >= 1e3 ? `${(bps / 1e3).toFixed(1)} KB/s` : `${Math.round(bps)} B/s`);
 
 /** The chart's top in ms: room for the longest frame, never under 50 (3x the target), a round number, at most 500. */
 export function scaleTop(hist: Dict[]): number {

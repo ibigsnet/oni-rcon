@@ -8,7 +8,7 @@ import { Superintendent, classify } from "../art/superintendent";
 import { BASE, face, faceClass } from "../art/archive";
 import { smooth, tones } from "../art/pixels";
 import { decrypt, noise } from "../art/palette";
-import { advice, level, scaleTop } from "./perf";
+import { advice, asksHealth, level, rate, rconFrames, scaleTop } from "./perf";
 import { filterTerms, nameDistance, rankedPlayers, type Found } from "./search";
 import { Findings, chatRequest, publicRoster } from "./findings";
 import { arrange, catalogItems, checkPlaylist, gameLabel, itemsFor, ordered, slug } from "./content";
@@ -565,5 +565,23 @@ describe("about", () => {
     for (const must of ["ONI RCON by Arche Labs (viik), version 1.11.0", "ibigs, LLC", "GNU Affero General Public License", "NO WARRANTY",
       "LICENSE", "https://github.com/viik2k/oni-rcon"]) expect(t).toContain(must);
     expect(aboutLine()).toBe("ONI RCON by Arche Labs (viik) · AGPL-3.0-or-later · no warranty · https://github.com/viik2k/oni-rcon");
+  });
+});
+
+describe("RCON health (Reclaimer 0.10+)", () => {
+  // captured 2026-11-11 from a 0.10.2 server in an empty lobby (`dedicated rcon --json health`)
+  const HEALTH_0102 = { download_bytes_per_second: 0.0, frame_ms_max: 0.0, frame_ms_p50: 0.0, frame_ms_p99: 0.0, frame_rate: 0.0, max_players: 16,
+    phase: "lobby", players: 0, upload_bytes_per_second: 0.0, uptime_seconds: 33044, version: "0.10.2" };
+  it("reads as a frame-rate row, an empty lobby as idle", () => {
+    expect(rconFrames(HEALTH_0102)).toEqual({ fps: null, p50: 0, p99: 0, max: 0, up: 0, down: 0, players: 0 });
+    expect(rconFrames({ ...HEALTH_0102, frame_rate: 47.5, frame_ms_p99: 61.2, upload_bytes_per_second: 183400, players: 12 }))
+      .toEqual({ fps: 47.5, p50: 0, p99: 61.2, max: 0, up: 183400, down: 0, players: 12 });
+    for (const d of [null, undefined, "x", { phase: "lobby" }, { ...HEALTH_0102, frame_rate: true }]) expect(rconFrames(d)).toBeNull();
+    expect([null, 0, 950, 12345, 1_240_000].map(rate)).toEqual(["—", "0 B/s", "950 B/s", "12.3 KB/s", "1.2 MB/s"]);
+  });
+  it("is asked of a 0.10+ Reclaimer server or one that named no version, never 0.9 or another game", () => {
+    for (const v of ["0.10.2", "v0.10.0", undefined, ""]) expect(asksHealth({ version: v }), String(v)).toBe(true);
+    expect(asksHealth({ version: "0.9.23" })).toBe(false);
+    expect(asksHealth({ protocol: "source", project: "renaissance", game: "Halo: Reach" })).toBe(false);
   });
 });

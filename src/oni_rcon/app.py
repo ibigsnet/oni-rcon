@@ -46,11 +46,11 @@ from .forge import (CREDIT, SITE, SORTS, WINDOWED, WINDOWS, WITHDRAWN, ForgeClie
                     compatible, favourite_listings, history_since, id_list, is_withdrawn, kind_of, latest_of,
                     listing_id, notes_of, owner_of, recent_of, scrub, scrub_data, shorten, tidy, title_of, usable, utc_iso,
                     version_id, version_label, versions_of, views_of, votes_of, when_of)
-from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, mem_level, swap_level
+from .health import BARE, OOM, RESTART, SIGNATURE, HealthSetup, Monitor, Notice, frames, mem_level, rate, swap_level
 from .install import SSH_OPTS, InstallError, place, plan, size_words, target_for
 from . import plugins as pl
 from .projects import mixed_by_project, project_of
-from .update import behind, since
+from .update import behind, semver, since
 from .plugins import ACTION_TIMEOUT, VIEW_TIMEOUT, Manifest, PluginError, PluginSetup, server_name
 from .medals import Medals
 from .prefs import Prefs
@@ -188,7 +188,8 @@ TAB_TIPS = {"assets": "Players on the selected server: click one for their file 
             "blacklist": "Bans, players allowed to join through a VPN, and who was kicked.",
             "console": "Type server commands directly. For when a button doesn't cover it.",
             "forge": "The ReclaimerForge catalog: community maps, gametypes and playlists for your servers.",
-            "health": "Crashes read from each server's log, the host's memory, and whether the workaround service runs.",
+            "health": "Crashes read from each server's log, frame rate over RCON, the host's memory, and whether the "
+                      "workaround service runs.",
             "plugins": "Programs you've added that draw their own panel here, such as Gryphon's moderation log."}
 
 # A connection failure in words to act on: (what the error says, card text, the full explanation)
@@ -259,6 +260,18 @@ def v010(st) -> bool:
     """A Project Reclaimer server on 0.10 or later: kick takes a block time, teamcount goes to 64, next and replay exist."""
     info = st.rcon.info if st.rcon else None
     return project_of(info).reclaimer and since((info or {}).get("version"), "0.10.0")
+
+
+def asks_health(st) -> bool:
+    """RCON `health` (frame rate, traffic) is Reclaimer 0.10's. Asked too when the sign-in named no version: the reply
+    names one."""
+    info = st.rcon.info if st.rcon else None
+    return project_of(info).reclaimer and (v010(st) or not semver((info or {}).get("version")))
+
+
+def fps_color(fps) -> str:
+    """60 is the server keeping up; under 54 players notice, under 40 it's choppy (desktop's lib/perf.ts)."""
+    return DIM if fps is None else GREEN if fps >= 54 else AMBER if fps >= 40 else RED
 
 
 def target_of(p: dict) -> str:
@@ -999,7 +1012,10 @@ GUIDE = [
                      "never shown on screen."),
         ("Thanks", CREDIT),
     ]),
-    ("F7  HEALTH  ·  crashes and memory", [
+    ("F7  HEALTH  ·  crashes, frame rate and memory", [
+        ("Frame rate", "From each Reclaimer 0.10+ server's RCON health, every 15 s: FPS (60 is keeping up, amber under "
+                       "54, red under 40; idle in an empty lobby), the median (P50), 99th-percentile (P99) and longest "
+                       "frame in ms, and the server's upload and download. Needs no health_cmd."),
         ("Crashes", "Each server's last crashes, read from its log: SIGNATURE is the known crash (an exception with its "
                     "code and RVA, the blue developer helmet under Wine), BARE is the engine probe failing with no "
                     "exception, which is a different fault, OOM-KILL is a container killed for memory, and "
@@ -1566,6 +1582,7 @@ class OniApp(App):
                 with TabPane("[dim]F7[/] HEALTH", id="health"):
                     yield Static(id="health-setup")
                     yield Roster(id="crashes", cursor_type="row", zebra_stripes=True)
+                    yield Roster(id="rconframes", cursor_type="none", zebra_stripes=True)
                     with Horizontal(id="health-bottom"):
                         with Vertical(id="host-box"):
                             yield Static(id="host")
@@ -1587,6 +1604,7 @@ class OniApp(App):
                 "#listings": ["", "TYPE", "TITLE", "AUTHOR", "RATING", "RECENT", "FIT"],
                 "#versions": ["", "VERSION", "PUBLISHED", "NOTES"],
                 "#crashes": ["WHEN", "SERVER", "CLASS", "PLAYERS", "DETAIL", "RCON"],
+                "#rconframes": ["SERVER", "FPS", "P50", "P99", "LONGEST", "UPLOAD", "DOWNLOAD", "PLAYERS"],
                 "#containers": ["SERVER", "STARTED", "UP", "OOMKILLED", "EXIT", "RESTARTS"]}
         for sel, c in cols.items():
             if not (t := self.query_one(sel, DataTable)).columns:  # once, whatever mounts twice
@@ -1837,6 +1855,16 @@ class OniApp(App):
                            Text(str(b.restarts) if b.restarts is not None else "—", DIM)])
                  for i, st in enumerate(self.stations) if (b := self.mon.boxes.get(str(st.index)))]
         self.query_one("#containers", Roster).fill(boxes)
+        ms = lambda v: Text(f"{v:.1f} ms" if v else "—", AMBER if v and v > 50 else DIM)
+        fr = [(str(st.index), [Text(st.label, WHITE),
+                               Text(f"{f['fps']:.0f}" if f["fps"] else "idle", fps_color(f["fps"])),
+                               ms(f["p50"]), ms(f["p99"]), ms(f["max"]), Text(rate(f["up"])), Text(rate(f["down"]), DIM),
+                               Text(str(f["players"]) if f["players"] is not None else "—")])
+              for st in self.stations if st.online and (f := frames(st.data.get("health")))]
+        t = self.query_one("#rconframes", Roster)
+        t.display = bool(fr)
+        t.fill(fr)
+        t.border_title = Text("FRAME RATE · RCON health, every 15 s")
         if self.hsetup.service:
             self.query_one("#workaround", Static).update(self.workaround_text(now))
             self.query_one("#workaround").border_title = Text(f"WORKAROUND · {self.hsetup.service}")
@@ -2294,7 +2322,8 @@ class OniApp(App):
             self.relabel()
             if st is self.cur:  # its version decides what fits it in the catalog
                 self.paint_forge()
-            self.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins")
+            self.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins",
+                       *(("health",) if asks_health(st) else ()))
             st.polled = time.monotonic()
             self.log_event(st, {"event": "uplink", "text": f"SECURE  {detail}"})
             self.note_mixed()
@@ -2392,10 +2421,14 @@ class OniApp(App):
                     where = st.server.where
                     self.rounds.observe(where, r["data"], lambda m, g, where=where: self.fstate.playing(where, m, g))
                 st.data[w] = r["data"]
+                if w == "health" and st.rcon and not semver(st.rcon.info.get("version")) and semver(r["data"].get("version")):
+                    st.rcon.info["version"] = r["data"]["version"]  # a sign-in reply that named none: health does
                 if w in ("status", "players") and self.watched(st):  # the crowd, for a crash's player count
                     self.mon.sample(str(st.index), num(r["data"].get("players")) if w == "status"
                                     else len(r["data"].get("players") or []))
         self.paint(st, what)
+        if "health" in what and self.query_one(TabbedContent).active == "health":
+            self.paint_health()
 
     def poll_fast(self) -> None:
         if not self.is_running:  # the 3 s timer can fire once more while quitting
@@ -2415,7 +2448,7 @@ class OniApp(App):
         for st in due[:-(-len(self.stations) // SLOW_POLL)]:
             st.polled = now
             empty = num(st.data.get("status", {}).get("players")) == 0 and not st.players
-            self.fetch(st, "status", *(() if empty else ("players",)))
+            self.fetch(st, "status", *(() if empty else ("players",)), *(("health",) if asks_health(st) else ()))
 
     async def cmd(self, st: Station, command: str, *args: str, toast: bool = True, show_data: bool = False,
                   quiet: bool = False, brief: bool = False, via: str = "") -> dict:
