@@ -31,6 +31,7 @@ SERVERS = [("Demo Ops | Slayer", 16, 9), ("Demo Ops | Big Team Battle", 32, 17),
 class Fake:
     def __init__(self, name: str, password: str, max_players: int, crowd: int, content_dir: str = ""):
         self.password, self.clients, self.engine, self.skill = password, set(), 0, {}
+        self.version = "0.9.7-demo"  # what it signs in as; a test sets "0.10.2" for what only 0.10 has
         self.content = Path(content_dir) if content_dir else None  # Forge installs land here, and get listed
         self.status = {"name": name, "address": "203.0.113.7:49176", "map": random.choice(MAPS), "mode": "Team Slayer",
                        "phase": "in_game", "max_players": max_players, "players": 0, "password_required": False,
@@ -90,7 +91,7 @@ class Fake:
                 await ws.send(json.dumps({"type": "auth", "ok": False, "error": "Wrong password."}))
                 return
             await ws.send(json.dumps({"type": "auth", "ok": True, "protocol": 1, "server": self.status["name"],
-                                      "version": "0.9.7-demo"}))
+                                      "version": self.version}))
             self.clients.add(ws)
             async for raw in ws:
                 msg = json.loads(raw)
@@ -129,6 +130,14 @@ class Fake:
                  "online": False},
                 *({"name": p["name"], "player_id": p["player_id"], "source": "rcon", "online": True}
                   for p in self.players if p.get("admin"))])
+        if cmd == "health":  # the 0.10 shape (0.10.2, captured); the clients ask only a 0.10+ server
+            n = len(self.players)
+            return ok("health: see data", {
+                "frame_rate": 59.6 - n * 0.4 if n else 0.0, "frame_ms_p50": 16.7 if n else 0.0,
+                "frame_ms_p99": 18.0 + n if n else 0.0, "frame_ms_max": 22.0 + 2 * n if n else 0.0,
+                "upload_bytes_per_second": 9000.0 * n, "download_bytes_per_second": 2500.0 * n,
+                "uptime_seconds": 33044, "players": n, "max_players": self.status["max_players"],
+                "phase": self.status.get("phase"), "version": self.version})
         if cmd in ("players", "status", "maps", "modes", "bans", "vpn", "vote", "nextmap"):
             return ok(f"{cmd}: see data", {
                 "players": lambda: {"count": len(self.players), "max_players": self.status["max_players"],

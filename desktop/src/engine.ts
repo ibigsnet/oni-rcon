@@ -16,8 +16,9 @@ import { Findings, publicRoster, quietKillMode, type Finding, type Who } from ".
 import {
   CATS, ID_LIKE, KIND, cmdLine, commonPrefix, explain, idForms, num, pick, playerIds, plain, reactionWords,
   pluginPace, pluginReply, pluginSnapshot, redactData, redactText, resolve, restartDue, splitTag, stripEnds, who, noteKick, typedParams,
-  type Dict, type Kick, type Line, type Pace,
+  semver, type Dict, type Kick, type Line, type Pace,
 } from "./lib/util";
+import { asksHealth } from "./lib/perf";
 
 export const FLEET = 12;
 const FANOUT = 4;
@@ -355,7 +356,7 @@ class Oni {
     if (state === "online") {
       st.medals.newGame(); // what happened while we were away is unknown
       this.relabel();
-      this.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins");
+      this.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins", ...(asksHealth(st.info) ? ["health"] : []));
       st.polled = performance.now();
       this.logEvent(st, { event: "uplink", text: `SECURE  ${detail}` });
       this.noteMixed();
@@ -511,6 +512,7 @@ class Oni {
         }
         if (w === "status") this.runner.status(st.where, r.data);
         st.data[w] = r.data;
+        if (w === "health" && !semver(st.info.version) && semver(r.data.version)) st.info.version = r.data.version; // a sign-in that named none
         if (w === "status" && restartDue(st.restartAfter, r.data)) this.restartNow(st, true);
       }
     });
@@ -522,6 +524,7 @@ class Oni {
       if (what.some((w) => w === "maps" || w === "modes")) bump("forge");
     }
     if (what.includes("status")) bump("mast");
+    if (what.includes("health")) bump("health");
   }
 
   private pollFast() {
@@ -537,7 +540,7 @@ class Oni {
     for (const st of due.slice(0, Math.ceil(this.stations.length / 15))) {
       st.polled = now;
       const empty = num(st.data.status?.players) === 0 && !st.players.length;
-      this.fetch(st, "status", ...(empty ? [] : ["players"]));
+      this.fetch(st, "status", ...(empty ? [] : ["players"]), ...(asksHealth(st.info) ? ["health"] : []));
     }
   }
 

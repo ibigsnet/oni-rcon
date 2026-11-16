@@ -27,6 +27,26 @@ from typing import Callable
 
 from .install import SSH_OPTS
 
+def frames(d) -> dict | None:
+    """Reclaimer 0.10+'s RCON `health` reply as F7's FRAME RATE row: fps (None while idle: an empty lobby reports 0),
+    frame times in ms, traffic in bytes a second. None when the reply has no frame rate (0.9, another game)."""
+    if not isinstance(d, dict):
+        return None
+    n = lambda k: float(v) if isinstance(v := d.get(k), (int, float)) and not isinstance(v, bool) else None
+    if (fps := n("frame_rate")) is None:
+        return None
+    return {"fps": fps if fps and fps > 0 else None, "p50": n("frame_ms_p50"), "p99": n("frame_ms_p99"),
+            "max": n("frame_ms_max"), "up": n("upload_bytes_per_second"), "down": n("download_bytes_per_second"),
+            "players": d.get("players")}
+
+
+def rate(bps) -> str:
+    """Bytes a second, the way a person reads them: 950 B/s, 12.3 KB/s, 1.2 MB/s."""
+    if bps is None:
+        return "—"
+    return f"{bps / 1e6:.1f} MB/s" if bps >= 1e6 else f"{bps / 1e3:.1f} KB/s" if bps >= 1e3 else f"{bps:.0f} B/s"
+
+
 # The 0.9.11 image under Wine crashes the game process when a player with the blue developer helmet is in the game.
 # The log says so in three lines; the first is missing from the other kind of crash, which is a different fault.
 #   Experimental startup exception 0xC0000005 in halo3.dll at RVA 0x14C73E
