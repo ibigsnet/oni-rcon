@@ -2,7 +2,7 @@
 // command on the selected station.
 import { invoke } from "@tauri-apps/api/core";
 import { DIM, TEAM_COLOR, TEAMS, WHITE, AMBER, CYAN, GREEN, RED } from "./art/palette";
-import { bump, oni, type Station } from "./engine";
+import { bump, oni, savesState, type Station } from "./engine";
 import { newPlaylist, type Playlist } from "./lib/content";
 import { projectOf, reclaimerOnly } from "./lib/projects";
 import { latestOf } from "./lib/forge";
@@ -200,7 +200,10 @@ async function restart(st: Station) {
     oni.call(st, "say", ["The server restarts after this game. It's back a minute or so later."], 3);
     return oni.notify("It restarts when this game ends, or at once if everyone leaves. RESTART SERVER again calls it off.", head, "warning", 10);
   }
-  if (when !== "now" || !(await oni.confirm(`RESTART  ${st.label}`, "Everyone on it is dropped and the game starts over; it's back in a minute or so. Servers sharing its container or window restart with it, and what was changed from here (name, join password, ping limit) goes back to dedicated.toml's.", "RESTART", true))) return;
+  const what = savesState(st)
+    ? "Everyone on it is dropped; it's back in a minute or so. It saves its game first, and with restore_state on in dedicated.toml it plays on from there, settings changed from here included. Servers sharing its container or window restart with it."
+    : "Everyone on it is dropped and the game starts over; it's back in a minute or so. Servers sharing its container or window restart with it, and what was changed from here (name, join password, ping limit) goes back to dedicated.toml's.";
+  if (when !== "now" || !(await oni.confirm(`RESTART  ${st.label}`, what, "RESTART", true))) return;
   return oni.restartNow(st);
 }
 

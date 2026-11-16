@@ -90,6 +90,9 @@ describe("words", () => {
     expect(d({ event: "admin_removed", id: "0123456789abcdef0123456789abcdef" })).toBe("ADMIN  01234567…  no longer admin");
     expect(d({ event: "control", action: "reload", ok: true, text: "max_players 16 -> 12" })).toBe("RELOAD  max_players 16 -> 12");
     expect(d({ event: "control", action: "reload", ok: false, text: "dedicated.toml: line 4" })).toBe("RELOAD FAILED  dedicated.toml: line 4");
+    expect(d({ event: "saved", kind: "state", by: "RCON", result: "data/s1/state.json" })).toBe("SAVED  game state  data/s1/state.json  by RCON");
+    expect(d({ event: "save_failed", kind: "map", by: "Alice", result: "No Forge game is being played" })).toBe("SAVE FAILED  Forge map  No Forge game is being played  by Alice");
+    expect(d({ event: "state_restored" })).toBe("STATE RESTORED");
     expect(d({ event: "control", action: "reload_applied", ok: true, text: "playlist" })).toBe("RELOAD APPLIED  playlist");
     expect(d({ event: "control", action: "kill_feed", ok: true, text: "x" }).startsWith("CONTROL  x")).toBe(true);
   });

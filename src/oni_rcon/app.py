@@ -607,6 +607,18 @@ def describe(ev: dict, names: dict, redact: bool = True) -> Text:
                     RED if failed else CYAN)
         if ev.get("text"):
             line.append(f"  {redact_text(str(ev['text']), redact)}")
+    elif kind in ("saved", "save_failed", "state_restored"):  # 0.10.3: `state save`, `forge save`
+        failed = kind == "save_failed"
+        line.append("STATE RESTORED" if kind == "state_restored" else "SAVE FAILED" if failed else "SAVED", RED if failed else CYAN)
+        what = {"state": "game state", "map": "Forge map"}.get(ev.get("kind"), ev.get("kind"))
+        if what:
+            line.append(f"  {what}", WHITE)
+        said = pick(ev, "result", "text")
+        if said is not None:
+            line.append("  " + (json.dumps(redact_data(said, redact)) if isinstance(said, (dict, list)) else redact_text(str(said), redact)))
+        if ev.get("by"):
+            line.append("  by ", DIM)
+            line.append(str(ev["by"]))
     elif kind == "health":
         line.append("HEALTH  " + str(ev.get("text", "")), RED if ev.get("level") == "crit" else AMBER)
     else:

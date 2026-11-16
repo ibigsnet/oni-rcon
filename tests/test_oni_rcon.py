@@ -786,6 +786,11 @@ def test_admin_and_reload_events_get_a_layout():
         == "RELOAD FAILED  dedicated.toml: line 4"
     assert d({"event": "control", "action": "reload_applied", "ok": True, "text": "playlist"}) == "RELOAD APPLIED  playlist"
     assert d({"event": "control", "action": "kill_feed", "ok": True, "text": "x"}).startswith("CONTROL  x")
+    assert d({"event": "saved", "kind": "state", "by": "RCON", "result": "data/s1/state.json"}) \
+        == "SAVED  game state  data/s1/state.json  by RCON"
+    assert d({"event": "save_failed", "kind": "map", "by": "Alice", "result": "No Forge game is being played"}) \
+        == "SAVE FAILED  Forge map  No Forge game is being played  by Alice"
+    assert d({"event": "state_restored"}) == "STATE RESTORED"
 
 
 def test_f4_pardons_a_kick():

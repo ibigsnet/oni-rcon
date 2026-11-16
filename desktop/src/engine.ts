@@ -15,10 +15,13 @@ import { mixedByProject, projectOf } from "./lib/projects";
 import { Findings, publicRoster, quietKillMode, type Finding, type Who } from "./lib/findings";
 import {
   CATS, ID_LIKE, KIND, behind, cmdLine, commonPrefix, explain, idForms, num, pick, playerIds, plain, reactionWords,
-  pluginPace, pluginReply, pluginSnapshot, redactData, redactText, resolve, restartDue, splitTag, stripEnds, who, noteKick, typedParams,
+  pluginPace, pluginReply, pluginSnapshot, redactData, redactText, resolve, restartDue, since, splitTag, stripEnds, who, noteKick, typedParams,
   semver, type Dict, type Kick, type Line, type Pace,
 } from "./lib/util";
 import { asksHealth } from "./lib/perf";
+
+/** Reclaimer 0.10.3 and later save their game, rotation and live settings on `state save`. */
+export const savesState = (st: Station) => projectOf(st.info).reclaimer && since(st.info.version, "0.10.3");
 
 export const FLEET = 12;
 const FANOUT = 4;
@@ -443,15 +446,24 @@ class Oni {
   }
 
   /** RESTART SERVER: the server's restart_cmd. `after` = the RESTART AFTER THIS GAME it was waiting for, so the
-   *  players still on it hear why they're dropped. */
+   *  players still on it hear why they're dropped. Reclaimer 0.10.3+ saves its game first (`state save`, which answers
+   *  once it is on disk), and with dedicated.toml's restore_state the next start plays on from it. A save that fails
+   *  stops the restart unless the admin says go anyway. */
   async restartNow(st: Station, after = false) {
     const head = `RESTART · ${st.label}`;
     if (after) {
       st.restartAfter = false;
       bump("cards", "ops");
-      await this.call(st, "say", ["Restarting the server now. It's back in a minute or so."], 3);
     }
-    this.notify(after ? "The game's over: restarting… the console reconnects by itself." : "Restarting… the console reconnects by itself.", head, "warning");
+    let saved = "";
+    if (st.online && savesState(st)) {
+      const r = await this.call(st, "state", ["save"], 30);
+      if (r.ok) saved = ` ${r.text ?? ""}`.trimEnd();
+      else if (!(await this.confirm(`NOT SAVED · ${st.label}`, `The server couldn't save its game: ${r.text || "no answer"}. Restart anyway? The game starts over.`, "RESTART", true)))
+        return this.notify("Not restarted: it plays on.", head);
+    }
+    if (after) await this.call(st, "say", ["Restarting the server now. It's back in a minute or so."], 3);
+    this.notify((after ? "The game's over: restarting…" : "Restarting…") + saved + " The console reconnects by itself.", head, "warning", saved ? 10 : undefined);
     return invoke("restart_server", { index: st.index }).then(() => this.notify("Restarted.", head),
       (e) => this.notify(String(e), `RESTART FAILED · ${st.label}`, "error", 15));
   }

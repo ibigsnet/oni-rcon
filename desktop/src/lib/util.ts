@@ -511,6 +511,14 @@ export function describe(ev: Dict, redact = true): Line {
     const failed = ev.ok === false; // a reload that changed nothing says why
     line.push([failed ? "RELOAD FAILED" : ev.action === "reload" ? "RELOAD" : "RELOAD APPLIED", failed ? RED : CYAN]);
     if (ev.text) line.push([`  ${redactText(String(ev.text), redact)}`]);
+  } else if (kind === "saved" || kind === "save_failed" || kind === "state_restored") { // 0.10.3: `state save`, `forge save`
+    const failed = kind === "save_failed";
+    line.push([kind === "state_restored" ? "STATE RESTORED" : failed ? "SAVE FAILED" : "SAVED", failed ? RED : CYAN]);
+    const what = ev.kind === "state" ? "game state" : ev.kind === "map" ? "Forge map" : ev.kind;
+    if (what) line.push([`  ${what}`, WHITE]);
+    const said = pick(ev, "result", "text");
+    if (said !== undefined) line.push([`  ${typeof said === "object" ? JSON.stringify(redactData(said, redact)) : redactText(String(said), redact)}`]);
+    if (ev.by) line.push(["  by ", DIM], [String(ev.by)]);
   } else if (kind === "health") {
     line.push(["HEALTH  " + String(ev.text ?? ""), ev.level === "crit" ? RED : AMBER]);
   } else {
