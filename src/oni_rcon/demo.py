@@ -224,6 +224,19 @@ class Fake:
                 if cmd == "mode" and args or cmd == "load" and len(args) > 1:
                     self.status["mode"] = args[-1]
             return ok(f"Accepted: {cmd} {' '.join(args)}.")
+        if cmd == "queue":  # 0.10's next-game queue; the demo answers it whatever version it reports
+            q, sub = self.status.setdefault("next_games", []), args[0] if args else "list"
+            if sub == "add" and len(args) > 1 and len(q) < 16:
+                q.append({"map": args[1], "mode": args[2] if len(args) > 2 else None})
+            elif sub == "remove" and len(args) > 1 and args[1].isdigit() and 0 < int(args[1]) <= len(q):
+                q.pop(int(args[1]) - 1)
+            elif sub == "clear":
+                q.clear()
+            elif sub != "list":
+                return no("queue [list | add <map> [mode] | remove <place> | clear]")
+            if sub != "list":
+                await self.emit("control", action="queue", text=f"{len(q)} games queued.")
+            return ok(f"{len(q)} games queued.", {"next_games": q, "queue_mode": "play"})
         if cmd in ("endround", "endgame", "shuffle", "teamcount", "passvote", "cancelvote", "startvote"):
             if cmd == "startvote":
                 self.vote = {"subject": args[0] if args else "?", "yes": 0, "no": 0,

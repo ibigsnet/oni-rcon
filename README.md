@@ -97,6 +97,9 @@ Also:
   order by name, install date, downloads or rating (click a button again to turn it round), and a ● marks what is
   playing now. With a ReclaimerForge key loaded, a last group offers maps and game types the server doesn't have yet:
   choosing one asks, then installs it. (From ibigs/oni-rcon, by RifleJock.)
+- **Game queue.** On a Reclaimer 0.10 server, GAME QUEUE (F3) lines up to 16 games to play after this one: add a map and
+  mode, remove one, or clear the lot. The queued games show first in ROTATION as Q1, Q2 and so on. A playlist server set to
+  `queue_mode = "ballot"` puts them on the ballots instead of playing them in turn.
 - **Playlists.** PLAYLISTS (F3, desktop) lists the server folder's `playlists`, the ones made here and any other, with
   the playlists installed from F6. NEW and EDIT open an editor: a name, the seconds players get to vote (5 to 120) and
   its games, a map and a game type each, with a weight for how often it comes up. Three games at least, each map and game

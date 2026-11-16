@@ -1,13 +1,13 @@
 // What the buttons and keys do: each one a small dialog flow, the same as the terminal console's, ending in a
 // command on the selected station.
 import { invoke } from "@tauri-apps/api/core";
-import { DIM, TEAM_COLOR, TEAMS, WHITE, AMBER, CYAN } from "./art/palette";
+import { DIM, TEAM_COLOR, TEAMS, WHITE, AMBER, CYAN, GREEN, RED } from "./art/palette";
 import { bump, oni, type Station } from "./engine";
 import { newPlaylist, type Playlist } from "./lib/content";
 import { projectOf, reclaimerOnly } from "./lib/projects";
 import { latestOf } from "./lib/forge";
 import { CATALOG, DISCORD_STEPS, MAX_RULES, ROLES, STARTERS, TELEGRAM_STEPS, TEMPLATE_HELP, block, chatOk, describe, describeBlock, plan, relay, sample, stepWords, telegramWhy, validate, type Field, type Part } from "./lib/rules";
-import { behind, since, CAMERAS, redactData, hotReloads, notesText, num, pardonTarget, pick, redactText, restartDue, targetOf, vpnCheck, type Dict, type Kick, type Line } from "./lib/util";
+import { behind, since, CAMERAS, redactData, hotReloads, notesText, num, pardonTarget, pick, queued, QUEUE_MAX, redactText, restartDue, targetOf, vpnCheck, type Dict, type Kick, type Line } from "./lib/util";
 
 export const BAN_TIMES: [string, string][] = [["Permanent", ""], ["30 minutes", "30m"], ["2 hours", "2h"], ["12 hours", "12h"], ["1 day", "1d"], ["7 days", "7d"], ["2 weeks", "2w"], ["30 days", "30d"]];
 export const KICK_TIMES: [string, string][] = [["Next step (10, 30, 60, then 120 minutes)", ""], ["None: they can rejoin at once", "0"], ["10 minutes", "10m"], ["1 hour", "1h"], ["2 hours", "2h"]];
@@ -20,13 +20,13 @@ export const COMMANDS = ["status", "players", "say", "tell", "kick", "ban", "ban
   "vote", "startvote", "passvote", "cancelvote", "admin", "admins", "pardon", "reload", "next", "replay", "health", "mutes", "queue", "immune", "help"];
 
 export const OPS: [string, string, string][] = [["load", "LOAD MAP+MODE", "primary"], ["map", "CHANGE MAP", ""], ["mode", "CHANGE MODE", ""],
-  ["nextmap", "QUEUE NEXT", ""], ["endround", "END ROUND", "warning"], ["endgame", "END GAME", "error"], ["next", "NEXT GAME", "warning"], ["replay", "REPLAY", "warning"], ["shuffle", "SHUFFLE TEAMS", ""],
+  ["nextmap", "QUEUE NEXT", ""], ["queue", "GAME QUEUE", ""], ["endround", "END ROUND", "warning"], ["endgame", "END GAME", "error"], ["next", "NEXT GAME", "warning"], ["replay", "REPLAY", "warning"], ["shuffle", "SHUFFLE TEAMS", ""],
   ["teamcount", "TEAM COUNT", ""], ["startvote", "CALL VOTE", ""], ["passvote", "PASS VOTE", "success"], ["cancelvote", "CANCEL VOTE", ""],
   ["broadcast", "BROADCAST", "primary"], ["servername", "RENAME", ""], ["password", "JOIN PASSWORD", ""], ["maxping", "PING LIMIT", ""], ["capacity", "PLAYER CAPACITY", ""], ["camera", "CAMERA", ""],
   ["charmods", "CHARACTER MODS", ""], ["playlist", "SWITCH PLAYLIST", ""], ["playlists", "PLAYLISTS", ""], ["newplaylist", "NEW PLAYLIST", ""], ["newgametype", "NEW GAME TYPE", ""], ["reconnect", "RECONNECT", ""], ["restart", "RESTART SERVER", "error"], ["remove", "REMOVE SERVER", "warning"]];
 /** What F3 does through a Project Reclaimer server's own files and formats: offered only on one. */
 export const RECLAIMER_OPS = ["capacity", "camera", "charmods", "playlist", "playlists", "newplaylist", "newgametype"];
-export const OP_GROUPS: [string, string[]][] = [["MATCH", ["load", "map", "mode", "nextmap", "endround", "endgame", "next", "replay"]],
+export const OP_GROUPS: [string, string[]][] = [["MATCH", ["load", "map", "mode", "nextmap", "queue", "endround", "endgame", "next", "replay"]],
   ["TEAMS & VOTES", ["shuffle", "teamcount", "startvote", "passvote", "cancelvote"]], ["SERVER", ["broadcast", "servername", "password", "maxping", "capacity", "camera", "charmods", "playlist", "playlists", "newplaylist", "newgametype", "reconnect", "restart", "remove"]]];
 export const BAN_OPS: [string, string, string][] = [["newban", "NEW BAN", "error"], ["unban", "UNBAN  u", "warning"], ["vpnallow", "VPN ALLOW  a", ""],
   ["vpnrevoke", "VPN REVOKE  r", ""], ["vpncheck", "CHECK IP", ""], ["adminadd", "ADD ADMIN  p", "primary"], ["adminremove", "REMOVE ADMIN  d", "warning"],
@@ -43,6 +43,7 @@ export const TIPS: Record<string, string> = {
   "op-endround": "End this round as if its time ran out.",
   "op-endgame": "End the whole game now, with the scores as they stand.",
   "op-shuffle": "Mix the players up across the teams.",
+  "op-queue": "Line up to 16 games to play after this one, in turn (on a playlist server, they go on the ballots). Needs server 0.10 or later.",
   "op-next": "End this game and start the next one now. Needs server 0.10 or later.",
   "op-replay": "End this game and play it again from the start. Needs server 0.10 or later.",
   "op-teamcount": "Spread the players over 2 to 8 teams (up to 64 on server 0.10 or later).",
@@ -456,6 +457,20 @@ export async function op(name: string, st = oni.cur) {
     const args = [mp, md].filter(Boolean);
     if (name !== "nextmap" && !(await oni.confirm(`${name.toUpperCase()}  ${args.join(" / ")}`, "Ends the current game for everyone on this station; the new one starts in the next lobby."))) return;
     oni.send(st, name, args, ["status", "nextmap"]);
+  } else if (name === "queue") {
+    const s = st.data.status ?? {}, q = queued(s);
+    const what = await oni.pick(`GAME QUEUE · ${q.length} of ${QUEUE_MAX}${s.queue_mode === "ballot" ? " · ON THE BALLOTS" : ""}`, [
+      ...(q.length < QUEUE_MAX ? [[[["+ ADD A GAME", GREEN]], "add"] as [Line, string]] : []),
+      ...q.map(([mp, md], i) => [[[`REMOVE  ${i + 1}. `, DIM], [mp, WHITE], [md ? `  ${md}` : "", DIM]], String(i + 1)] as [Line, string]),
+      ...(q.length > 1 ? [[[["CLEAR THE QUEUE", RED]], "clear"] as [Line, string]] : [])]);
+    if (what === "add") {
+      if (!entries(st, "maps").length) return oni.notify("Map list not loaded yet.", "", "warning");
+      const mp = await browse(st, "maps", "QUEUE · SELECT MAP");
+      const md = mp ? await browse(st, "modes", "QUEUE · SELECT MODE", true) : null;
+      if (mp && md !== null) oni.send(st, "queue", ["add", mp, md].filter(Boolean), ["status"]);
+    } else if (what === "clear") {
+      if (await oni.confirm("CLEAR THE QUEUE", `Drops all ${q.length} queued games; the rotation carries on after this game.`)) oni.send(st, "queue", ["clear"], ["status"]);
+    } else if (what) oni.send(st, "queue", ["remove", what], ["status"]);
   } else if (["endround", "endgame", "next", "replay", "shuffle"].includes(name)) {
     const body = ({ endround: "Ends the round as if its time ran out.", endgame: "Ends the game with the scores as they stand.",
       next: "Ends this game and starts the next one now.", replay: "Ends this game and starts it again from the beginning.",

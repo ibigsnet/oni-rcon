@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { behind, since, describe as describeEvent, explain, hotReloads, mixedVersions, idForms, kickLeft, notesText, noteKick, pardonTarget, parseCommand, plain, pluginPace, pluginReply, pluginSnapshot, reactionWords, restartDue, redactData, redactText, sides, splitTag, typedParams, vpnCheck, vpnLists, type Kick } from "./util";
+import { behind, since, describe as describeEvent, explain, hotReloads, mixedVersions, idForms, kickLeft, notesText, noteKick, pardonTarget, parseCommand, queued, plain, pluginPace, pluginReply, pluginSnapshot, reactionWords, restartDue, redactData, redactText, sides, splitTag, typedParams, vpnCheck, vpnLists, type Kick } from "./util";
 import { Medals } from "./medals";
 import { mixedByProject, projectOf, reclaimerOnly } from "./projects";
 import { aboutLine, aboutText } from "./about";
@@ -565,6 +565,15 @@ describe("about", () => {
     for (const must of ["ONI RCON by Arche Labs (viik), version 1.11.0", "ibigs, LLC", "GNU Affero General Public License", "NO WARRANTY",
       "LICENSE", "https://github.com/viik2k/oni-rcon"]) expect(t).toContain(must);
     expect(aboutLine()).toBe("ONI RCON by Arche Labs (viik) · AGPL-3.0-or-later · no warranty · https://github.com/viik2k/oni-rcon");
+  });
+});
+
+describe("game queue", () => {
+  it("reads status's next_games as [map, mode], whatever shape its entries take", () => {
+    expect(queued({ next_games: [{ map: "guardian", mode: "oddball" }, { map: "valhalla", mode: null }, "The Pit"] }))
+      .toEqual([["guardian", "oddball"], ["valhalla", ""], ["The Pit", ""]]);
+    expect(queued({})).toEqual([]);
+    expect(queued(undefined)).toEqual([]);
   });
 });
 
