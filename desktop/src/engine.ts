@@ -9,12 +9,12 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { AMBER, CYAN, DIM, GREEN, RED, WHITE } from "./art/palette";
 import { Superintendent, classify } from "./art/superintendent";
 import { Medals } from "./lib/medals";
-import { Engine, type Roles } from "./lib/rules";
+import { Engine, privateCommands, registerCommands, type Roles } from "./lib/rules";
 import { Runner, type Note } from "./lib/runner";
-import { mixedByProject } from "./lib/projects";
+import { mixedByProject, projectOf } from "./lib/projects";
 import { Findings, publicRoster, quietKillMode, type Finding, type Who } from "./lib/findings";
 import {
-  CATS, ID_LIKE, KIND, cmdLine, commonPrefix, explain, idForms, num, pick, playerIds, plain, reactionWords,
+  CATS, ID_LIKE, KIND, behind, cmdLine, commonPrefix, explain, idForms, num, pick, playerIds, plain, reactionWords,
   pluginPace, pluginReply, pluginSnapshot, redactData, redactText, resolve, restartDue, splitTag, stripEnds, who, noteKick, typedParams,
   semver, type Dict, type Kick, type Line, type Pace,
 } from "./lib/util";
@@ -97,6 +97,8 @@ export class Station {
   aliases = new Map<string, string>();
   unmatched = false;
   kicks = new Map<string, Kick>(); // who it saw kicked, for F4's PARDON
+  privateCmds: Map<string, string> | null = null; // the private commands registered on this link (word → usage); null: none, or refused
+  cmdSync: Promise<void> = Promise.resolve();
   constructor(public index: number, public where: string, public name: string, public ssh: string, public url: string,
     public contentDir: string, public host: string, public port: number, public canRestart = false) {
     this.label = name || where;
@@ -193,6 +195,8 @@ class Oni {
   findings = new Findings();
   /** Automation rules: they run while this console is open, and act through the same calls as the buttons do. */
   rules: Dict[] = [];
+  /** The words running Studio scripts hook with command(): registered as private commands after the rules' own. */
+  studioWords: string[] = [];
   roles: Roles = {};
   runner = new Runner({
     call: (where, command, args) => {
@@ -271,6 +275,7 @@ class Oni {
       const f = await invoke<Dict>("automation_load");
       [this.rules, this.roles, this.runner.webhooks, this.runner.chats] = [f.rules, f.roles, f.webhooks, f.telegram ?? {}];
       this.runner.load(this.rules, this.roles);
+      for (const st of this.stations) this.syncCommands(st);
     } catch (e) {
       this.notify(String(e), "AUTOMATION", "error", 10);
     }
@@ -281,6 +286,32 @@ class Oni {
     await invoke("automation_save", { rules, roles });
     [this.rules, this.roles] = [rules, roles];
     this.runner.load(rules, roles);
+    for (const st of this.stations) this.syncCommands(st);
+  }
+
+  studioCommands(words: unknown[]) {
+    const ok = [...new Set(words.map((w) => String(w).toLowerCase()).filter((w) => /^[a-z0-9_-]{1,23}$/.test(w)))].sort();
+    if (ok.join(" ") === this.studioWords.join(" ")) return;
+    this.studioWords = ok;
+    for (const st of this.stations) this.syncCommands(st);
+  }
+
+  /** Reclaimer 0.10.3+ private commands: register the words this server's !command rules answer, so a player's !word
+   *  (or /word) reaches only the server, never everyone's chat, and /help lists it. They last until a restart, which
+   *  drops the link, so `fresh` (a new link) adds them all again: remove first, as a reconnect may find them still there.
+   *  A server that refuses `commands` keeps matching chat, as before.
+   *  ponytail: another console on the same server can remove a word this one added; per-console words if that bites. */
+  syncCommands(st: Station, fresh = false) {
+    st.cmdSync = st.cmdSync.then(async () => {
+      if (!st.online || !projectOf(st.info).reclaimer || behind(st.info.version, "0.10.3")) return; // no version (0.10.1+ sign-in): ask
+      if (fresh) st.privateCmds = (await this.call(st, "commands")).ok ? new Map() : null;
+      const had = st.privateCmds;
+      if (!had) return;
+      const failed = await registerCommands((args) => this.call(st, "commands", args), had, privateCommands(this.rules, st.where, this.studioWords), fresh);
+      const head: Line = [[new Date().toTimeString().slice(0, 9), DIM], [`${st.label} `, CYAN]];
+      if (fresh && had.size) this.logLine([...head, [`PRIVATE COMMANDS  ${[...had.keys()].map((w) => "!" + w).join(" ")}`, DIM]]);
+      if (failed.length) this.logLine([...head, [`PRIVATE COMMANDS NOT ADDED  ${failed.join(" · ")}`, AMBER]]);
+    });
   }
 
   /** What a rule did goes in the command log, the audit trail beside everything typed by hand. */
@@ -357,6 +388,7 @@ class Oni {
       st.medals.newGame(); // what happened while we were away is unknown
       this.relabel();
       this.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins", ...(asksHealth(st.info) ? ["health"] : []));
+      this.syncCommands(st, true);
       st.polled = performance.now();
       this.logEvent(st, { event: "uplink", text: `SECURE  ${detail}` });
       this.noteMixed();

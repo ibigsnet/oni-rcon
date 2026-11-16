@@ -134,6 +134,7 @@ function Frame({ p, b }: { p: Plugin; b: Dict }) {
       if (e.source !== ref.current?.contentWindow || !m || typeof m !== "object") return;
       if (m.oni === "ready") latest.current();
       else if (m.oni === "refresh") oni.pluginView(p);
+      else if (m.oni === "commands" && p.m.builtin && Array.isArray(m.words)) oni.studioCommands(m.words); // Studio's command() words
       else if (m.oni === "height" && Number.isFinite(m.px)) setH(Math.max(40, Math.min(4000, m.px)));
       // ponytail: no rate limit on a page's RCON or calls; each is logged, and only its permitted commands go out
       else if (m.oni === "rcon" && typeof m.command === "string") oni.pluginPageRcon(p, m).then((r) => send({ oni: "rcon-reply", id: m.id ?? null, ...r }));

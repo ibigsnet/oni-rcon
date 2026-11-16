@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Engine, MatchEvents, STARTERS, VIP_GUARD, cronDue, cronFields, chatOk, describe as describeRule, fill, plan, relay, sample, telegramWhy, validate, zoned } from "./rules";
+import { Engine, MAX_PRIVATE, MatchEvents, STARTERS, VIP_GUARD, cronDue, privateCommands, registerCommands, cronFields, chatOk, describe as describeRule, fill, plan, relay, sample, telegramWhy, validate, zoned } from "./rules";
 
 const rule = (o: Record<string, any>) => validate({ name: "t", ...o });
 const lobby = (e: Engine, key = "s1") => {
@@ -169,6 +169,54 @@ describe("rules", () => {
     const f = e.event("s1", { event: "chat", name: "Ann", text: "!Admin cheater here" });
     expect(f).toHaveLength(1);
     expect(plan(e, f[0])[0].args).toEqual(["tell", "a".repeat(64), "cheater here"]);
+  });
+
+  // a 0.10.3 private command, as RCON.md describes the event: word, args, text, the player's ID and role, private
+  const priv = (o = {}) => ({ type: "event", event: "command", time: 1, player_id: "b".repeat(64), word: "admin", args: ["cheater", "here"],
+    text: "!admin cheater here", role: "moderator", private: true, ...o });
+
+  it("a private command (0.10.3) fires the same !command rule, with its args, the player and the server's role", () => {
+    const fresh = () => {
+      const e = new Engine([rule({ when: { type: "command", command: "!admin" }, if: [{ type: "player_role", role: "mod" }], then: [{ type: "tell_player", message: "{player}: {args}" }] })]);
+      lobby(e);
+      return e;
+    };
+    let e = fresh();
+    const f = e.event("s1", priv());
+    expect(f).toHaveLength(1);
+    expect(plan(e, f[0])[0].args).toEqual(["tell", "b".repeat(64), "Bob: cheater here"]);
+    expect(fresh().event("s1", priv({ role: "player" }))).toHaveLength(0); // the role condition reads the event's role
+    e = fresh();
+    const g = e.event("s1", priv({ word: "/ADMIN", args: "x" })); // a prefix or case doesn't matter
+    expect(g).toHaveLength(1);
+    expect(plan(e, g[0])[0].args).toEqual(["tell", "b".repeat(64), "Bob: x"]);
+    expect(fresh().event("s1", priv({ word: "rules" }))).toHaveLength(0);
+    expect(fresh().event("s1", priv({ private: undefined }))).toHaveLength(0); // only the server's private commands
+  });
+
+  it("private commands: each enabled !command rule's word for that server, once, at most 16", () => {
+    const cmd = (command: string, o = {}) => rule({ name: `${command} rule`, when: { type: "command", command }, then: [{ type: "tell_player", message: "hi" }], ...o });
+    const rules = [cmd("!admin"), cmd("!admin", { name: "second" }), cmd("!rules", { enabled: false }), cmd("!kills", { servers: ["s2"] }), rule({ when: { type: "join" }, then: [{ type: "say", to: "this", message: "hi" }] })];
+    expect(privateCommands(rules, "s1")).toEqual([["admin", "!admin rule"]]);
+    expect(privateCommands(rules, "s2")).toEqual([["admin", "!admin rule"], ["kills", "!kills rule"]]);
+    expect(privateCommands(Array.from({ length: 20 }, (_, i) => cmd(`!c${i}`)), "s1")).toHaveLength(MAX_PRIVATE);
+    expect(privateCommands(rules, "s1", ["kills", "admin"])).toEqual([["admin", "!admin rule"], ["kills", "!kills"]]); // Studio's, after the rules'
+  });
+
+  it("registering private commands: fresh adds all (removing first), then only the difference", async () => {
+    const sent: string[] = [];
+    const call = async (args: string[]) => (sent.push(args.join(" ")), { ok: args[1] !== "bad", text: "no" });
+    const had = new Map<string, string>();
+    expect(await registerCommands(call, had, [["admin", "!admin call"], ["bad", "x"]], true)).toEqual(["!bad: no"]);
+    expect(sent).toEqual(["remove admin", "add admin !admin call", "remove bad", "add bad x"]);
+    expect([...had]).toEqual([["admin", "!admin call"]]);
+    sent.length = 0;
+    await registerCommands(call, had, [["admin", "!admin call"], ["kills", "!kills"]], false);
+    expect(sent).toEqual(["add kills !kills"]);
+    sent.length = 0;
+    await registerCommands(call, had, [["kills", "your kills"]], false);
+    expect(sent).toEqual(["remove admin", "remove kills", "add kills your kills"]);
+    expect([...had]).toEqual([["kills", "your kills"]]);
   });
 
   it("match boundaries come from phase changes", () => {

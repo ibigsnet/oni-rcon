@@ -97,7 +97,7 @@ plug-in without the `addresses` permission. These limits apply:
 | | |
 |---|---|
 | `on(kind, filter?, handler)` | Runs `handler(ev)` for each event of a kind (`"chat"`, `"kill"`, …), a list of kinds, or `"*"` for every kind. `filter` is an object of fields to match (`text` ignores case, a list matches any of its items, a RegExp tests the field) or a function of `ev`. Returns a function that stops it. |
-| `command(name, filter?, handler)` | Runs `handler(ev)` when a chat line starts with `name` (or one of a list), like `"!rules"`. Case is ignored, and the server's own lines never count. `ev.command` is the word, `ev.rest` the text after it, `ev.args` its words. |
+| `command(name, filter?, handler)` | Runs `handler(ev)` when a chat line starts with `name` (or one of a list), like `"!rules"`. Case is ignored, and the server's own lines never count. `ev.command` is the word, `ev.rest` the text after it, `ev.args` its words. On Reclaimer 0.10.3+ Oni registers the word as one of the server's private commands while the script runs, so a player's `!rules` or `/rules` reaches only the server, never chat (see [Automation](AUTOMATION.md#what-to-know)). |
 | `every(duration, fn)` | Runs `fn` every `duration`: `"30s"`, `"10m"`, `"2h"`, `"1d"` or milliseconds, at least 1 s. Returns an id for `cancel`. |
 | `after(duration, fn)` | Runs `fn` once, after `duration`. Returns an id for `cancel`. |
 | `cancel(id)` | Stops an `every` or `after`. |
