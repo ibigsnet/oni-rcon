@@ -213,7 +213,8 @@ const GUIDE: [string, [string, string][]][] = [
     ["Your key", "Forge takes your own API key: k loads one. It's only ever sent to reclaimerforge.net, and it never reaches the window."],
     ["Thanks", CREDIT],
   ]],
-  ["F7  HEALTH  ·  crashes and memory", [
+  ["F7  HEALTH  ·  crashes, frame rate and memory", [
+    ["Frame rate over RCON", "Reclaimer 0.10+ servers report their own frame rate over RCON health, read every 15 s with no health_cmd: FPS (60 is keeping up, amber under 54, red under 40; idle in an empty lobby), the median (P50), 99th-percentile (P99) and longest frame in ms, and the server's upload and download. A server whose log is read shows in FRAME RATE above instead."],
     ["Crashes", "Each server's last crashes, read from its log: SIGNATURE is the known crash (an exception with its code and RVA), BARE is the engine probe failing with no exception, OOM-KILL is a container killed for memory, and CONTAINER-RESTART is one that started again. PLAYERS is how many were on. DROPPED means the RCON connection fell at the same moment."],
     ["Host", "Free memory (amber under twice health_min_free_mb, red under it), swap, the kernel's oom_kill counter, and each container's start time and OOMKilled flag."],
     ["Workaround", "Whether the named systemd service is running, when it last moved a tag, and any warning that the build isn't the pinned one. Hidden without health_service."],

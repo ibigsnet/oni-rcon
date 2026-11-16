@@ -520,3 +520,72 @@ def test_the_feed_names_players_when_kills_use_another_id():
             assert "name" in log and "xuid" in log and "17999231430439361766" not in log  # field names, never values
 
     asyncio.run(go())
+
+
+# Reclaimer 0.10.2's RCON `health` reply, captured 2026-11-11 from an empty lobby (`dedicated rcon --json health`).
+HEALTH_0102 = {"download_bytes_per_second": 0.0, "frame_ms_max": 0.0, "frame_ms_p50": 0.0, "frame_ms_p99": 0.0,
+               "frame_rate": 0.0, "max_players": 16, "phase": "lobby", "players": 0, "upload_bytes_per_second": 0.0,
+               "uptime_seconds": 33044, "version": "0.10.2"}
+
+
+def test_rcon_health_reads_as_a_frame_rate_row():
+    assert hc.frames(HEALTH_0102) == {"fps": None, "p50": 0.0, "p99": 0.0, "max": 0.0, "up": 0.0, "down": 0.0,
+                                      "players": 0}  # an empty lobby measures no frames: idle, not 0 fps
+    busy = {**HEALTH_0102, "frame_rate": 47.5, "frame_ms_p50": 16.9, "frame_ms_p99": 61.2, "frame_ms_max": 140,
+            "upload_bytes_per_second": 183400.0, "players": 12}
+    assert hc.frames(busy) == {"fps": 47.5, "p50": 16.9, "p99": 61.2, "max": 140.0, "up": 183400.0, "down": 0.0,
+                               "players": 12}
+    assert hc.frames({"phase": "lobby", "players": 0}) is None and hc.frames(None) is None  # 0.9's status, nothing
+    assert hc.frames({**HEALTH_0102, "frame_rate": True}) is None
+    assert [hc.rate(v) for v in (None, 0.0, 950, 12345, 1_240_000)] == ["—", "0 B/s", "950 B/s", "12.3 KB/s", "1.2 MB/s"]
+
+
+def test_a_010_server_shows_its_frame_rate_without_health_cmd():
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        for f in keep:
+            if hasattr(f, "version"):
+                f.version = "0.10.2"
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(170, 50)) as pilot:
+            for _ in range(100):
+                await pilot.pause(0.05)
+                if all("health" in st.data for st in app.stations):
+                    break
+            await pilot.press("f7")
+            await pilot.pause(0.3)
+            t = app.query_one("#rconframes")
+            assert t.display and app.query_one("#health-setup").display  # beside the how-to, no health_cmd needed
+            rows = table_text(t)
+            for st in app.stations:
+                assert st.label in rows
+            assert "ms" in rows and "KB/s" in rows and ("idle" in rows or any(c.isdigit() for c in rows))
+            st = app.stations[0]  # a sign-in that names no version: health's reply fills it in
+            st.rcon.info.pop("version")
+            st.data.pop("health")
+            app.fetch(st, "health")
+            for _ in range(40):
+                await pilot.pause(0.05)
+                if "health" in st.data:
+                    break
+            assert st.rcon.info["version"] == "0.10.2"
+
+    asyncio.run(go())
+
+
+def test_a_09_server_is_never_asked_for_health():
+    async def go():
+        ports, keep = await serve_fakes(tick=False)
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(170, 50)) as pilot:
+            for _ in range(40):
+                await pilot.pause(0.05)
+                if all("status" in st.data for st in app.stations):
+                    break
+            await pilot.pause(0.3)
+            assert all("status" in st.data and "health" not in st.data for st in app.stations)
+            await pilot.press("f7")
+            await pilot.pause(0.2)
+            assert not app.query_one("#rconframes").display
+
+    asyncio.run(go())
