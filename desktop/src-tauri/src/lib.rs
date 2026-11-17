@@ -600,6 +600,8 @@ async fn server_setting(index: usize, key: String, value: Value, app: State<'_, 
         ("max_players", Some(n)) if (1..=63).contains(&n) => n.into(),
         ("max_players", _) => return Err("A server holds 1 to 63 players.".into()),
         ("camera", _) => value.as_str().filter(|c| host::CAMERAS.contains(c)).ok_or_else(|| format!("{value} isn't a camera setting"))?.into(),
+        ("sandbox", _) => value.as_str().filter(|c| host::SANDBOXES.contains(c)).ok_or_else(|| format!("{value} isn't a sandbox setting"))?.into(),
+        ("network_model", _) => value.as_str().filter(|c| host::NETWORK_MODELS.contains(c)).ok_or_else(|| format!("{value} isn't a network model"))?.into(),
         ("playlist", _) => install::safe_path(value.as_str().unwrap_or_default()).map_err(|_| format!("Not a playlist in the server folder: {value}"))?.into(),
         ("admin_add" | "admin_remove", _) => value.as_str().ok_or("That's not a player ID.")?.into(),
         ("character_mods", _) => "".into(), // host::Mods, written whole by set_server_mods below
