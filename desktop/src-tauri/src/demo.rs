@@ -636,6 +636,11 @@ impl FakeHost {
         }
     }
 
+    /// A setting `set` saved for server `i`, off when never set.
+    pub fn flag(&self, i: usize, key: &str) -> bool {
+        self.fakes.get(i).is_some_and(|(_, f)| f.lock().status[key].as_bool() == Some(true))
+    }
+
     /// Everyone dropped, and five seconds later as many back.
     async fn bounce(&self, i: usize) {
         let fake = &self.fakes[i].1;
