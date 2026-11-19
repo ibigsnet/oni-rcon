@@ -422,6 +422,16 @@ pub fn set_server_key(text: &str, rcon_port: u16, key: &str, v: toml_edit::Value
     })
 }
 
+/// A true/false `key` as the [[server]] on `rcon_port` has it, else as [defaults] has it for every server; false when
+/// neither sets it, as Reclaimer reads it.
+pub fn server_flag(text: &str, rcon_port: u16, key: &str) -> Result<bool, String> {
+    let doc: toml_edit::DocumentMut = text.parse().map_err(|e| format!("dedicated.toml doesn't read: {e}"))?;
+    let list = doc.get("server").and_then(toml_edit::Item::as_array_of_tables).ok_or("dedicated.toml has no [[server]]")?;
+    let t = list.iter().find(|t| on_port(t, rcon_port)).ok_or_else(|| format!("dedicated.toml has no [[server]] on RCON port {rcon_port}"))?;
+    let under = doc.get("defaults").and_then(|d| d.get(key));
+    Ok(t.get(key).or(under).and_then(toml_edit::Item::as_bool).unwrap_or(false))
+}
+
 /// `id` added to, or taken off, the admins of the [[server]] on `rcon_port` only: Reclaimer has no other tiers.
 pub fn set_server_admin(text: &str, rcon_port: u16, id: &str, add: bool) -> Result<String, String> {
     let id = id.trim();
@@ -1187,6 +1197,23 @@ mod tests {
         let t: toml::Table = back.parse().unwrap();
         assert!(t["server"][1].get("sandbox").is_none() && t["server"][1].get("network_model").is_none(), "\"\" takes the key out");
         assert!(back.contains("# set one to turn on the remote console")); // the rest of the file is kept
+    }
+
+    #[test]
+    fn restore_state_round_trips() {
+        assert!(!server_flag(TOML, 50177, "restore_state").unwrap(), "unset is off");
+        let on = set_server_key(TOML, 50177, "restore_state", true.into()).unwrap();
+        assert!(on.contains("# set one to turn on the remote console")); // the rest of the file is kept
+        assert!(server_flag(&on, 50177, "restore_state").unwrap());
+        assert!(!server_flag(&on, 49176, "restore_state").unwrap(), "only the server it was set on");
+        let off = set_server_key(&on, 50177, "restore_state", false.into()).unwrap();
+        assert!(!server_flag(&off, 50177, "restore_state").unwrap());
+        let t: toml::Table = off.parse().unwrap();
+        assert_eq!(t["server"][1]["restore_state"].as_bool(), Some(false));
+        let all = format!("[defaults]\nrestore_state = true\n{TOML}");
+        assert!(server_flag(&all, 49176, "restore_state").unwrap(), "[defaults] holds for every server");
+        assert!(!server_flag(&set_server_key(&all, 49176, "restore_state", false.into()).unwrap(), 49176, "restore_state").unwrap());
+        assert!(server_flag(TOML, 1234, "restore_state").is_err());
     }
 
     #[test]
