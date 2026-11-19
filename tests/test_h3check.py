@@ -1,6 +1,7 @@
 import base64, hashlib, json
 import pytest
 from oni_rcon.h3check import Rejected, check, H3_MAP_VARIANT
+from oni_rcon import h3check
 
 MAP = {"version": 1, "name": "Arena", "base_map": {"id": 30, "stem": "guardian"}, "hosting": {}, "mode": "forge",
        "rules": {}, "map": {"data": base64.b64encode(b"\0" * H3_MAP_VARIANT).decode()}}
@@ -103,3 +104,35 @@ def test_held_reads_the_hold_list(monkeypatch):
     import urllib.request
     monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=0: io.BytesIO(_json.dumps(doc).encode()))
     assert install.held("L", "V") == "bad" and install.held("L", "other") is None and install.held("X", "V") is None
+
+
+# 2026-11-19: game types saved since Reclaimer 0.10.4 carry starting weapons (Preset.weapons in the game's forge.rs).
+def _preset_with_weapons(**extra):
+    doc = {"version": 2, "name": "Rocket Zombies", "base_map": {"id": 320, "stem": "guardian"},
+           "hosting": {}, "mode": {}, "rules": {}, "options": {},
+           "weapons": {"infected.primary_weapon": {"source": {"game": "reach"}, "donor": "forge_halo",
+                       "name": "haloreach\\objects\\weapons\\support_high\\rocket_launcher\\rocket_launcher",
+                       "label": "rocket launcher"}},
+           "world": {}, "map": None, "author": "tester"}
+    doc.update(extra)
+    return json.dumps(doc).encode()
+
+
+def test_forge_game_type_with_starting_weapons_is_accepted():
+    assert h3check.check("Rocket Zombies.json", _preset_with_weapons(), "forge") == "forge game type"
+
+
+def test_forge_game_type_newer_preset_fields_are_accepted():
+    assert h3check.check("x.json", _preset_with_weapons(description="d", campaign=None, odst=None), "forge") == "forge game type"
+
+
+@pytest.mark.parametrize("weapons", [[1], {"k": "rocket"}, {"k": {"name": "a", "exe": "b"}},
+                                     {"k": {"name": "..\\..\\evil", "donor": "a", "label": "l", "source": {}}}])
+def test_forge_starting_weapons_must_be_weapon_choices(weapons):
+    with pytest.raises(h3check.Rejected):
+        h3check.check("x.json", _preset_with_weapons(weapons=weapons), "forge")
+
+
+def test_forge_packed_map_must_be_blf():
+    with pytest.raises(h3check.Rejected):
+        h3check.check("x.json", _preset_with_weapons(packed_map="TVo="), "forge")

@@ -1,4 +1,4 @@
-## IBIGS fork: current release 0.9.0+ibigs.30 (10 November 2026)
+## IBIGS fork: current release 0.9.0+ibigs.31 (19 November 2026)
 
 This is IBIGS's public fork of [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 (GPL-3.0), the console
 behind the IBIGS fleet and every IBIGS customer server. `main` is the maintained source. Customer servers don't
@@ -6,6 +6,11 @@ pull from GitHub: they get signed releases through IBIGS's update channel (**F9*
 
 ### Latest releases
 
+- **0.9.0+ibigs.31** (19 Nov): **game types saved with starting weapons are accepted again.** Since Project
+  Reclaimer 0.10.4 a game type can carry starting weapons (and a few other new fields); the Halo 3 file check still had
+  October's list of fields, so Forge downloads and uploads of such game types were refused as "fields Reclaimer doesn't
+  use: weapons". The check now knows the game's current fields and still checks every weapon entry (tag-path names only,
+  no unknown keys) and that a packed map is a real Halo 3 variant.
 - **0.9.0+ibigs.30** (10 Nov): **custom maps and game types are back in the pickers on Project Reclaimer 0.10.** A 0.10
   server tells a console about its base maps and built-in game types only, so Forge saves, map variants and custom
   game types had gone from SELECT MAP, SELECT MODE and the playlist editor, though the server still had and played
