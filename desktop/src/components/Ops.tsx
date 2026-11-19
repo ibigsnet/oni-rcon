@@ -85,7 +85,7 @@ export function Operations() {
     ["VPN BLOCK", yesNo(s.block_vpn)], ["TEXT CHAT", yesNo(s.text_chat)], ["VOICE", yesNo(s.voice)], ["HIDDEN", yesNo(s.hidden, "YES", "NO")],
   ];
   const voting = "vote" in st.data ? !!vote.vote : null;
-  const off = (o: string) => (RECLAIMER_OPS.includes(o) && !game.reclaimer) || (o === "restart" ? !st.canRestart : o === "remove" ? false : ["capacity", "camera", "charmods", "playlist", "playlists", "newgametype"].includes(o) ? !st.contentDir : o === "newplaylist" ? !st.contentDir || !st.online : o !== "reconnect" && !st.online) || (["passvote", "cancelvote"].includes(o) && voting === false) || (o === "startvote" && voting === true) || (["next", "replay", "queue"].includes(o) && !v010(st));
+  const off = (o: string) => (RECLAIMER_OPS.includes(o) && !game.reclaimer) || (o === "restart" ? !st.canRestart : o === "remove" ? false : ["capacity", "camera", "sandbox", "netmodel", "charmods", "playlist", "playlists", "newgametype"].includes(o) ? !st.contentDir : o === "newplaylist" ? !st.contentDir || !st.online : o !== "reconnect" && !st.online) || (["passvote", "cancelvote"].includes(o) && voting === false) || (o === "startvote" && voting === true) || (["next", "replay", "queue"].includes(o) && !v010(st));
   const ops = Object.fromEntries(OPS.map(([o, l, v]) => [o, [l, v]]));
   const here = norm(s.map);
   const pulledRefs = new Set<string>();

@@ -573,3 +573,6 @@ export function voteText(v: unknown): Line[] {
 
 /** dedicated.toml's camera (0.9.20), as host::CAMERAS has it; first person is the server's default. */
 export const CAMERAS: [string, string][] = [["First person", "first_person"], ["Players choose", "player_choice"], ["Third person", "third_person"]];
+/** dedicated.toml's sandbox (0.10.5) and network_model (0.10.4), as host::SANDBOXES / NETWORK_MODELS have them; "" leaves the key out. */
+export const SANDBOXES: [string, string][] = [["Map's own", ""], ["Halo 3", "halo3"], ["Halo: Reach", "reach"]];
+export const NETWORK_MODELS: [string, string][] = [["Enhanced", ""], ["Classic (Halo 3's own)", "classic"]];

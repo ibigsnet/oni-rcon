@@ -210,6 +210,10 @@ impl Settings {
 const SOURCE_KEYS: [&str; 6] = ["map", "game", "base_map", "variant", "campaign", "odst"];
 /// dedicated.toml's `camera` (0.9.20): how players see their own character on foot. Left out, it's first person.
 pub const CAMERAS: [&str; 3] = ["first_person", "player_choice", "third_person"];
+/// dedicated.toml's `sandbox` (0.10.5): whose weapons and vehicles a map plays with; "" leaves the key out (the map's own).
+pub const SANDBOXES: [&str; 3] = ["", "halo3", "reach"];
+/// dedicated.toml's `network_model` (0.10.4): "" leaves the key out (enhanced networking, the default again).
+pub const NETWORK_MODELS: [&str; 2] = ["", "classic"];
 
 /// dedicated.toml with the settings in it and the comments left alone. `dedicated init` writes two servers; a custom
 /// one is a single server, so the first enabled [[server]] is kept and any other turned off (not deleted).
@@ -409,7 +413,11 @@ pub fn set_server_key(text: &str, rcon_port: u16, key: &str, v: toml_edit::Value
                 t.remove(other); // a server plays from one source
             }
         }
-        t[key] = toml_edit::Item::Value(v);
+        if v.as_str() == Some("") {
+            t.remove(key); // the server's own default (sandbox: the map's own; network_model: enhanced)
+        } else {
+            t[key] = toml_edit::Item::Value(v);
+        }
         Ok(())
     })
 }
@@ -1175,6 +1183,20 @@ mod tests {
         assert!(!add_flood_map(mcc.path(), server.path()).unwrap()); // there already
         assert!(["Flood Infection", "flood_infection", "H4 Flood", "h4-flood"].iter().all(|g| plays_flood(g)));
         assert!(!["Infection", "Slayer", "Floodgate Slayer"].iter().any(|g| plays_flood(g)));
+    }
+
+    #[test]
+    fn sandbox_and_network_model_set_and_clear() {
+        let reach = set_server_key(TOML, 50177, "sandbox", "reach".into()).unwrap();
+        let classic = set_server_key(&reach, 50177, "network_model", "classic".into()).unwrap();
+        let t: toml::Table = classic.parse().unwrap();
+        assert_eq!(t["server"][1]["sandbox"].as_str(), Some("reach"));
+        assert_eq!(t["server"][1]["network_model"].as_str(), Some("classic"));
+        assert!(t["server"][0].get("sandbox").is_none(), "only the server it was set on");
+        let back = set_server_key(&set_server_key(&classic, 50177, "sandbox", "".into()).unwrap(), 50177, "network_model", "".into()).unwrap();
+        let t: toml::Table = back.parse().unwrap();
+        assert!(t["server"][1].get("sandbox").is_none() && t["server"][1].get("network_model").is_none(), "\"\" takes the key out");
+        assert!(back.contains("# set one to turn on the remote console")); // the rest of the file is kept
     }
 
     #[test]
