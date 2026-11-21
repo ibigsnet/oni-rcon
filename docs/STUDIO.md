@@ -97,7 +97,7 @@ plug-in without the `addresses` permission. These limits apply:
 | | |
 |---|---|
 | `on(kind, filter?, handler)` | Runs `handler(ev)` for each event of a kind (`"chat"`, `"kill"`, …), a list of kinds, or `"*"` for every kind. `filter` is an object of fields to match (`text` ignores case, a list matches any of its items, a RegExp tests the field) or a function of `ev`. Returns a function that stops it. |
-| `command(name, filter?, handler)` | Runs `handler(ev)` when a chat line starts with `name` (or one of a list), like `"!rules"`. Case is ignored, and the server's own lines never count. `ev.command` is the word, `ev.rest` the text after it, `ev.args` its words. |
+| `command(name, filter?, handler)` | Runs `handler(ev)` when a chat line starts with `name` (or one of a list), like `"!rules"`. Case is ignored, and the server's own lines never count. `ev.command` is the word, `ev.rest` the text after it, `ev.args` its words. On Reclaimer 0.10.3+ Oni registers the word as one of the server's private commands while the script runs, so a player's `!rules` or `/rules` reaches only the server, never chat (see [Automation](AUTOMATION.md#what-to-know)). |
 | `every(duration, fn)` | Runs `fn` every `duration`: `"30s"`, `"10m"`, `"2h"`, `"1d"` or milliseconds, at least 1 s. Returns an id for `cancel`. |
 | `after(duration, fn)` | Runs `fn` once, after `duration`. Returns an id for `cancel`. |
 | `cancel(id)` | Stops an `every` or `after`. |
@@ -162,6 +162,8 @@ Every event also has these helpers, which act on its server and player: `ev.repl
 | Reports | `!report <player> <what they did>` notifies you in Oni and posts to Discord. |
 | Discord log | Posts joins, kicks and bans to a Discord webhook. |
 | Next-game vote | An admin types `!nextvote`, players answer with a number (their last answer counts), standings go out with 30 and 10 s left, and the winner is queued with `nextmap` so the current game finishes. `!nextvote end`, `cancel` and `list`. Votes on `CHOICES` at the top of the script, or on up to 5 games from the server's rotation. Only admins (matched by player ID) can start or stop one. |
+| Reserved slots | Keeps the last `SLOTS` places on each server for the player IDs in `WHITELIST` and for admins. When everyone else fills the public places, it sets the join password `PASSWORD`, so the server shows PRIVATE, and clears it when a place frees. Anyone else who still lands in a reserved place is kicked, newest first. It checks on every join and leave and every 10 s, and leaves a password an admin set alone. |
+| Team balance | When one team has `GAP` (2) or more players than another, moves one player from the bigger team to the smaller and tells them why. A dead player goes first; if nobody on the bigger team has died after `WAIT` (a minute), the newest arrival goes. Admins, the player IDs in `KEEP` and anyone it moved in the last 5 minutes stay put. It checks on every join and leave and every 10 s, and leaves free-for-alls alone. A team with nobody on it isn't listed by the server, so it isn't evened. |
 
 ## On disk
 

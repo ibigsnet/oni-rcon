@@ -141,6 +141,35 @@ pub fn shell(line: &str) -> tokio::process::Command {
     }
 }
 
+/// An https page in the default browser.
+pub fn open_url(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") || !url.bytes().all(|b| b.is_ascii_graphic() && b != b'"') {
+        return Err("That isn't a web page.".into());
+    }
+    #[cfg(windows)]
+    let mut c = {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", url]);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut c = {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut c = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    let mut child = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn()
+        .map_err(|e| format!("No browser opened ({e}). The page is {url}"))?;
+    std::thread::spawn(move || child.wait()); // reaped, not left a zombie
+    Ok(())
+}
+
 /// The ssh client on PATH, if there is one.
 pub fn which(name: &str) -> Option<std::path::PathBuf> {
     let path = std::env::var_os("PATH")?;

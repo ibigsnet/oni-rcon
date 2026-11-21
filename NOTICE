@@ -1,15 +1,54 @@
-oni-rcon
-Copyright (c) 2026 Arche Labs
-Portions copyright (c) 2026 ibigs, LLC
-SPDX-License-Identifier: GPL-3.0-or-later
+ONI RCON (oni-rcon)
+Copyright (c) 2026 Arche Labs (viik)
+Portions copyright (c) 2026 ibigs, LLC (author: RifleJock), from
+https://github.com/ibigsnet/oni-rcon
+SPDX-License-Identifier: AGPL-3.0-or-later
+Source: https://github.com/viik2k/oni-rcon
 
-This project is released under the GNU General Public License, version 3
-or any later version. See LICENSE.
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. See LICENSE.
 
-Upstream oni-rcon is https://github.com/viik2k/oni-rcon (Arche Labs).
-Its releases up to and including v0.9.0 and desktop-v1.4.1 were published
-under the MIT license that follows, and those releases remain available
-under it.
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+If you run a modified version of this program for others to use over a
+network, section 13 of the licence requires you to offer those users the
+Corresponding Source of your version.
+
+
+Additional terms (section 7 of the GNU Affero General Public License)
+
+These terms apply to the parts of this program that are copyright Arche Labs.
+
+(b) Modified versions must preserve the Appropriate Legal Notices this program
+    displays (the About screen in the desktop app, and ABOUT in the terminal
+    console), including the attribution "ONI RCON by Arche Labs (viik)", the
+    notice of the portions by ibigs, LLC, and the link to the original source,
+    https://github.com/viik2k/oni-rcon.
+
+(c) Modified versions must be marked as different from the original: their
+    About screen must say that they are modified and by whom, and they must
+    not be presented as the original ONI RCON from Arche Labs.
+
+
+Earlier licences
+
+The portions from ibigs, LLC (credited in the source as from ibigs/oni-rcon, by
+RifleJock) were received under the GNU General Public License, version 3 or
+later, and remain under it. Section 13 of that licence permits combining them
+with this program; the combined program is subject to section 13 of the GNU
+Affero General Public License.
+
+Releases after v0.9.0 and desktop-v1.4.1, up to and including desktop-v1.10.0,
+were published under the GNU General Public License, version 3 or later, and
+those releases remain available under it.
+
+Releases up to and including v0.9.0 and desktop-v1.4.1 were published under
+the MIT license that follows, and those releases remain available under it.
 
 MIT License
 

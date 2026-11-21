@@ -72,3 +72,11 @@ port = 49177
 # url = "wss://rcon.example.org/btb"
 # ssh = ""
 # password_env = "BTB_RCON_PASSWORD"
+
+# A Reach Renaissance dedicated server (desktop app): Source RCON, on by an [rcon] password in its dedicated.toml,
+# on the game port unless it sets rcon_port. Status, players, kick, ban, say, end game and the F5 console work; it
+# sends no live feed. On the setup screen, type the address as source://HOST.
+# [[server]]
+# port = 40011
+# protocol = "source"
+# password_env = "REACH_RCON_PASSWORD"

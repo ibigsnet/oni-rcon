@@ -66,8 +66,10 @@ npx tauri dev -- --demo   # a window with the demo, reloading as you edit
 npx tauri build           # an installer in src-tauri/target/release/bundle
 ```
 
-Releasing: `npm run release -- 1.3.0` bumps the version everywhere it lives, commits it and tags `desktop-v1.3.0`;
-`git push origin HEAD desktop-v1.3.0` (or add `--push`) then builds, signs and publishes it.
+Releasing: on staging, `npm run release -- 1.3.0` bumps the version everywhere it lives and commits it (drop the
+`desktop-v1.3.0` tag it makes) and RELEASE-NOTES.md is rewritten for it. Merging staging into main then tags
+`desktop-v1.3.0` on the merge commit and builds, signs and publishes it (`.github/workflows/release-on-merge.yml`). By
+hand still works: `git push origin HEAD desktop-v1.3.0`, or `npm run release -- 1.3.0 --push`.
 
 Tests: `npm test` (the window's logic and art) and `cargo test` in `src-tauri` (config, RCON, health, Forge,
 installs, state).

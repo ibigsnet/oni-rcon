@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { AMBER, CYAN, DIM, GREEN, RED, WHITE } from "../art/palette";
 import { emblem } from "../art/archive";
 import { CAMERAS, explain, type Dict } from "../lib/util";
+import { aboutLine } from "../lib/about";
 import { Check, Pixel, useSize } from "./ui";
 
 interface Spec { address: string; port: string; password: string; name: string; ssh: string }
@@ -270,7 +271,7 @@ export function Setup({ info, onDone }: { info: Dict; onDone: (demo: boolean) =>
           </div>
         </div>
       )}
-      <div className="hint">Ctrl+Q quits.   {info.version ? `oni-rcon ${info.version}` : ""}</div>
+      <div className="hint">Ctrl+Q quits.   {info.version ? `oni-rcon ${info.version}   ·   ` : ""}{aboutLine()}</div>
     </div>
   );
 }

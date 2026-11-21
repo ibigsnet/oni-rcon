@@ -231,8 +231,49 @@ def test_self_update_is_disabled(tmp_path, monkeypatch):
     assert exe.read_bytes() == b"reviewed build"
 
 
+def test_about_keeps_the_legal_notices():
+    from oni_rcon.about import about_line, about_text
+    t = about_text("0.9.0")
+    for must in ("ONI RCON by Arche Labs (viik), version 0.9.0", "ibigs, LLC", "GNU Affero General Public License",
+                 "NO WARRANTY", "LICENSE", "https://github.com/viik2k/oni-rcon"):
+        assert must in t
+    assert about_line() == ("ONI RCON by Arche Labs (viik) · Modified by ibigs, LLC (source: https://github.com/ibigsnet/oni-rcon)"
+                            " · AGPL-3.0-or-later · no warranty · https://github.com/viik2k/oni-rcon")  # IBIGS build: NOTICE (c)
+    assert "this isn't the original ONI RCON" in t
+
+    async def go():
+        ports, _ = await serve_fakes(tick=False)
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            app.action_about()
+            await pilot.pause()
+            assert type(app.screen).__name__ == "About"
+            assert "Arche Labs (viik)" in str(app.screen.query(".dialog-body").first().render())
+            await pilot.press("escape")
+            app.action_help()
+            await pilot.pause()
+            assert isinstance(app.screen, Help)
+    asyncio.run(go())
+
+
+def test_projects():
+    from oni_rcon.projects import mixed_by_project, project_of
+    assert project_of({"server": "S", "version": "0.9.18"}).reclaimer and project_of(None).id == "reclaimer"
+    p = project_of({"project": "Project Gravemind"})
+    assert (p.id, p.game, p.tag, p.reclaimer) == ("gravemind", "Halo 2", "H2", False)
+    assert project_of({"project": "renaissance"}).tag == "REACH"
+    o = project_of({"project": "OpenCE\n", "game": "Halo: Combat Evolved"})
+    assert (o.name, o.tag, o.reclaimer) == ("OpenCE", "HCE", False)
+    st = lambda v, p=None: {"version": v, "project": p}
+    assert mixed_by_project([("A", st("0.9.18")), ("B", st("1.2.0", "gravemind"))]) == ""
+    assert mixed_by_project([("A", st("0.9.18")), ("B", st("0.9.17")), ("C", st("1.0.0", "gravemind"))]) == \
+        "Project Reclaimer: 0.9.17 on B · 0.9.18 on A"
+
+
 def test_reclaimer_drift():
-    from oni_rcon.update import behind, mixed_versions
+    from oni_rcon.update import behind, mixed_versions, since
+    assert since("0.10.0", "0.10.0") and since("v0.10.1-rc1", "0.10.0") and since("1.0.0", "0.10.0")
+    assert not since("0.9.23", "0.10.0") and not since("?", "0.10.0") and not since(None, "0.10.0")
     assert behind("0.9.9", "v0.9.18") == "0.9.18"  # numeric, not text: 9 < 18
     assert behind("0.9.18", "0.9.18") == behind("0.9.19", "0.9.18") == ""  # current or ahead
     assert behind("?", "0.9.18") == behind("0.9.17", "") == ""  # unknown never counts as behind
@@ -254,6 +295,11 @@ def test_reclaimer_drift():
             st.rcon.info["version"] = "0.9.18"
             app.note_mixed()
             assert app.lag(st) == "" and any("MIXED VERSIONS  0.9.7 on" in str(e.get("text")) for _, e in app.feed)
+            next_off = lambda: app.query_one("#op-next", appmod.Button).disabled
+            assert app.cur is st and next_off() and not appmod.v010(st)  # 0.9: no NEXT GAME / REPLAY
+            st.rcon.info["version"] = "0.10.0"
+            app.paint_ops()
+            assert appmod.v010(st) and not next_off()
     asyncio.run(go())
 
 
@@ -431,6 +477,36 @@ def test_markup_in_a_name_is_just_a_name():
                                                      "text": "admin [b]help[/b]"})
             await pilot.pause(0.2)
             assert app.is_running
+
+    asyncio.run(go())
+
+
+def test_mute_says_what_on_010():
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        sent = []
+        app.send = lambda st, *a, then=(): sent.append(a)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "players")
+            st, t = app.stations[0], app.query_one("#players")
+            victim = next(p for p in app.row_players.values() if not p.get("muted"))
+            t.move_cursor(row=next(i for i, k in enumerate(t.ids) if app.row_players[k] is victim))
+            t.focus()
+            for version, fields, want in (
+                    ("0.9.23", {"time": "10m", "reason": "mic spam"}, ("mute", victim["player_id"], "10m", "mic spam")),
+                    ("0.10.0", {"kind": "voice", "time": "10m", "reason": "mic spam", "shadow": "shadow"},
+                     ("mute", victim["player_id"], "voice", "10m", "mic spam", "shadow")),
+                    ("0.10.0", {}, ("mute", victim["player_id"], "all"))):  # defaults: everything, until restart, told
+                st.rcon.info["version"] = version
+                await pilot.press("m")
+                assert await until(pilot, lambda: isinstance(app.screen, Form))
+                assert bool(app.screen.query("#field-kind")) == (version != "0.9.23")
+                for k, v in fields.items():
+                    app.screen.query_one(f"#field-{k}").value = v
+                app.screen.query_one("#yes").press()  # not a click: on a slow runner it can land before layout
+                assert await until(pilot, lambda: not isinstance(app.screen, Form))
+                assert sent.pop() == want, version
 
     asyncio.run(go())
 
@@ -711,6 +787,11 @@ def test_admin_and_reload_events_get_a_layout():
         == "RELOAD FAILED  dedicated.toml: line 4"
     assert d({"event": "control", "action": "reload_applied", "ok": True, "text": "playlist"}) == "RELOAD APPLIED  playlist"
     assert d({"event": "control", "action": "kill_feed", "ok": True, "text": "x"}).startswith("CONTROL  x")
+    assert d({"event": "saved", "kind": "state", "by": "RCON", "result": "data/s1/state.json"}) \
+        == "SAVED  game state  data/s1/state.json  by RCON"
+    assert d({"event": "save_failed", "kind": "map", "by": "Alice", "result": "No Forge game is being played"}) \
+        == "SAVE FAILED  Forge map  No Forge game is being played  by Alice"
+    assert d({"event": "state_restored"}) == "STATE RESTORED"
 
 
 def test_f4_pardons_a_kick():
@@ -803,5 +884,48 @@ def test_f4_adds_and_removes_admins():
             await until(pilot, lambda: isinstance(app.screen, Confirm))
             app.screen.query_one("#yes").press()
             assert await until(pilot, lambda: admins.row_count == before) and not new["admin"]
+
+    asyncio.run(go())
+
+
+def test_game_queue_on_010():
+    assert appmod.queued({"next_games": [{"map": "guardian", "mode": "oddball"}, {"map": "valhalla"}, "The Pit"]}) == \
+        [("guardian", "oddball"), ("valhalla", ""), ("The Pit", "")]
+    assert appmod.queued({}) == [] and appmod.queued({"next_games": None}) == []
+
+    async def go():
+        ports, keep = await serve_fakes(tick=False, specs=[("Probe", 16, 2)])
+        app = OniApp([Server(port=p, password="demo") for p in ports], by="pytest", intro=False)
+        async with app.run_test(size=(160, 48)) as pilot:
+            await settle(app, pilot, "status", "maps", "modes")
+            st, btn = app.stations[0], app.query_one("#op-queue", appmod.Button)
+            await pilot.press("f3")  # IBIGS: panes repaint only while shown, as a person would see it
+            await pilot.pause(0.2)
+            app.paint_ops()
+            assert btn.disabled  # the demo says 0.9.7: no queue
+            st.rcon.info["version"] = "0.10.1"
+            app.paint_ops()
+            assert not btn.disabled
+
+            async def choose(*values):  # answer each dialog the op opens, in turn
+                for v in values:
+                    assert await until(pilot, lambda: isinstance(app.screen, (Pick, appmod.Confirm)))
+                    app.screen.dismiss(v)
+                    await pilot.pause()
+
+            rotation = lambda: [str(app.query_one("#rotation").get_row_at(r)[1])
+                                for r in range(app.query_one("#rotation").row_count)]
+            for mp, md in (("guardian", "oddball"), ("valhalla", "")):
+                app.op("queue")
+                await choose("add", mp, md)
+                assert await until(pilot, lambda: mp in rotation())
+            assert appmod.queued(st.data["status"]) == [("guardian", "oddball"), ("valhalla", "")]
+            assert rotation()[:2] == ["guardian", "valhalla"]  # queued games list first
+            app.op("queue")
+            await choose("1")  # remove the first
+            assert await until(pilot, lambda: appmod.queued(st.data["status"]) == [("valhalla", "")])
+            app.op("queue")
+            await choose(None)  # Esc: nothing sent
+            assert appmod.queued(st.data["status"]) == [("valhalla", "")]
 
     asyncio.run(go())

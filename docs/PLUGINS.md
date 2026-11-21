@@ -13,8 +13,8 @@ Discord relay) mostly want to run 24/7 on a host, long after the console is clos
 
 So a plug-in is **never code in Oni's process**. It is a separate program that speaks a small JSON protocol, and it
 **describes its own panel** in a fixed vocabulary of blocks that both front-ends draw. Write it once, in any language;
-it appears in the desktop app and the terminal console alike. Oni (GPL-3.0-or-later) and a plug-in's licence stay
-separate, because they only exchange JSON.
+it appears in the desktop app and the terminal console alike. Oni (AGPL-3.0-or-later) and a plug-in's licence stay
+separate, because they only exchange JSON: a plug-in is its own program, under whatever licence its author picks.
 
 ## A plug-in on disk
 
@@ -33,12 +33,23 @@ description = "Automated hate-speech moderation."
 mode = "service"                      # service: runs elsewhere, Oni asks it things.  session: Oni starts it with the console.
 exec = "gryphon oni -c /etc/gryphon/gryphon.toml"   # a shell string, run the way health_cmd is (service: once per request; session: once)
 host = ""                             # an ssh destination ("" = this machine), same as ping_log/health_cmd
+requires = [{ program = "gryphon", url = "https://github.com/viik2k/gryphon" }]  # optional: programs it needs (below)
 
 [permissions]
 events = []                           # event kinds pushed to its session process and its pages: "chat", "join", "kill", ...
 rcon   = ["pardon", "unban", "unmute"]  # RCON commands it may ask Oni to send for it (an action's `rcon` reply, or session mode)
 addresses = false                     # true = sees player IPs unredacted (redaction is on by default everywhere)
 ```
+
+**What it needs** (desktop app). `run.requires` lists the programs a plug-in needs on the computer that runs it: each a
+name (`"node"`) or a table `{program, name, url}` with the name to show and an `https://` page to get it from. A plug-in
+whose `exec` starts with `python`, `python3`, `py` or `node` needs that runtime without saying so, and Oni knows Python's
+and Node's download pages. When a plug-in is turned on, Oni looks for each one on PATH (on Windows also in the plug-in's folder, where `cmd` looks first) and
+offers its page before asking for approval; one that's still missing keeps the plug-in from running, and F10 shows
+**NEEDS PYTHON 3** with GET PYTHON 3 and CHECK AGAIN. Python counts when `python3`, `python` or Windows' `py` launcher
+says it's Python 3 (Windows' Store placeholder for `python` doesn't), and a leading `python` in `exec` runs as whichever
+it found, so `exec = "python greeter.py"` works on a Mac and on Windows without `python` on PATH. Nothing is checked for a
+plug-in with a `host`: what's on that machine is its own business. The terminal console ignores `requires`.
 
 Oni lists a plug-in only when its folder is named in the config's **top-level** `plugins = ["gryphon"]` (top level only: an
 older Oni exits on a key it doesn't know inside `[defaults]` or `[[server]]`, and ignores one out there).
@@ -205,8 +216,13 @@ still move a player without holding an RCON slot or a password.
 - plug-in → Oni: the answer to a request, as for a service plug-in but carrying the request's `ref` (no answer in 10 s for
   a view or 30 s for an action is an error; requests made while it's down fail with "it isn't running");
   `rcon {id, server, command, args}` (filtered like an action's; one refused is answered `rcon-reply` with `ok: false`);
-  `view {…}` (pushed: replaces the panel at once); `notify {level: info | warning | error, text}` (a toast);
+  `view {…}` (pushed: replaces the panel, at most 5 times a second; a burst is drawn as its latest); `notify {level: info | warning | error, text}` (a toast);
   `log {text}` (the command log). A line over 1 MiB, or that isn't a JSON object, is ignored.
+- RCON a plug-in sends by itself (a session's `rcon`, a page's `{"oni": "rcon"}`) is held to 60 commands a minute per
+  plug-in, and 20 `say`/`tell` a minute to one server, as automation is. One over the limit isn't sent: it's answered
+  `ok: false` with `not sent: … is the limit`, and the command log says so now and then. An action's `rcon` (a click) isn't
+  limited. Oni keeps up to 256 lines waiting for a session that isn't reading its stdin; while it's that far behind, newer
+  ones (events first of all) are dropped and the command log says so.
 
 ## Wire rules (both hosts must follow these exactly)
 

@@ -1,9 +1,9 @@
 [package]
 name = "oni-rcon"
-version = "1.10.0"
-description = "An ONI-themed admin console for Project Reclaimer Halo 3 dedicated servers, over RCON."
-authors = ["Arche Labs"]
-license = "GPL-3.0-or-later"
+version = "1.15.0"
+description = "An ONI-themed admin console for community Halo dedicated servers over RCON: Project Reclaimer (Halo 3), and other projects that speak its remote console."
+authors = ["Arche Labs (viik)"]
+license = "AGPL-3.0-or-later"
 edition = "2021"
 rust-version = "1.82"
 

@@ -16,6 +16,13 @@ export function pick(d: unknown, ...keys: string[]): any {
   return undefined;
 }
 
+/** Server 0.10's games a next-game queue holds. */
+export const QUEUE_MAX = 16;
+/** The 0.10 next-game queue from status's `next_games`, as [map, mode]; mode is "" when the entry names none. */
+// ponytail: RCON.md names the field but not its entries; takes {map, mode} objects or bare strings until a capture
+export const queued = (status: Dict | undefined): [string, string][] =>
+  ((status?.next_games ?? []) as unknown[]).map((e) => (e && typeof e === "object" ? [String(pick(e, "map", "base_map") ?? "?"), String(pick(e, "mode", "game") ?? "")] : [String(e), ""]));
+
 /** v as a number, or undefined. A count may come as the list of what it counts. */
 export function num(v: unknown): number | undefined {
   if (typeof v === "number") return v;
@@ -243,6 +250,25 @@ export function pluginReply(x: Dict, r: { ok: boolean | null; text?: string; dat
   return { server: x.server, command: x.command, args: x.args, ok: r.ok, text: redactText(String(r.text ?? ""), !addresses), data: redactData(r.data ?? null, !addresses) };
 }
 
+/** RCON a plug-in sends by itself (its session or its page), at most this many commands a minute, and of those this many
+ *  chat lines a minute to one server, as automation is held to: a plug-in gone wrong can't flood a server. */
+export const PLUGIN_RCON_PER_MINUTE = 60;
+export const PLUGIN_SAY_PER_MINUTE = 20;
+export interface Pace { sent: number[]; said: Record<string, number[]> }
+
+/** Whether one more command fits a plug-in's pace at `now` (ms): "" and counted when it does, else why not. */
+export function pluginPace(pace: Pace, server: string, command: string, now: number): string {
+  const recent = (a: number[] = []) => a.filter((t) => now - t < 60_000);
+  const chat = command === "say" || command === "tell";
+  pace.sent = recent(pace.sent);
+  pace.said[server] = recent(pace.said[server]);
+  if (pace.sent.length >= PLUGIN_RCON_PER_MINUTE) return `${PLUGIN_RCON_PER_MINUTE} commands a minute is the limit`;
+  if (chat && pace.said[server].length >= PLUGIN_SAY_PER_MINUTE) return `${PLUGIN_SAY_PER_MINUTE} chat messages a minute to one server is the limit`;
+  pace.sent.push(now);
+  if (chat) pace.said[server].push(now);
+  return "";
+}
+
 /** A plug-in action's form answers (keyed p0, p1, ... in its params' order) as the contract types them: number as a
  *  JSON number, bool as true/false, the rest strings. A number that isn't one gives the words to say, and nothing is sent. */
 export function typedParams(params: Dict[], got: Dict): Dict | string {
@@ -348,9 +374,21 @@ const EXPLAIN: [string[], string, string][] = [
 ];
 
 /** Server 0.9.18 and later apply dedicated.toml edits without a restart, and `reload` says what changed. */
-export function hotReloads(version: unknown): boolean {
-  const v = semver(version);
-  return !!v && cmpVer(v, [0, 9, 18]) >= 0;
+export const hotReloads = (version: unknown) => since(version, "0.9.18");
+
+/** Whether a server's version is known and at least `min` ("0.10.0"). */
+export const since = (version: unknown, min: string) => !!semver(version) && !behind(version, min);
+
+/** Phases with a game under way: Reclaimer's playing/round_over/between_rounds, Reach's in_game. */
+const MID_GAME = new Set(["playing", "round_over", "between_rounds", "in_game", "ingame"]);
+
+/** Whether a RESTART AFTER THIS GAME waiting on this status runs now: the game is over (finished, or already past it:
+ *  lobby, loading, postgame) or nobody's on. A phase the server doesn't report waits for the server to empty. */
+export function restartDue(pending: boolean, status: Dict | undefined): boolean {
+  if (!pending || !status) return false;
+  if (num(status.players) === 0) return true;
+  const phase = String(status.phase ?? "").toLowerCase();
+  return phase !== "" && phase !== "unknown" && phase !== "none" && !MID_GAME.has(phase);
 }
 
 /** A version's major.minor.patch ("v0.9.18-rc1" is [0, 9, 18]); null when it isn't one. */
@@ -473,6 +511,14 @@ export function describe(ev: Dict, redact = true): Line {
     const failed = ev.ok === false; // a reload that changed nothing says why
     line.push([failed ? "RELOAD FAILED" : ev.action === "reload" ? "RELOAD" : "RELOAD APPLIED", failed ? RED : CYAN]);
     if (ev.text) line.push([`  ${redactText(String(ev.text), redact)}`]);
+  } else if (kind === "saved" || kind === "save_failed" || kind === "state_restored") { // 0.10.3: `state save`, `forge save`
+    const failed = kind === "save_failed";
+    line.push([kind === "state_restored" ? "STATE RESTORED" : failed ? "SAVE FAILED" : "SAVED", failed ? RED : CYAN]);
+    const what = ev.kind === "state" ? "game state" : ev.kind === "map" ? "Forge map" : ev.kind;
+    if (what) line.push([`  ${what}`, WHITE]);
+    const said = pick(ev, "result", "text");
+    if (said !== undefined) line.push([`  ${typeof said === "object" ? JSON.stringify(redactData(said, redact)) : redactText(String(said), redact)}`]);
+    if (ev.by) line.push(["  by ", DIM], [String(ev.by)]);
   } else if (kind === "health") {
     line.push(["HEALTH  " + String(ev.text ?? ""), ev.level === "crit" ? RED : AMBER]);
   } else {
@@ -527,3 +573,6 @@ export function voteText(v: unknown): Line[] {
 
 /** dedicated.toml's camera (0.9.20), as host::CAMERAS has it; first person is the server's default. */
 export const CAMERAS: [string, string][] = [["First person", "first_person"], ["Players choose", "player_choice"], ["Third person", "third_person"]];
+/** dedicated.toml's sandbox (0.10.5) and network_model (0.10.4), as host::SANDBOXES / NETWORK_MODELS have them; "" leaves the key out. */
+export const SANDBOXES: [string, string][] = [["Map's own", ""], ["Halo 3", "halo3"], ["Halo: Reach", "reach"]];
+export const NETWORK_MODELS: [string, string][] = [["Enhanced", ""], ["Classic (Halo 3's own)", "classic"]];

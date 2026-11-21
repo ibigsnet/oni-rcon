@@ -41,7 +41,7 @@ export const CATALOG: Record<Part, Record<string, Entry>> = {
     fps_recovered: { label: "A server's frame rate is back to N or more", hint: "After it had dropped under N.", fields: [F("fps", "Frames a second", "int", 54, { min: 5, max: 60 })] },
     join: { label: "A player joins", hint: "Someone finishes connecting.", fields: [] },
     leave: { label: "A player leaves", hint: "Someone disconnects or is removed.", fields: [] },
-    command: { label: "A player types a !command", hint: "Only messages that START with the command count, e.g. !admin. Ordinary chat never triggers anything.", fields: [F("command", "Command", "text", "!admin", { max: 24 })] },
+    command: { label: "A player types a !command", hint: "Only messages that START with the command count, e.g. !admin. Ordinary chat never triggers anything. On Reclaimer 0.10.3+ the console registers it with the server, so the player's !admin (or /admin) goes to the server only, not everyone's chat, and /help lists it.", fields: [F("command", "Command", "text", "!admin", { max: 24 })] },
     vote: { label: "A vote starts", hint: "A player calls a vote.", fields: [F("kind", "Kind of vote", "choice", "any", { options: ["any", "kick", "endround", "endgame", "shuffle", "playlist"] })] },
     match_start: { label: "A match starts", hint: "The game goes live.", fields: [] },
     match_end: { label: "A match ends", hint: "The game finishes (not a round break).", fields: [] },
@@ -190,6 +190,44 @@ export const VIP_GUARD = () => validate({ id: "builtin-vip-guard", name: "VIP ki
   if: [{ type: "player_role", role: "vip" }], then: [{ type: "cancel_vote" }, { type: "say", to: "this", message: "{target} is a VIP and can't be vote-kicked." }], cooldown: 0, per_hour: 120 });
 
 // --- small helpers ----------------------------------------------------------------------------------------------
+/** The server's role names (a private command's `role`) as the console's ROLES. */
+const SERVER_ROLES: Dict = { admin: "admin", moderator: "mod", mod: "mod", vip: "vip" };
+
+/** The server keeps up to 16 private commands (RCON `commands add`, Reclaimer 0.10.3+). */
+export const MAX_PRIVATE = 16;
+
+/** The private commands a server's enabled !command rules answer, then Studio's (`studio`, every server): [word without its
+ *  "!", what `/help` shows: the rule's name, or the word]. On 0.10.3+ the console registers these, so a player's !word
+ *  reaches only the server, never everyone's chat. */
+export function privateCommands(rules: Dict[], server: string, studio: string[] = []): [string, string][] {
+  const out = new Map<string, string>();
+  for (const r of rules) {
+    if (!r.enabled || r.when?.type !== "command" || !(r.servers === "all" || r.servers?.includes(server))) continue;
+    const word = String(r.when.command).slice(1);
+    if (!out.has(word)) out.set(word, String(r.name).slice(0, 60));
+  }
+  for (const w of studio) if (!out.has(w)) out.set(w, `!${w}`);
+  return [...out].slice(0, MAX_PRIVATE);
+}
+
+/** Bring a server's private commands from `had` (what this console registered, updated in place) to `want`. `fresh`:
+ *  a new link, where a reconnect may find them still there, so each is removed before it's added. Returns what failed. */
+export async function registerCommands(call: (args: string[]) => Promise<{ ok: boolean | null; text?: string }>, had: Map<string, string>,
+  want: [string, string][], fresh: boolean): Promise<string[]> {
+  const keep = new Map(want), failed: string[] = [];
+  for (const w of [...had.keys()]) if (!keep.has(w)) {
+    await call(["remove", w]);
+    had.delete(w);
+  }
+  for (const [w, usage] of keep) if (had.get(w) !== usage) {
+    if (fresh || had.has(w)) await call(["remove", w]); // a new usage replaces the old one
+    const r = await call(["add", w, usage]);
+    if (r.ok) had.set(w, usage);
+    else failed.push(`!${w}: ${r.text || "refused"}`);
+  }
+  return failed;
+}
+
 export const clean = (s: string) => s.replace(/\p{C}/gu, "");
 const fail = (m: string): never => { throw new Error(m); };
 
@@ -627,6 +665,14 @@ export class Engine {
       if (!pid) pid = this.find(lob, name)?.[1].id ?? "";
       return this.fire("command", server, this.context(server, { player: name, args: clean(rest.join(" ")).slice(0, 120) }), { player_id: pid, command: word.toLowerCase() });
     }
+    if (kind === "command" && ev.private === true) { // 0.10.3+: a private command reached only the server (privateCommands)
+      const word = String(ev.word ?? "").trim().replace(/^[!/]/, "").toLowerCase();
+      if (!word) return [];
+      const pid = pidOf(), name = text(pick(ev, "name", "player") ?? (pid ? this.find(lob, pid)?.[1].name : ""));
+      const args = clean(Array.isArray(ev.args) ? ev.args.join(" ") : String(ev.args ?? "")).slice(0, 120);
+      const role = SERVER_ROLES[String(ev.role ?? "").toLowerCase()] ?? "";
+      return this.fire("command", server, this.context(server, { player: name, args }), { player_id: pid, command: `!${word}`, role });
+    }
     if (kind === "medal" || kind === "award") {
       const medal = text(ev.medal ?? ev.award);
       const hit = this.find(lob, pick(ev, "player_id", "id", "name"));
@@ -782,7 +828,7 @@ export class Engine {
       case "admin_online": return this.admins(this.scope(c.where, server)).length > 0;
       case "no_admin_online": return this.admins().length === 0;
       case "player_role": {
-        const roles = this.roleOf(f.player_id);
+        const roles = f.role ? [...this.roleOf(f.player_id), f.role] : this.roleOf(f.player_id); // a private command names the server's role
         return c.role === "none" ? roles.length === 0 : roles.includes(c.role);
       }
       case "player_kd": {

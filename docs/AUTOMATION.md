@@ -180,5 +180,19 @@ The IBIGS fleet console has the same rules under **F12**, in **FLEET AUTOMATION*
 - **SWITCH**: rules run only while it's ON, and it starts OFF.
 - **RULES**, **ROLES** (VIP protection and roles for rules) and **DISCORD**.
 
+- Rules run **while the console is open**. They act through the same connection as the buttons do, so a closed
+  console, or a server it has lost, does nothing.
+- Rules live in `automation.json` beside the config; a rule that no longer checks out is skipped and said so.
+- A vote can't be switched off on the dedicated server, so the *Votes off* template cancels each vote the moment it
+  starts and says so in chat.
+- **`!commands` stay out of chat on Reclaimer 0.10.3+.** On connect, and whenever the rules change, the console
+  registers each enabled `!command` rule's word with the server (`commands add`, up to 16, rules first, then the words
+  Studio scripts hook with `command()`). A player's `!kills` or `/kills` then reaches only the server, never everyone's
+  chat, and the game's `/help` lists it under the rule's name. The server's own `role` comes with it, so *The player has
+  a role* works for staff the console's roles don't list. Players on games older than 0.10.3, and servers that refuse
+  `commands`, keep the old way: the word goes to chat and the rule matches it there. The command log shows the words
+  registered (`PRIVATE COMMANDS`). Registrations last until the server restarts, so with the console closed a player's
+  `/kills` gets no answer.
+
 Every node runs the rules on its own lobbies. Lifecycle stays with the controller, so "start a stopped server" is
 refused there.

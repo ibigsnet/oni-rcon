@@ -139,7 +139,7 @@ impl Hub {
             .into_iter()
             .map(|s| {
                 let (url, ready) = match tunnels.iter().find(|t| !s.ssh.is_empty() && s.url.is_empty() && t.dest == s.ssh) {
-                    Some(t) => (format!("ws://127.0.0.1:{}", t.local_port(&s.host, s.port)), Some(t.ready.subscribe())),
+                    Some(t) => (format!("{}://127.0.0.1:{}", s.scheme(), t.local_port(&s.host, s.port)), Some(t.ready.subscribe())),
                     None => (s.direct_url(), None),
                 };
                 Arc::new(StationRt { rcon: Rcon::new(&s.password, &by), server: s, url, ready, task: Mutex::new(None), health: Mutex::new(HealthRt::default()) })

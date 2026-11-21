@@ -9,14 +9,19 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { AMBER, CYAN, DIM, GREEN, RED, WHITE } from "./art/palette";
 import { Superintendent, classify } from "./art/superintendent";
 import { Medals } from "./lib/medals";
-import { Engine, type Roles } from "./lib/rules";
+import { Engine, privateCommands, registerCommands, type Roles } from "./lib/rules";
 import { Runner, type Note } from "./lib/runner";
+import { mixedByProject, projectOf } from "./lib/projects";
 import { Findings, publicRoster, quietKillMode, type Finding, type Who } from "./lib/findings";
 import {
-  CATS, ID_LIKE, KIND, cmdLine, commonPrefix, explain, idForms, mixedVersions, num, pick, playerIds, plain, reactionWords,
-  pluginReply, pluginSnapshot, redactData, redactText, resolve, splitTag, stripEnds, who, noteKick, typedParams,
-  type Dict, type Kick, type Line,
+  CATS, ID_LIKE, KIND, behind, cmdLine, commonPrefix, explain, idForms, num, pick, playerIds, plain, reactionWords,
+  pluginPace, pluginReply, pluginSnapshot, redactData, redactText, resolve, restartDue, since, splitTag, stripEnds, who, noteKick, typedParams,
+  semver, type Dict, type Kick, type Line, type Pace,
 } from "./lib/util";
+import { asksHealth } from "./lib/perf";
+
+/** Reclaimer 0.10.3 and later save their game, rotation and live settings on `state save`. */
+export const savesState = (st: Station) => projectOf(st.info).reclaimer && since(st.info.version, "0.10.3");
 
 export const FLEET = 12;
 const FANOUT = 4;
@@ -87,6 +92,7 @@ export class Station {
   flash = 0;
   firstSeen = new Map<string, number>();
   painted = false;
+  restartAfter = false; // RESTART AFTER THIS GAME is waiting on this server
   polled = 0;
   pings = new Map<string, number>();
   here = new Map<string, string>();
@@ -94,6 +100,8 @@ export class Station {
   aliases = new Map<string, string>();
   unmatched = false;
   kicks = new Map<string, Kick>(); // who it saw kicked, for F4's PARDON
+  privateCmds: Map<string, string> | null = null; // the private commands registered on this link (word → usage); null: none, or refused
+  cmdSync: Promise<void> = Promise.resolve();
   constructor(public index: number, public where: string, public name: string, public ssh: string, public url: string,
     public contentDir: string, public host: string, public port: number, public canRestart = false) {
     this.label = name || where;
@@ -155,6 +163,7 @@ export interface Plugin {
   m: Dict; view: Dict | null; error: string; busy: boolean; asked: boolean; due: number; note: string;
   replies: Dict[]; session: { state: string; detail: string; retry_in: number } | null; pages: Set<(msg: Dict) => void>;
   update: { behind: number; log: string[]; source: string; to: string; asked: boolean } | null; // its git upstream is ahead
+  pace: Pace; paced: number; // the RCON it sent by itself in the last minute; when it was last told it's over the limit
 }
 export const badgeOf = (p: Plugin): Dict | null => (p.view && !p.error ? p.view.badge : null);
 
@@ -189,6 +198,8 @@ class Oni {
   findings = new Findings();
   /** Automation rules: they run while this console is open, and act through the same calls as the buttons do. */
   rules: Dict[] = [];
+  /** The words running Studio scripts hook with command(): registered as private commands after the rules' own. */
+  studioWords: string[] = [];
   roles: Roles = {};
   runner = new Runner({
     call: (where, command, args) => {
@@ -267,6 +278,7 @@ class Oni {
       const f = await invoke<Dict>("automation_load");
       [this.rules, this.roles, this.runner.webhooks, this.runner.chats] = [f.rules, f.roles, f.webhooks, f.telegram ?? {}];
       this.runner.load(this.rules, this.roles);
+      for (const st of this.stations) this.syncCommands(st);
     } catch (e) {
       this.notify(String(e), "AUTOMATION", "error", 10);
     }
@@ -277,6 +289,32 @@ class Oni {
     await invoke("automation_save", { rules, roles });
     [this.rules, this.roles] = [rules, roles];
     this.runner.load(rules, roles);
+    for (const st of this.stations) this.syncCommands(st);
+  }
+
+  studioCommands(words: unknown[]) {
+    const ok = [...new Set(words.map((w) => String(w).toLowerCase()).filter((w) => /^[a-z0-9_-]{1,23}$/.test(w)))].sort();
+    if (ok.join(" ") === this.studioWords.join(" ")) return;
+    this.studioWords = ok;
+    for (const st of this.stations) this.syncCommands(st);
+  }
+
+  /** Reclaimer 0.10.3+ private commands: register the words this server's !command rules answer, so a player's !word
+   *  (or /word) reaches only the server, never everyone's chat, and /help lists it. They last until a restart, which
+   *  drops the link, so `fresh` (a new link) adds them all again: remove first, as a reconnect may find them still there.
+   *  A server that refuses `commands` keeps matching chat, as before.
+   *  ponytail: another console on the same server can remove a word this one added; per-console words if that bites. */
+  syncCommands(st: Station, fresh = false) {
+    st.cmdSync = st.cmdSync.then(async () => {
+      if (!st.online || !projectOf(st.info).reclaimer || behind(st.info.version, "0.10.3")) return; // no version (0.10.1+ sign-in): ask
+      if (fresh) st.privateCmds = (await this.call(st, "commands")).ok ? new Map() : null;
+      const had = st.privateCmds;
+      if (!had) return;
+      const failed = await registerCommands((args) => this.call(st, "commands", args), had, privateCommands(this.rules, st.where, this.studioWords), fresh);
+      const head: Line = [[new Date().toTimeString().slice(0, 9), DIM], [`${st.label} `, CYAN]];
+      if (fresh && had.size) this.logLine([...head, [`PRIVATE COMMANDS  ${[...had.keys()].map((w) => "!" + w).join(" ")}`, DIM]]);
+      if (failed.length) this.logLine([...head, [`PRIVATE COMMANDS NOT ADDED  ${failed.join(" · ")}`, AMBER]]);
+    });
   }
 
   /** What a rule did goes in the command log, the audit trail beside everything typed by hand. */
@@ -344,11 +382,16 @@ class Oni {
     st.state = state;
     st.detail = detail;
     st.info = m.info ?? st.info;
+    if (state !== "online" && st.restartAfter) { // it went down anyway: restarting it once it's back would drop everyone again
+      st.restartAfter = false;
+      this.notify("The link dropped, so the restart waiting for the end of the game is off.", `RESTART · ${st.label}`, "warning", 15);
+    }
     if (state !== "connecting") this.runner.connection(st.where, state === "online", st.label);
     if (state === "online") {
       st.medals.newGame(); // what happened while we were away is unknown
       this.relabel();
-      this.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins");
+      this.fetch(st, "status", "players", "maps", "modes", "nextmap", "vote", "bans", "vpn", "admins", ...(asksHealth(st.info) ? ["health"] : []));
+      this.syncCommands(st, true);
       st.polled = performance.now();
       this.logEvent(st, { event: "uplink", text: `SECURE  ${detail}` });
       this.noteMixed();
@@ -399,6 +442,30 @@ class Oni {
     if (kind === "admin_added" || kind === "admin_removed") this.fetch(st, "admins", "players");
     if (kind === "vote") this.fetch(st, "vote");
     if (kind === "control") this.fetch(st, "nextmap");
+    if (kind === "phase" && st.restartAfter) this.fetch(st, "status"); // the game may have just ended
+  }
+
+  /** RESTART SERVER: the server's restart_cmd. `after` = the RESTART AFTER THIS GAME it was waiting for, so the
+   *  players still on it hear why they're dropped. Reclaimer 0.10.3+ saves its game first (`state save`, which answers
+   *  once it is on disk), and with dedicated.toml's restore_state the next start plays on from it. A save that fails
+   *  stops the restart unless the admin says go anyway. */
+  async restartNow(st: Station, after = false) {
+    const head = `RESTART · ${st.label}`;
+    if (after) {
+      st.restartAfter = false;
+      bump("cards", "ops");
+    }
+    let saved = "";
+    if (st.online && savesState(st)) {
+      const r = await this.call(st, "state", ["save"], 30);
+      if (r.ok) saved = ` ${r.text ?? ""}`.trimEnd();
+      else if (!(await this.confirm(`NOT SAVED · ${st.label}`, `The server couldn't save its game: ${r.text || "no answer"}. Restart anyway? The game starts over.`, "RESTART", true)))
+        return this.notify("Not restarted: it plays on.", head);
+    }
+    if (after) await this.call(st, "say", ["Restarting the server now. It's back in a minute or so."], 3);
+    this.notify((after ? "The game's over: restarting…" : "Restarting…") + saved + " The console reconnects by itself.", head, "warning", saved ? 10 : undefined);
+    return invoke("restart_server", { index: st.index }).then(() => this.notify("Restarted.", head),
+      (e) => this.notify(String(e), `RESTART FAILED · ${st.label}`, "error", 15));
   }
 
   // --- findings ----------------------------------------------------------------------------------------------------
@@ -489,6 +556,8 @@ class Oni {
         }
         if (w === "status") this.runner.status(st.where, r.data);
         st.data[w] = r.data;
+        if (w === "health" && !semver(st.info.version) && semver(r.data.version)) st.info.version = r.data.version; // a sign-in that named none
+        if (w === "status" && restartDue(st.restartAfter, r.data)) this.restartNow(st, true);
       }
     });
     bump("cards");
@@ -499,6 +568,7 @@ class Oni {
       if (what.some((w) => w === "maps" || w === "modes")) bump("forge");
     }
     if (what.includes("status")) bump("mast");
+    if (what.includes("health")) bump("health");
   }
 
   private pollFast() {
@@ -514,7 +584,7 @@ class Oni {
     for (const st of due.slice(0, Math.ceil(this.stations.length / 15))) {
       st.polled = now;
       const empty = num(st.data.status?.players) === 0 && !st.players.length;
-      this.fetch(st, "status", ...(empty ? [] : ["players"]));
+      this.fetch(st, "status", ...(empty ? [] : ["players"]), ...(asksHealth(st.info) ? ["health"] : []));
     }
   }
 
@@ -533,7 +603,7 @@ class Oni {
   /** One feed line when the connected stations run different versions: a player can join only those on theirs.
    *  Said again only when the mix changes. */
   private noteMixed() {
-    const mix = mixedVersions(this.stations.filter((s) => s.online).map((s) => ({ label: s.label, version: s.info.version })));
+    const mix = mixedByProject(this.stations.filter((s) => s.online));
     if (mix && mix !== this.mixedSaid) this.logEvent(null, { event: "uplink", text: `MIXED VERSIONS  ${mix}` });
     this.mixedSaid = mix;
   }
@@ -790,7 +860,8 @@ class Oni {
     try {
       const list = await invoke<Dict[]>("plugins_list");
       const had = new Map(this.plugins.map((p) => [p.m.id, p]));
-      this.plugins = list.map((m) => Object.assign(had.get(m.id) ?? { view: null, error: "", busy: false, asked: false, due, note: "", replies: [], session: null, pages: new Set<(msg: Dict) => void>(), update: null }, { m }));
+      this.plugins = list.map((m) => Object.assign(had.get(m.id) ?? { view: null, error: "", busy: false, asked: false, due, note: "", replies: [], session: null, pages: new Set<(msg: Dict) => void>(), update: null,
+        pace: { sent: [], said: {} }, paced: 0 }, { m }));
     } catch { /* no console running */ }
     const servers = this.stations.map((s) => ({ index: s.index, name: this.serverName(s) }));
     for (const p of this.plugins) {
@@ -850,7 +921,7 @@ class Oni {
     } else if (m.kind === "plugin-log") {
       this.logLine([...head, [redactText(m.text, this.redact), m.warn ? AMBER : DIM]]);
     } else if (m.kind === "plugin-rcon") {
-      this.pluginRcon(p, m).then((r) => invoke("plugin_send", { id: p.m.id, msg: { type: "rcon-reply", id: m.ref, ok: r.ok, text: r.text, data: r.data } }).catch(() => {}));
+      this.pluginOwnRcon(p, m).then((r) => invoke("plugin_send", { id: p.m.id, msg: { type: "rcon-reply", id: m.ref, ok: r.ok, text: r.text, data: r.data } }).catch(() => {}));
     }
     bump("plugins", "mast");
   }
@@ -866,13 +937,24 @@ class Oni {
     return pluginReply(x, res, !!p.m.addresses);
   }
 
+  /** RCON it sent by itself (its session or its page), held to its pace; over it, nothing is sent and it hears why. */
+  async pluginOwnRcon(p: Plugin, x: Dict): Promise<Dict> {
+    const why = pluginPace(p.pace, String(x.server), String(x.command), Date.now());
+    if (!why) return this.pluginRcon(p, x);
+    if (Date.now() - p.paced > 10_000) { // said once in a while, not once for each one dropped
+      p.paced = Date.now();
+      this.logLine([[new Date().toTimeString().slice(0, 9), DIM], [redactText(`plug-in ${p.m.id} ▸ ${cmdLine(x.command, x.args)}: not sent, ${why}`, this.redact), AMBER]]);
+    }
+    return pluginReply(x, { ok: false, text: `not sent: ${why}` }, true);
+  }
+
   /** RCON its page asked for ({oni:"rcon", server?, command, args}): the same filter as an action's, on the selected
    *  server unless it names one. */
   async pluginPageRcon(p: Plugin, m: Dict): Promise<Dict> {
     const want = { server: m.server == null ? this.serverName(this.cur) : String(m.server), command: m.command, args: Array.isArray(m.args) ? m.args : [] };
     const n = await invoke<Dict>("plugin_filter", { id: p.m.id, rcon: want, servers: this.stations.map((s) => this.serverName(s)) })
       .catch((e) => ({ rcon: [], dropped: [String(e)] }));
-    if (n.rcon.length) return this.pluginRcon(p, n.rcon[0]);
+    if (n.rcon.length) return this.pluginOwnRcon(p, n.rcon[0]);
     const why = String(n.dropped[0] ?? "refused");
     this.logLine([[new Date().toTimeString().slice(0, 9), DIM], [redactText(`plug-in ${p.m.id}'s page asked for ${why}: not sent`, this.redact), AMBER]]);
     return pluginReply(want, { ok: false, text: `not sent: ${why}` }, true);
@@ -962,8 +1044,44 @@ class Oni {
     if (!p) return true;
     this.psel = this.plugins.indexOf(p);
     bump("plugins");
+    await this.pluginNeeds(p);
     if (p.m.state === "needs approval") await this.pluginApprove(p);
     return true;
+  }
+
+  /** What it needs that this computer hasn't, and where to get each. */
+  pluginNeedsText(p: Plugin) {
+    const list = (p.m.missing ?? []) as Dict[];
+    return redactText(`${p.m.name || p.m.id} runs  ${p.m.exec}\n\nOni can't find what it needs on this computer:\n\n`
+      + list.map((n) => `  ${n.name} (${n.program})${n.url ? `   ${n.url}` : ""}`).join("\n")
+      + "\n\nInstall it, then CHECK AGAIN on F10. If it still isn't found, restart Oni: it reads PATH when it starts.", this.redact);
+  }
+
+  /** Before it's approved, offer what it needs that isn't here: each one's download page, opened on yes. */
+  async pluginNeeds(p: Plugin) {
+    const name = String(p.m.name || p.m.id).toUpperCase();
+    for (const n of ((p.m.missing ?? []) as Dict[]).filter((x) => x.url)) {
+      if (await this.confirm(`${name} NEEDS ${String(n.name).toUpperCase()}`, this.pluginNeedsText(p), `GET ${String(n.name).toUpperCase()}`, false)) await this.pluginGetNeed(p, n);
+    }
+  }
+
+  async pluginGetNeed(p: Plugin, n: Dict) {
+    const title = String(p.m.name || p.m.id).toUpperCase();
+    try {
+      await invoke("plugin_get_requirement", { id: p.m.id, program: n.program });
+      this.notify(`Opened ${n.url}. Install ${n.name}, then CHECK AGAIN on F10.`, title);
+    } catch (e) {
+      this.notify(redactText(String(e), this.redact), `${title} · NO BROWSER`, "warning", 15);
+    }
+  }
+
+  /** Look again for what plug-ins need (something was installed): one that has it all now starts. */
+  async pluginRecheck(p: Plugin) {
+    await invoke("plugin_recheck").catch(() => {});
+    await this.loadPlugins();
+    const left = ((this.plugin(p.m.id)?.m.missing ?? []) as Dict[]).map((n) => n.name);
+    this.notify(left.length ? `Still can't find ${left.join(", ")}. If you installed it since Oni started, restart Oni.` : "It has everything it needs.",
+      String(p.m.name || p.m.id).toUpperCase(), left.length ? "warning" : "information");
   }
 
   /** Ask for a git address, clone it into plugins/ and turn it on. Downloading runs nothing: approval comes next. */

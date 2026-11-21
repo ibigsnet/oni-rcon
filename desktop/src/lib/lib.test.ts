@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { behind, describe as describeEvent, explain, hotReloads, mixedVersions, idForms, kickLeft, notesText, noteKick, pardonTarget, parseCommand, plain, pluginReply, pluginSnapshot, reactionWords, redactData, redactText, sides, splitTag, typedParams, vpnCheck, vpnLists, type Kick } from "./util";
+import { behind, since, describe as describeEvent, explain, hotReloads, mixedVersions, idForms, kickLeft, notesText, noteKick, pardonTarget, parseCommand, queued, plain, pluginPace, pluginReply, pluginSnapshot, reactionWords, restartDue, redactData, redactText, sides, splitTag, typedParams, vpnCheck, vpnLists, type Kick } from "./util";
 import { Medals } from "./medals";
+import { mixedByProject, projectOf, reclaimerOnly } from "./projects";
+import { aboutLine, aboutText } from "./about";
 import { compatible, latestOf, refsOf, votesOf } from "./forge";
 import { Superintendent, classify } from "../art/superintendent";
 import { BASE, face, faceClass } from "../art/archive";
 import { smooth, tones } from "../art/pixels";
 import { decrypt, noise } from "../art/palette";
-import { advice, level, scaleTop } from "./perf";
+import { advice, asksHealth, level, rate, rconFrames, scaleTop } from "./perf";
 import { filterTerms, nameDistance, rankedPlayers, type Found } from "./search";
 import { Findings, chatRequest, publicRoster } from "./findings";
 import { arrange, catalogItems, checkPlaylist, gameLabel, itemsFor, ordered, slug } from "./content";
@@ -72,12 +74,25 @@ describe("words", () => {
     expect(pluginReply(x, r, true).data.address).toBe("203.0.113.9");
     expect(pluginReply(x, { ok: null }, false)).toMatchObject({ ok: null, text: "", data: null });
   });
+
+  it("holds a plug-in's own RCON to a pace", () => {
+    const pace = { sent: [] as number[], said: {} as Record<string, number[]> };
+    for (let i = 0; i < 20; i++) expect(pluginPace(pace, "A", "say", 1000 + i)).toBe("");
+    expect(pluginPace(pace, "A", "tell", 2000)).toMatch(/20 chat messages a minute/);
+    expect(pluginPace(pace, "B", "say", 2000)).toBe(""); // another server's chat is its own
+    for (let i = 0; i < 39; i++) expect(pluginPace(pace, "A", "status", 3000)).toBe("");
+    expect(pluginPace(pace, "A", "status", 3000)).toMatch(/60 commands a minute/);
+    expect(pluginPace(pace, "A", "say", 1000 + 60_000)).toBe(""); // a minute on, the first ones have gone
+  });
   it("describes admin and reload events", () => {
     const d = (ev: Record<string, unknown>) => plain(describeEvent(ev));
     expect(d({ event: "admin_added", name: "Bravo", id: "76561198000000001", by: "RCON" })).toBe("ADMIN  Bravo  made admin  by RCON");
     expect(d({ event: "admin_removed", id: "0123456789abcdef0123456789abcdef" })).toBe("ADMIN  01234567…  no longer admin");
     expect(d({ event: "control", action: "reload", ok: true, text: "max_players 16 -> 12" })).toBe("RELOAD  max_players 16 -> 12");
     expect(d({ event: "control", action: "reload", ok: false, text: "dedicated.toml: line 4" })).toBe("RELOAD FAILED  dedicated.toml: line 4");
+    expect(d({ event: "saved", kind: "state", by: "RCON", result: "data/s1/state.json" })).toBe("SAVED  game state  data/s1/state.json  by RCON");
+    expect(d({ event: "save_failed", kind: "map", by: "Alice", result: "No Forge game is being played" })).toBe("SAVE FAILED  Forge map  No Forge game is being played  by Alice");
+    expect(d({ event: "state_restored" })).toBe("STATE RESTORED");
     expect(d({ event: "control", action: "reload_applied", ok: true, text: "playlist" })).toBe("RELOAD APPLIED  playlist");
     expect(d({ event: "control", action: "kill_feed", ok: true, text: "x" }).startsWith("CONTROL  x")).toBe(true);
   });
@@ -426,6 +441,21 @@ describe("hot reload", () => {
   });
 });
 
+describe("restart after this game", () => {
+  it("waits out the game, runs once it's finished or empty, and never once cancelled", () => {
+    expect(restartDue(true, { phase: "playing", players: 6 })).toBe(false);
+    expect(restartDue(true, { phase: "round_over", players: 6 })).toBe(false);
+    expect(restartDue(true, { phase: "in_game", players: 2 })).toBe(false); // Reach
+    expect(restartDue(true, { phase: "finished", players: 6 })).toBe(true);
+    expect(restartDue(true, { phase: "no_game", players: 6 })).toBe(true); // the finished poll was missed
+    expect(restartDue(true, { phase: "postgame", players: 2 })).toBe(true); // Reach
+    expect(restartDue(true, { phase: "playing", players: 0 })).toBe(true); // empty: nobody to drop
+    expect(restartDue(true, { players: 3 })).toBe(false); // no phase reported: waits for it to empty
+    expect(restartDue(true, undefined)).toBe(false);
+    expect(restartDue(false, { phase: "finished", players: 0 })).toBe(false); // cancelled
+  });
+});
+
 describe("server version", () => {
   it("is behind only when both versions are known and the server's is older", () => {
     expect(behind("0.9.17", "0.9.18")).toBe("0.9.18");
@@ -433,6 +463,11 @@ describe("server version", () => {
     expect(behind("0.9.18", "0.10.0")).toBe("0.10.0");
     for (const [have, latest] of [["0.9.18", "0.9.18"], ["0.9.19-rc1", "0.9.18"], ["?", "0.9.18"], [undefined, "0.9.18"], ["0.9.17", ""]])
       expect(behind(have, latest), `${have} vs ${latest}`).toBe("");
+  });
+
+  it("is since a release only when the version is known and not older", () => {
+    for (const v of ["0.10.0", "v0.10.1", "0.10.0-rc1", "1.0.0"]) expect(since(v, "0.10.0"), v).toBe(true);
+    for (const v of ["0.9.23", "0.9.100", "?", undefined, ""]) expect(since(v, "0.10.0"), String(v)).toBe(false);
   });
 
   it("names a mixed fleet once, oldest first, and stays quiet when it agrees", () => {
@@ -481,6 +516,27 @@ describe("plug-ins", () => {
   });
 });
 
+describe("projects", () => {
+  it("takes a server for Project Reclaimer unless its sign-in names another", () => {
+    expect(projectOf({ server: "Slayer", version: "0.9.18" }).id).toBe("reclaimer");
+    expect(projectOf(undefined).reclaimer).toBe(true);
+    expect(projectOf({ project: "Project Gravemind" })).toMatchObject({ id: "gravemind", game: "Halo 2", reclaimer: false });
+    expect(projectOf({ project: "renaissance" }).tag).toBe("REACH");
+    expect(projectOf({ project: "reclaimer" }).reclaimer).toBe(true);
+    expect(projectOf({ project: "OpenCE\n", game: "Halo: Combat Evolved" })).toMatchObject({ name: "OpenCE", game: "Halo: Combat Evolved", tag: "HCE", reclaimer: false });
+    expect(projectOf({ project: "Halo2Server", game: "Halo 2 Vista" }).tag).toBe("H2V");
+    expect(reclaimerOnly({ project: "gravemind" }, "CAMERA")).toBe("CAMERA is Project Reclaimer's (Halo 3), and this server runs Project Gravemind (Halo 2).");
+    expect(reclaimerOnly({})).toBe("");
+  });
+
+  it("compares versions only within one project", () => {
+    const st = (label: string, version: string, project?: string) => ({ label, info: { version, project } });
+    expect(mixedByProject([st("A", "0.9.18"), st("B", "1.2.0", "gravemind")])).toBe("");
+    expect(mixedByProject([st("A", "0.9.18"), st("B", "0.9.17")])).toBe("0.9.17 on B · 0.9.18 on A");
+    expect(mixedByProject([st("A", "0.9.18"), st("B", "0.9.17"), st("C", "1.0.0", "gravemind")])).toBe("Project Reclaimer: 0.9.17 on B · 0.9.18 on A");
+  });
+});
+
 describe("vpn lists (0.9.22)", () => {
   const now = 1_800_000_000;
   const v = { lists: { refreshed_at: now - 60, sources: [
@@ -503,5 +559,41 @@ describe("vpn lists (0.9.22)", () => {
     expect(vpnCheck("refused", { listed: true, list: "x4bnet", refused: true })).toBe("refused · matched x4bnet");
     expect(vpnCheck("refused", { listed: false, refused: true, fail_closed: true })).toContain("fail_closed");
     expect(vpnCheck("fine", null)).toBe("fine");
+  });
+});
+
+describe("about", () => {
+  it("shows the legal notices NOTICE asks a modified version to keep", () => {
+    const t = aboutText("1.11.0");
+    for (const must of ["ONI RCON by Arche Labs (viik), version 1.11.0", "ibigs, LLC", "GNU Affero General Public License", "NO WARRANTY",
+      "LICENSE", "https://github.com/viik2k/oni-rcon"]) expect(t).toContain(must);
+    expect(aboutLine()).toBe("ONI RCON by Arche Labs (viik) · AGPL-3.0-or-later · no warranty · https://github.com/viik2k/oni-rcon");
+  });
+});
+
+describe("game queue", () => {
+  it("reads status's next_games as [map, mode], whatever shape its entries take", () => {
+    expect(queued({ next_games: [{ map: "guardian", mode: "oddball" }, { map: "valhalla", mode: null }, "The Pit"] }))
+      .toEqual([["guardian", "oddball"], ["valhalla", ""], ["The Pit", ""]]);
+    expect(queued({})).toEqual([]);
+    expect(queued(undefined)).toEqual([]);
+  });
+});
+
+describe("RCON health (Reclaimer 0.10+)", () => {
+  // captured 2026-11-11 from a 0.10.2 server in an empty lobby (`dedicated rcon --json health`)
+  const HEALTH_0102 = { download_bytes_per_second: 0.0, frame_ms_max: 0.0, frame_ms_p50: 0.0, frame_ms_p99: 0.0, frame_rate: 0.0, max_players: 16,
+    phase: "lobby", players: 0, upload_bytes_per_second: 0.0, uptime_seconds: 33044, version: "0.10.2" };
+  it("reads as a frame-rate row, an empty lobby as idle", () => {
+    expect(rconFrames(HEALTH_0102)).toEqual({ fps: null, p50: 0, p99: 0, max: 0, up: 0, down: 0, players: 0 });
+    expect(rconFrames({ ...HEALTH_0102, frame_rate: 47.5, frame_ms_p99: 61.2, upload_bytes_per_second: 183400, players: 12 }))
+      .toEqual({ fps: 47.5, p50: 0, p99: 61.2, max: 0, up: 183400, down: 0, players: 12 });
+    for (const d of [null, undefined, "x", { phase: "lobby" }, { ...HEALTH_0102, frame_rate: true }]) expect(rconFrames(d)).toBeNull();
+    expect([null, 0, 950, 12345, 1_240_000].map(rate)).toEqual(["—", "0 B/s", "950 B/s", "12.3 KB/s", "1.2 MB/s"]);
+  });
+  it("is asked of a 0.10+ Reclaimer server or one that named no version, never 0.9 or another game", () => {
+    for (const v of ["0.10.2", "v0.10.0", undefined, ""]) expect(asksHealth({ version: v }), String(v)).toBe(true);
+    expect(asksHealth({ version: "0.9.23" })).toBe(false);
+    expect(asksHealth({ protocol: "source", project: "renaissance", game: "Halo: Reach" })).toBe(false);
   });
 });

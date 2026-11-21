@@ -11,12 +11,15 @@ import { Btn, Panel, Table, type Row } from "./ui";
 
 const BADGE: Record<string, string> = { ok: GREEN, warn: AMBER, alert: RED, off: DIM };
 
+/** Whether all that stops it is a program it needs that isn't here: it runs once that's installed. */
+const lacking = (p: Plugin) => !!p.m.state && p.m.state !== "needs approval" && !p.m.error && !!p.m.missing?.length;
+
 /** Its entry in the list: a light, its name, and its badge or what's wrong. */
 function entry(p: Plugin): Row {
-  const why = p.m.state, b = badgeOf(p), down = p.m.mode === "session" && p.session?.state !== "running";
-  const light: [string, string] = p.busy ? ["◌", AMBER] : why && why !== "needs approval" ? ["⊘", RED] : why ? ["?", AMBER]
+  const why = p.m.state, b = badgeOf(p), down = p.m.mode === "session" && p.session?.state !== "running", wait = why === "needs approval" || lacking(p);
+  const light: [string, string] = p.busy ? ["◌", AMBER] : why && !wait ? ["⊘", RED] : why ? ["?", AMBER]
     : down ? ["○", p.session ? RED : DIM] : p.error ? ["○", RED] : !p.view ? ["○", DIM] : ["●", b ? BADGE[b.level] : GREEN];
-  const tail: Line = why ? [[why === "needs approval" ? "NEEDS APPROVAL" : "DISABLED", why === "needs approval" ? AMBER : RED]]
+  const tail: Line = why ? [[wait ? why.toUpperCase() : "DISABLED", wait ? AMBER : RED]]
     : down ? [[p.session ? "RESTARTING" : "STARTING", AMBER]] : p.error ? [["NO ANSWER", RED]] : b?.text ? [[b.text, BADGE[b.level]]] : [];
   return { id: p.m.id, cells: [[light], [[p.m.name || p.m.id, why ? DIM : WHITE]], p.update ? [["▲ ", CYAN], ...tail] : tail] };
 }
@@ -62,8 +65,22 @@ function Onboarding({ first, onDone }: { first: boolean; onDone: () => void }) {
   );
 }
 
-/** A plug-in that won't run: why it can't, or what approving it would allow. */
+/** A plug-in that won't run: why it can't, what it needs installed first, or what approving it would allow. */
 function Gate({ p }: { p: Plugin }) {
+  if (lacking(p)) {
+    return (
+      <div style={{ whiteSpace: "pre-wrap" }}>
+        <div style={{ color: AMBER }}>{p.m.state.toUpperCase()}</div><br />
+        <div>{oni.pluginNeedsText(p)}</div><br />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {p.m.missing.filter((n: Dict) => n.url).map((n: Dict) => (
+            <Btn key={n.program} label={`GET ${String(n.name).toUpperCase()}`} variant="primary" onClick={() => oni.pluginGetNeed(p, n)} id={`plugin-get-${n.program}`} />
+          ))}
+          <Btn label="CHECK AGAIN" onClick={() => oni.pluginRecheck(p)} id="plugin-recheck" />
+        </div>
+      </div>
+    );
+  }
   if (p.m.state !== "needs approval") {
     return (
       <div style={{ whiteSpace: "pre-wrap" }}>
@@ -117,6 +134,7 @@ function Frame({ p, b }: { p: Plugin; b: Dict }) {
       if (e.source !== ref.current?.contentWindow || !m || typeof m !== "object") return;
       if (m.oni === "ready") latest.current();
       else if (m.oni === "refresh") oni.pluginView(p);
+      else if (m.oni === "commands" && p.m.builtin && Array.isArray(m.words)) oni.studioCommands(m.words); // Studio's command() words
       else if (m.oni === "height" && Number.isFinite(m.px)) setH(Math.max(40, Math.min(4000, m.px)));
       // ponytail: no rate limit on a page's RCON or calls; each is logged, and only its permitted commands go out
       else if (m.oni === "rcon" && typeof m.command === "string") oni.pluginPageRcon(p, m).then((r) => send({ oni: "rcon-reply", id: m.id ?? null, ...r }));

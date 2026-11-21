@@ -319,8 +319,8 @@ const LH = 20, PADX = 8, PADY = 4, TAB = 2;
 let CW = 7.8;
 
 const KINDS = ["chat", "kill", "join", "leave", "refused", "kick", "ban", "unban", "mute", "unmute", "cheat", "pardon", "admin_added",
-  "admin_removed", "vote", "medal", "award", "lagged", "control", "admin"];
-const FIELDS = { chat: "channel name team text player_id", kill: "killer victim weapon killer_name victim_name medals", join: "name player_id address",
+  "admin_removed", "vote", "medal", "award", "lagged", "control", "admin", "command"];
+const FIELDS = { chat: "channel name team text player_id", command: "word args text role private player_id", kill: "killer victim weapon killer_name victim_name medals", join: "name player_id address",
   leave: "name reason", refused: "name id ip reason", kick: "name id ip by reason seconds", ban: "name id ip by reason", unban: "name id by",
   mute: "name id by reason", unmute: "name id by", cheat: "name text", pardon: "target name by", admin_added: "name id by", admin_removed: "name id by",
   vote: "text name action vote_type target", medal: "medal name player_id", award: "award name player_id", lagged: "name player_id",
@@ -352,7 +352,7 @@ const DURS = ["30s", "1m", "5m", "10m", "30m", "1h", "6h", "12h", "1d"];
 const LEVELS = ["info", "warn", "error"];
 const DOC = {
   on: ["on(kind, filter?, handler)", 'Runs handler(ev) for each event of a kind ("chat", "kill", ...), a list of kinds, or "*" for every kind. filter is an object of fields to match (text ignores case, a list matches any of it, a RegExp tests it) or a function of ev. Returns a function that stops it.'],
-  command: ["command(name, filter?, handler)", 'Runs handler(ev) when a chat line starts with name, or one of a list, like "!rules". Case is ignored, and lines the server says itself never count. ev.command is the word, ev.rest the text after it, ev.args its words.'],
+  command: ["command(name, filter?, handler)", 'Runs handler(ev) when a chat line starts with name, or one of a list, like "!rules". Case is ignored, and lines the server says itself never count. On Reclaimer 0.10.3+ Oni registers the word with the server, so a player\'s !rules (or /rules) reaches only the server, never chat. ev.command is the word, ev.rest the text after it, ev.args its words.'],
   every: ["every(duration, fn)", 'Runs fn every duration: "30s", "10m", "2h", "1d" or milliseconds, at least 1 s. Returns an id for cancel().'],
   after: ["after(duration, fn)", "Runs fn once, after duration. Returns an id for cancel()."],
   cancel: ["cancel(id)", "Stops an every() or after()."],
@@ -402,6 +402,7 @@ const LIMITS = [["RCON", "120 commands a minute per script"], ["say and tell", "
 function sample(kind) {
   const ip = [203, 0, 113, 7].join(".");
   return ({ chat: { channel: "all", name: "Rook", team: "red", text: "!kills", player_id: "1001" },
+    command: { name: "Rook", player_id: "1001", word: "kills", args: [], text: "/kills", role: "player", private: true },
     kill: { killer: "Rook", victim: "Static", weapon: "assault_rifle", killer_name: "Rook", victim_name: "Static", medals: [] },
     join: { name: "Rook", player_id: "1001", address: "" }, leave: { name: "Rook", reason: "quit" },
     refused: { name: "Cinder", id: "1003", ip, reason: "banned" }, kick: { name: "Static", id: "1002", ip, by: "admin", reason: "afk", seconds: 0 },
@@ -1895,7 +1896,7 @@ function workerMain() {
   async function players(server) {
     const r = await rcon(server, "players");
     if (!r.ok) throw new Error(`players(): ${r.text || "no answer"}`);
-    return r.data ?? [];
+    return Array.isArray(r.data) ? r.data : r.data?.players ?? []; // the reply is {count, max_players, players}
   }
   const servers = () => SERVERS.map((x) => ({ ...x }));
   const notify = (text, level = "info") => void post({ t: "notify", text: String(text), level: String(level) });
@@ -1962,13 +1963,21 @@ function workerMain() {
     needFn(fn, "command()");
     const ns = (Array.isArray(names) ? names : [names]).map((n) => String(n).trim().toLowerCase());
     if (!ns.length || ns.some((n) => !n || /\s/.test(n))) throw new TypeError('command(): a command is one word, like "!rules"');
-    const test = matcher(filter), g = guard(fn, "command " + ns.join(","));
-    return on("chat", (ev) => {
-      if (ev.channel === "server") return;
-      const text = String(ev.text ?? "").trim(), word = text.split(/\s+/)[0].toLowerCase();
-      if (!ns.includes(word)) return;
-      ev.command = word;
-      ev.rest = text.slice(word.length).trim();
+    const test = matcher(filter), g = guard(fn, "command " + ns.join(",")), bare = ns.map((n) => n.replace(/^[!/]/, ""));
+    post({ t: "words", words: bare }); // Oni registers them as the server's private commands (0.10.3+)
+    return on(["chat", "command"], (ev) => {
+      if (ev.kind === "command") { // a private command: the word without its ! or /, its args already split
+        const i = ev.private === true ? bare.indexOf(String(ev.word ?? "").trim().replace(/^[!/]/, "").toLowerCase()) : -1;
+        if (i < 0) return;
+        ev.command = ns[i];
+        ev.rest = (Array.isArray(ev.args) ? ev.args.join(" ") : String(ev.args ?? "")).trim();
+      } else {
+        if (ev.channel === "server") return;
+        const text = String(ev.text ?? "").trim(), word = text.split(/\s+/)[0].toLowerCase();
+        if (!ns.includes(word)) return;
+        ev.command = word;
+        ev.rest = text.slice(word.length).trim();
+      }
       ev.args = ev.rest ? ev.rest.split(/\s+/) : [];
       if (test(ev)) g(ev);
     });
@@ -2060,7 +2069,7 @@ const bytes = (s) => new TextEncoder().encode(s).length;
 class Run {
   constructor(name, code, dry) {
     Object.assign(this, { name, code, dry, state: "starting", why: "", started: Date.now(), events: 0, rcon: 0, errors: 0, store: {}, storeSize: 0,
-      q: [], w: null, url: "", hello: false, pong: 0, pinged: 0, wd: 0, rconT: [], errT: [], notifyT: [], saveT: 0, saving: null, unsaved: false, bigT: 0 });
+      q: [], w: null, url: "", hello: false, pong: 0, pinged: 0, wd: 0, rconT: [], errT: [], notifyT: [], words: [], saveT: 0, saving: null, unsaved: false, bigT: 0 });
   }
   get active() { return this.state === "starting" || this.state === "running"; }
   post(x) { if (this.w) this.w.postMessage(x); }
@@ -2120,6 +2129,7 @@ class Run {
       case "notify": return this.notifyMsg(m);
       case "discord": case "telegram": return this.hookMsg(m);
       case "store": return this.storeMsg(m.data);
+      case "words": this.words = [...new Set([...this.words, ...(Array.isArray(m.words) ? m.words.map(String) : [])])].slice(0, 32); return runsChanged();
     }
   }
   error(text, stack) {
@@ -2291,7 +2301,11 @@ async function stopTest() {
 }
 let statusT = 0;
 /** A run started, stopped or failed: redraw, and tell Oni (its badge on F10). */
+let sentWords = null; // the first call always says, so a reloaded page clears what a closed one left
 function runsChanged() {
+  // the words running scripts' command() hooks, for Oni to register as private commands; a TEST run's don't count
+  const words = [...new Set([...runs.values()].filter((r) => r.active && !r.dry).flatMap((r) => r.words))].sort().join(" ");
+  if (words !== sentWords) toParent({ oni: "commands", words: (sentWords = words) ? words.split(" ") : [] });
   drawFiles();
   drawTabs();
   drawStatus();
@@ -3068,6 +3082,110 @@ on("chat", (ev) => {
 });
 
 for (const key of store.keys("vote:")) schedule(key.slice(5)); // a vote open when Oni closed carries on
+`],
+  ["Reserved slots", "Keeps the last places on a server for whitelisted players: locks it with a password when the rest fill.", `// Keeps the last SLOTS places on each server for WHITELIST players (and admins). When everyone else fills the public
+// places, the server gets PASSWORD, so it shows PRIVATE and others are asked for it rather than kicked. Give the password
+// to your whitelisted players. It comes off again when a public place frees. Anyone else who still ends up in a reserved
+// place is kicked, the newest first. A password an admin set by hand is left alone.
+const SLOTS = 2;
+const PASSWORD = "change-me";
+const WHITELIST = []; // player IDs, as F1 or "players" shows them: ["0123456789abcdef0123456789abcdef"]
+
+const allowed = new Set(WHITELIST.map((id) => String(id).toLowerCase()));
+const seen = new Map(); // player ID -> when it turned up, for newest first
+const kicked = new Map(); // player ID -> when this script kicked it, so a slow leave isn't kicked twice
+const busy = new Set();
+const reserved = (p) => p.admin || allowed.has(String(p.player_id ?? "").toLowerCase());
+
+async function check(server) {
+  if (busy.has(server)) return;
+  busy.add(server);
+  try {
+    const [pl, st] = await Promise.all([rcon(server, "players"), rcon(server, "status")]);
+    const max = pl.data?.max_players ?? st.data?.max_players, list = pl.data?.players ?? [];
+    if (!pl.ok || !st.ok || !max) return;
+    const now = Date.now(), open = max - SLOTS;
+    list.forEach((p, i) => seen.has(p.player_id) || seen.set(p.player_id, now + i)); // a later row joined later
+    const others = list.filter((p) => !reserved(p)), key = "locked:" + server, pw = !!st.data.password_required;
+    if (store.has(key) && !pw && !script.dry) store.del(key); // the server restarted, or an admin opened it
+    if (others.length >= open && !store.has(key) && !pw) {
+      store.set(key, true);
+      await rcon(server, "password", PASSWORD);
+      log(\`\${server}: \${others.length} of \${open} public places taken, locked\`);
+    } else if (others.length < open && store.has(key)) {
+      store.del(key);
+      await rcon(server, "password", "");
+      log(\`\${server}: a public place is free, unlocked\`);
+    }
+    for (const [id, t] of kicked) if (now - t > 30000) kicked.delete(id);
+    const extra = others.filter((p) => !kicked.has(p.player_id)).sort((a, b) => seen.get(b.player_id) - seen.get(a.player_id));
+    for (const p of extra.slice(0, Math.max(0, extra.length - open))) {
+      kicked.set(p.player_id, now);
+      await kick(server, p, "That place is reserved");
+      log(\`\${server}: kicked \${p.name} from a reserved place\`);
+    }
+  } finally {
+    busy.delete(server);
+  }
+}
+
+on("join", (ev) => {
+  if (ev.player_id) seen.set(ev.player_id, ev.at);
+  check(ev.server);
+});
+on("leave", (ev) => check(ev.server));
+every("10s", () => Promise.all(servers().filter((s) => s.online).map((s) => check(s.name))));
+`],
+  ["Team balance", "Evens out the teams: moves one player from a team that's two or more ahead, a dead one first.", `// Evens out the teams. When one team has GAP or more players than another, it moves one player from the bigger team to
+// the smaller one and tells them why. A dead player goes first, so nobody is pulled out of a fight; if nobody on the
+// bigger team has died after WAIT, the newest arrival goes anyway. Admins, the player IDs in KEEP and anyone it moved in
+// the last 5 minutes stay put. Free-for-alls are left alone, and so is a team nobody is on (the server doesn't list it).
+const GAP = 2;
+const WAIT = 60000; // ms
+const KEEP = []; // player IDs, as F1 or "players" shows them: ["0123456789abcdef0123456789abcdef"]
+
+const TEAMS = ["red", "blue", "green", "orange", "purple", "gold", "brown", "pink"]; // the engine's order
+const teamOf = (p) => (typeof p.team === "number" ? TEAMS[p.team] ?? "" : String(p.team ?? "").toLowerCase());
+const idOf = (p) => String(p.player_id ?? p.name).toLowerCase();
+const keep = new Set(KEEP.map((id) => String(id).toLowerCase()));
+const seen = new Map(); // player ID -> when it turned up, for newest first
+const moved = new Map(); // player ID -> when this script moved it
+const uneven = new Map(); // server -> since when its teams have been uneven
+const rest = new Map(); // server -> no move before this, so the player list catches up
+const busy = new Set();
+
+async function check(server) {
+  if (busy.has(server) || Date.now() < (rest.get(server) ?? 0)) return;
+  busy.add(server);
+  try {
+    const list = await players(server).catch(() => null);
+    if (!list) return;
+    const now = Date.now(), teams = new Map();
+    list.forEach((p, i) => seen.has(idOf(p)) || seen.set(idOf(p), now + i)); // a later row joined later
+    for (const p of list) if (teamOf(p)) teams.set(teamOf(p), [...(teams.get(teamOf(p)) ?? []), p]);
+    const sides = [...teams].sort((a, b) => b[1].length - a[1].length);
+    const ffa = sides.length > 2 && sides.every(([, ps]) => ps.length === 1);
+    const [big, small] = [sides[0], sides[sides.length - 1]];
+    if (ffa || sides.length < 2 || big[1].length - small[1].length < GAP) return void uneven.delete(server);
+    if (!uneven.has(server)) uneven.set(server, now);
+    const dead = (p) => (p.alive === false ? 0 : 1);
+    const p = big[1]
+      .filter((p) => !p.admin && !keep.has(idOf(p)) && !(now - (moved.get(idOf(p)) ?? 0) < 300000))
+      .sort((a, b) => dead(a) - dead(b) || seen.get(idOf(b)) - seen.get(idOf(a)))[0];
+    if (!p || (dead(p) && now - uneven.get(server) < WAIT)) return;
+    moved.set(idOf(p), now);
+    uneven.delete(server);
+    rest.set(server, now + 15000);
+    await rcon(server, "team", p.player_id ?? p.name, small[0]);
+    await tell(server, p, \`Moved you to \${small[0]} to even the teams (\${big[1].length} v \${small[1].length}).\`);
+    log(\`\${server}: moved \${p.name} from \${big[0]} to \${small[0]}, \${big[1].length} v \${small[1].length}\`);
+  } finally {
+    busy.delete(server);
+  }
+}
+
+on(["join", "leave"], (ev) => check(ev.server));
+every("10s", () => Promise.all(servers().filter((s) => s.online).map((s) => check(s.name))));
 `],
 ];
 async function newScript() {

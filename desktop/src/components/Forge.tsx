@@ -12,6 +12,7 @@ import {
   versionsOf, viewsOf, votesOf,
 } from "../lib/forge";
 import { num, pick, redactData, type Dict, type Line } from "../lib/util";
+import { reclaimerOnly } from "../lib/projects";
 import { Btn, Json, L, Panel, Table, type Row } from "./ui";
 
 const KIND_COLOR: Record<string, string> = { map: CYAN, gametype: AMBER, playlist: GOLD };
@@ -136,6 +137,8 @@ export function curListing(): Dict | null {
 
 function canInstallHere(): string {
   const s = oni.cur;
+  const theirs = reclaimerOnly(s.info, "ReclaimerForge content");
+  if (theirs) return theirs;
   if (!s.contentDir) return "This server has no content_dir: add content_dir = \"...\" to its [[server]] block in the config file, naming the folder the dedicated server loads content from (on the game box, with ssh).";
   if (s.url) return "This server is reached by a ws:// or wss:// link, so oni-rcon can't put files on it. Reach it with ssh instead.";
   if (!s.ssh && !["127.0.0.1", "localhost", "::1"].includes(s.host)) return "This server is on another machine with no ssh set, so oni-rcon can't put files on it. Set ssh for it.";

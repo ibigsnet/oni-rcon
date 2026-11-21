@@ -46,10 +46,68 @@ pub struct Manifest {
     pub events: Vec<String>,
     pub rcon: Vec<String>,
     pub addresses: bool,
+    pub requires: Vec<Need>, // programs it needs where it runs: run.requires, and the runtime its exec starts with
     pub error: String, // why it can't run at all (a bad manifest, a newer api); it's still listed, with this
     pub builtin: bool, // ships inside Oni (studio.rs): answered in this process, never needs approving or turning on
     #[serde(skip)]
     pub folder: Option<PathBuf>, // a local one runs here, so exec can name a file beside it
+}
+
+/// A program a plug-in needs on the computer that runs it: what it's called, and the https page to get it from ("" for none).
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
+pub struct Need {
+    pub program: String,
+    pub name: String,
+    pub url: String,
+}
+
+/// The runtimes Oni knows by name, so a manifest that only says `python` still gets a name and a download page.
+const KNOWN: [(&str, &str, &str); 2] = [
+    ("python", "Python 3", "https://www.python.org/downloads/"),
+    ("node", "Node.js", "https://nodejs.org/en/download"),
+];
+
+/// python3 and py are Python too: the one that's here runs it (`local_exec`).
+fn family(program: &str) -> &str {
+    match program {
+        "python" | "python3" | "py" => "python",
+        p => p,
+    }
+}
+
+/// run.requires (program names, or `{program, name, url}` tables) and the runtime `exec` starts with, each once, named and
+/// linked from KNOWN where the manifest doesn't say. None when run.requires isn't that shape.
+fn needs(v: Option<&toml::Value>, exec: &str) -> Option<Vec<Need>> {
+    let plain = |p: &str| !p.is_empty() && p.len() <= 64 && p.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b));
+    let mut out: Vec<Need> = Vec::new();
+    let listed = match v {
+        None => vec![],
+        Some(v) => v.as_array()?.clone(),
+    };
+    let first = exec.split_whitespace().next().unwrap_or_default();
+    let implied = KNOWN.iter().any(|k| k.0 == family(first)).then(|| toml::Value::String(first.into()));
+    for x in listed.iter().chain(implied.as_ref()) {
+        let t = |k: &str| x.get(k).and_then(toml::Value::as_str).unwrap_or_default().to_string();
+        let (program, name, url) = match x {
+            toml::Value::String(p) => (p.clone(), String::new(), String::new()),
+            toml::Value::Table(_) => (t("program"), cut(&t("name"), 80), t("url")),
+            _ => return None,
+        };
+        if !plain(&program) {
+            return None;
+        }
+        let url = if url.starts_with("https://") && url.len() <= 300 && url.bytes().all(|b| b.is_ascii_graphic() && b != b'"') { url } else { String::new() };
+        let known = KNOWN.iter().find(|k| k.0 == family(&program));
+        if out.iter().any(|n| family(&n.program) == family(&program)) {
+            continue;
+        }
+        out.push(Need {
+            name: if name.is_empty() { known.map_or(program.clone(), |k| k.1.into()) } else { name },
+            url: if url.is_empty() { known.map(|k| k.2.into()).unwrap_or_default() } else { url },
+            program,
+        });
+    }
+    Some(out)
 }
 
 impl Manifest {
@@ -106,6 +164,7 @@ pub fn load(folder: &Path) -> Manifest {
     let host = run.get("host").map(|v| v.as_str());
     let (events, rcon) = (strings(perms.get("events")), strings(perms.get("rcon")));
     let addresses = perms.get("addresses").map(|v| v.as_bool());
+    let requires = needs(run.get("requires"), exec.unwrap_or_default());
     m.error = if api > API {
         format!("needs plug-in api {api}; this version of Oni speaks api {API}")
     } else if m.name.is_empty() {
@@ -120,6 +179,8 @@ pub fn load(folder: &Path) -> Manifest {
         "permissions.events and permissions.rcon must be lists of names".into()
     } else if addresses.is_some_and(|a| a.is_none()) {
         "permissions.addresses must be true or false".into()
+    } else if requires.is_none() {
+        "run.requires must be a list of program names, or of {program, name, url} tables".into()
     } else {
         String::new()
     };
@@ -128,6 +189,7 @@ pub fn load(folder: &Path) -> Manifest {
     m.events = events.unwrap_or_default();
     m.rcon = rcon.unwrap_or_default();
     m.addresses = addresses.flatten().unwrap_or(false);
+    m.requires = requires.unwrap_or_default();
     m
 }
 
@@ -207,11 +269,96 @@ pub fn state(m: &Manifest, trusted: &Value) -> String {
     if trusted.get(&m.id).and_then(Value::as_str) == Some(m.hash.as_str()) { String::new() } else { "needs approval".into() }
 }
 
+// --- what it needs: checked here, so it can say so instead of failing ------------------------------------------------
+static PYTHON: Lazy<Mutex<Option<Option<String>>>> = Lazy::new(Default::default);
+
+/// How Python 3 runs here, as the start of a command line, asked once (until `recheck`). The first that answers
+/// `--version` with Python 3: Windows' Store stand-in for `python` only says how to get it, so it doesn't count.
+pub fn python() -> Option<String> {
+    let mut p = PYTHON.lock();
+    p.get_or_insert_with(|| python_candidates().into_iter().find(|c| speaks_python3(c))).clone()
+}
+
+/// Forget what was found, so the next look sees a program installed since.
+pub fn recheck() {
+    *PYTHON.lock() = None;
+}
+
+#[cfg(windows)]
+fn python_candidates() -> Vec<String> {
+    let mut v: Vec<String> = vec!["python".into(), "py -3".into(), "python3".into()];
+    // the py launcher, which python.org's installer adds by default: found even when installed after Oni started,
+    // since Oni's PATH is the one it was started with
+    let at = |var: &str, rel: &str| std::env::var_os(var).map(|d| format!("\"{}\" -3", Path::new(&d).join(rel).display()));
+    v.extend(at("LOCALAPPDATA", r"Programs\Python\Launcher\py.exe").into_iter().chain(at("SystemRoot", "py.exe")));
+    v
+}
+
+#[cfg(not(windows))]
+fn python_candidates() -> Vec<String> {
+    // the last two: an app started from the Finder gets a PATH without Homebrew in it
+    ["python3", "python", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"].map(String::from).into()
+}
+
+/// Whether this command line, given --version, says it's Python 3 within 5 s.
+fn speaks_python3(cand: &str) -> bool {
+    let line = format!("{cand} --version");
+    #[cfg(windows)]
+    let mut c = {
+        use std::os::windows::process::CommandExt;
+        let mut c = std::process::Command::new("cmd");
+        c.raw_arg(format!("/S /C \"{line}\"")).creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        c
+    };
+    #[cfg(not(windows))]
+    let mut c = {
+        let mut c = std::process::Command::new("sh");
+        c.arg("-c").arg(&line);
+        c
+    };
+    let Ok(mut child) = c.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() else { return false };
+    let t0 = std::time::Instant::now();
+    while t0.elapsed() < Duration::from_secs(5) {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let Ok(out) = child.wait_with_output() else { return false };
+                return [out.stdout, out.stderr].iter().any(|b| String::from_utf8_lossy(b).trim_start().starts_with("Python 3."));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    false
+}
+
+/// What it needs that isn't here: none for one that runs over ssh, which is that host's business.
+pub fn missing(m: &Manifest) -> Vec<Need> {
+    if !m.host.is_empty() {
+        return vec![];
+    }
+    // cmd runs a program in the folder it starts in before looking on PATH; sh only looks on PATH
+    let beside = |p: &str| cfg!(windows) && m.folder.as_ref().is_some_and(|f| ["", ".exe", ".cmd", ".bat"].iter().any(|e| f.join(format!("{p}{e}")).is_file()));
+    let here = |p: &str| beside(p) || crate::util::which(p).is_some();
+    m.requires.iter().filter(|n| if family(&n.program) == "python" { python().is_none() } else { !here(&n.program) }).cloned().collect()
+}
+
+/// Its exec as run here: a leading python, python3 or py becomes the Python 3 found here (python3 on a Mac or Linux, py
+/// on Windows when python isn't on PATH), so one manifest runs everywhere.
+fn local_exec(exec: &str) -> String {
+    let t = exec.trim_start();
+    let (first, rest) = t.split_once(char::is_whitespace).unwrap_or((t, ""));
+    match python() {
+        Some(p) if family(first) == "python" && p != first => format!("{p} {rest}").trim_end().into(),
+        _ => exec.into(),
+    }
+}
+
 // --- running one ---------------------------------------------------------------------------------------------------
 /// Its `exec`, here in its folder or over ssh, with all three pipes. Killed when dropped.
 pub fn command(m: &Manifest) -> Result<tokio::process::Command, String> {
     let mut c = if m.host.is_empty() {
-        let mut c = crate::util::shell(&m.exec);
+        let mut c = crate::util::shell(&local_exec(&m.exec));
         if let Some(f) = &m.folder {
             c.current_dir(f);
         }
@@ -726,6 +873,37 @@ mod tests {
         assert_eq!(state(&m, &json!({"echo": m.hash})), "");
         std::fs::write(f.join(MANIFEST), format!("{GOOD}\n")).unwrap();
         assert_eq!(state(&load(&f), &json!({"echo": m.hash})), "needs approval");
+    }
+
+    #[test]
+    fn what_it_needs_comes_from_requires_and_its_exec() {
+        let d = tempfile::tempdir().unwrap();
+        let need = |p: &str, n: &str, u: &str| Need { program: p.into(), name: n.into(), url: u.into() };
+        let py = need("python", "Python 3", "https://www.python.org/downloads/");
+        assert_eq!(load(&plugin(d.path(), "a", GOOD)).requires, [py.clone()]); // python echo.py: Python, without being told
+        let m = load(&plugin(d.path(), "b", "api = 1\nname = \"B\"\n[run]\nexec = \"py -3 b.py\"\nrequires = [\"node\", \
+            { program = \"gryphon\", name = \"Gryphon\", url = \"https://github.com/viik2k/gryphon\" }, \
+            { program = \"tool\", url = \"http://plain.example\" }, \"python3\"]\n"));
+        assert_eq!(m.error, "");
+        assert_eq!(m.requires, [need("node", "Node.js", "https://nodejs.org/en/download"), need("gryphon", "Gryphon", "https://github.com/viik2k/gryphon"),
+            need("tool", "tool", ""), need("python3", "Python 3", "https://www.python.org/downloads/")]); // http isn't offered; py is python3's
+        for bad in ["requires = \"python\"", "requires = [\"../x\"]", "requires = [{ name = \"no program\" }]", "requires = [1]"] {
+            let m = load(&plugin(d.path(), "c", &format!("api = 1\nname = \"C\"\n[run]\nexec = \"x\"\n{bad}\n")));
+            assert!(m.error.starts_with("run.requires"), "{bad}: {}", m.error);
+        }
+        let mut m = load(&plugin(d.path(), "e", "api = 1\nname = \"E\"\n[run]\nexec = \"x\"\nrequires = [\"not-a-program-anywhere\", \"sh\"]\n"));
+        assert_eq!(missing(&m).iter().map(|n| n.program.as_str()).collect::<Vec<_>>(), ["not-a-program-anywhere"]);
+        m.host = "box".into();
+        assert!(missing(&m).is_empty(), "over ssh, what it needs is that host's business");
+    }
+
+    #[test]
+    fn a_leading_python_runs_as_the_python_here() {
+        let p = python().expect("the tests need a Python 3");
+        assert_eq!(local_exec("python greeter.py"), format!("{p} greeter.py"));
+        assert_eq!(local_exec("python3"), p);
+        assert_eq!(local_exec("node x.js"), "node x.js");
+        assert_eq!(local_exec("pythonista run"), "pythonista run");
     }
 
     #[test]
