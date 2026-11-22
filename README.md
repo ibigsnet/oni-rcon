@@ -92,7 +92,8 @@ Self-updating binaries remain disabled: reviewed, pinned IBIGS source is package
 
 ![oni-rcon boot screen: the ONI emblem over the clearance check](docs/boot.png)
 
-**An ONI-themed terminal admin console for Project Reclaimer Halo 3 dedicated servers.**
+**An ONI-themed admin console for community Halo dedicated servers: Project Reclaimer (Halo 3) first, and [other
+projects](docs/OTHER-GAMES.md) that speak its remote console.** By Arche Labs (viik).
 Every server you run on one screen: players, live intercepts, kicks and bans, map and mode control, votes, VPN
 allowances and a raw command console, wrapped in Office of Naval Intelligence, Section Three dossier styling.
 
@@ -185,6 +186,9 @@ Also:
   order by name, install date, downloads or rating (click a button again to turn it round), and a ● marks what is
   playing now. With a ReclaimerForge key loaded, a last group offers maps and game types the server doesn't have yet:
   choosing one asks, then installs it. (From ibigs/oni-rcon, by IBIGS.)
+- **Game queue.** On a Reclaimer 0.10 server, GAME QUEUE (F3) lines up to 16 games to play after this one: add a map and
+  mode, remove one, or clear the lot. The queued games show first in ROTATION as Q1, Q2 and so on. A playlist server set to
+  `queue_mode = "ballot"` puts them on the ballots instead of playing them in turn.
 - **Playlists.** PLAYLISTS (F3, desktop) lists the server folder's `playlists`, the ones made here and any other, with
   the playlists installed from F6. NEW and EDIT open an editor: a name, the seconds players get to vote (5 to 120) and
   its games, a map and a game type each, with a weight for how often it comes up. Three games at least, each map and game
@@ -323,10 +327,22 @@ port = 49176
 port = 49177
 ```
 
+**Reach Renaissance** (desktop app): a `[[server]]` with `protocol = "source"` speaks the Source RCON that
+Reach Renaissance's dedicated server answers once its `dedicated.toml` sets an `[rcon]` password (on the game port
+unless it sets `rcon_port`). On the setup screen, type the address as `source://HOST`. Cards, F1 and F3 fill from its
+`status` and `players`, the F4 blacklist from `bans`, and the map and mode pickers from `maps` and `modes`; kick, ban,
+unban, say, end game and the F5 console work. A `say` sent while the game's match chat isn't up shows as failed, since
+no player saw it. It sends no live feed, so F2 stays quiet.
+
 ### Restarting a server
 
 RESTART SERVER on F3 (desktop app) runs the server's `restart_cmd` where the server is: on its `ssh` host, or on
-this machine without one. The setup screen writes it for the servers it finds or hosts, and a server on this Windows
+this machine without one. While a game is on it asks NOW or AFTER THIS GAME: after the game, players are told in
+chat, the server's card shows `↻ AFTER GAME`, and it restarts once the game ends (or at once if everyone leaves); RESTART
+SERVER again calls it off. The console has to stay open until then. On Reclaimer 0.10.3 or later it first sends
+`state save` and restarts only once the server says the game is on disk (if the save fails it says why and asks);
+with `restore_state` on in the server's dedicated.toml, the next start plays on from that game, rotation and live
+settings. The setup screen writes it for the servers it finds or hosts, and a server on this Windows
 machine that its server folder lists gets one without any config; for others, add it to the
 `[[server]]` block (or `[defaults]`; `{port}` is the server's RCON port):
 
@@ -566,6 +582,14 @@ The first time, F8 shows what it runs, where, and what it may send, and asks you
 `oni-plugin.toml` asks again. [`examples/plugins/hello`](examples/plugins/hello) is a working one in a single Python
 file. [docs/PLUGINS.md](docs/PLUGINS.md) is the protocol.
 
+## Other games
+
+The desktop app can also manage servers of other community projects, such as Project Gravemind (Halo 2) and Reach
+Renaissance (Halo: Reach), once their dedicated server speaks Reclaimer's remote console and names its game when it
+signs in. Such a server's card shows its game, and what is Reclaimer's alone (its `dedicated.toml` settings,
+ReclaimerForge, its release warnings) is turned off for it. [docs/OTHER-GAMES.md](docs/OTHER-GAMES.md) is what a server
+needs, written for those projects' developers. The demo's third server is a pretend Project Gravemind one.
+
 ## Security
 
 - **RCON is plain text.** Keep the server's `[rcon] address` on `127.0.0.1` and reach it with `--ssh` (or a VPN). Never
@@ -643,8 +667,8 @@ work is. oni-rcon doesn't speak for ReclaimerForge; it's a separate community pr
 
 ## Disclaimer
 
-oni-rcon is an unofficial, fan-made tool. It is not affiliated with or endorsed by Microsoft, Halo Studios or the
-Project Reclaimer team. Halo and related names are trademarks of Microsoft Corporation, and the ONI styling is a fan
+oni-rcon is an unofficial, fan-made tool. It is not affiliated with or endorsed by Microsoft, Halo Studios, the
+Project Reclaimer team or any other community project it works with. Halo and related names are trademarks of Microsoft Corporation, and the ONI styling is a fan
 tribute: the emblem in the interface is a fan-made pixel rendition, and the Windows icon is the ONI emblem. oni-rcon
 contains no game files.
 
@@ -654,3 +678,9 @@ GPL-3.0-or-later. Copyright (c) 2026 Arche Labs, with portions copyright (c) 202
 
 
 IBIGS customer controls remain F7 Start/Stop, F8 Automation (rules, schedules, roles, votes, Discord) and F9 Updates. The upstream Health tab is F10. Generated customer inventory enables the local, read-only health helper automatically.
+
+[AGPL-3.0-or-later](LICENSE) © 2026 Arche Labs (viik), with portions © 2026 ibigs, LLC (RifleJock), which remain under
+GPL-3.0-or-later. Anyone who runs a modified ONI RCON for others over a network has to offer those users its source.
+[NOTICE](NOTICE) has two additional terms (section 7): a modified version keeps the About screen's credits and says it's
+modified. Releases up to desktop-v1.10.0 remain available under GPL-3.0-or-later, and up to v0.9.0 and desktop-v1.4.1
+under MIT.

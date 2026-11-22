@@ -1,21 +1,17 @@
-# ONI RCON desktop 1.10.0
+# ONI RCON desktop 1.15.0
 
-One-click plug-ins from the oni-rcon index, update notices while the app runs, and a lighter console.
+Three Reclaimer server settings you can now change from the console: restore state, sandbox and networking.
 
 ## New
 
-- **Plug-in index.** ADD A PLUG-IN lists the plug-ins from the oni-rcon index. INSTALL… on one downloads it, then asks the usual download and approval questions. The list is cached, so it still shows offline. Pasting a git URL still works for any other plug-in.
-- **Update notices.** The app checks for a new release when it starts and every 6 hours. When there is one, you get a toast and Shift+U in the footer. Shift+U shows the release notes and installs the update.
-- **What's new.** The first start after an update shows that version's notes once.
-- **Camera (Project Reclaimer 0.9.20).** Host setup offers Camera. CAMERA on F3 switches a running 0.9.20+ server between first person, third person and letting players choose. The change applies from the next game.
-- **ODST playlists (0.9.19).** Host setup and SWITCH PLAYLIST also clear a server's `odst` table.
+- **Restore state.** F3 › SERVER › RESTORE STATE turns `restore_state` on or off for a Reclaimer 0.10.3+ server, so a restart plays on from the game it saved instead of starting fresh. Applied at once. ([#64](https://github.com/viik2k/oni-rcon/pull/64))
+- **Sandbox.** F3 › SERVER › SANDBOX plays a server's maps with Halo 3's or Halo: Reach's weapons and vehicles instead of the map's own (a Battle Rifle becomes a DMR, a Hornet a Falcon). Needs server 0.10.5+, and players need that game installed. ([#65](https://github.com/viik2k/oni-rcon/pull/65))
+- **Networking.** F3 › SERVER › NETWORKING switches between Enhanced (the default) and Halo 3's classic networking. Needs server 0.10.4+. ([#65](https://github.com/viik2k/oni-rcon/pull/65))
 
-## Fixes
+## Under the hood
 
-- The console no longer re-renders everything once a second, so it uses less CPU, most of all with many servers.
-- A plug-in download that times out no longer leaves a half-written folder that blocks every retry.
-- The Plug-ins tab keeps showing its getting-started steps while Automation Studio is the only plug-in.
+- In-range dependency updates (Tauri 2.12.7, npm, cargo, uv).
 
 ## Upgrading
 
-Desktop installs update in place from the app. Config and plug-ins work unchanged. `ONI_RCON_NO_UPDATE=1` turns off update checks and the plug-in index download.
+Desktop installs update in place from the app. Config and plug-ins work unchanged.

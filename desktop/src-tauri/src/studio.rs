@@ -23,7 +23,7 @@ const RCON: [&str; 37] = ["status", "players", "say", "tell", "kick", "ban", "ba
     "unmute", "endround", "endgame", "maps", "modes", "map", "mode", "load", "nextmap", "servername", "password", "maxping", "teamcount",
     "shuffle", "team", "vote", "startvote", "passvote", "cancelvote", "admin", "admins", "pardon", "reload", "help"];
 /// For its approval-free listing only: the window hands it every event kind (see pluginEvent in engine.ts).
-const EVENTS: [&str; 19] = ["chat", "kill", "join", "leave", "refused", "kick", "ban", "unban", "mute", "unmute", "cheat", "pardon",
+const EVENTS: [&str; 20] = ["chat", "command", "kill", "join", "leave", "refused", "kick", "ban", "unban", "mute", "unmute", "cheat", "pardon",
     "admin_added", "admin_removed", "vote", "medal", "award", "lagged", "control"];
 
 /// Scripts running and failed, as its page last said: the badge.

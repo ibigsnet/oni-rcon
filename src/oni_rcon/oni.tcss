@@ -111,6 +111,7 @@ Blacklist { height: 1fr; }
 #crashes { height: 1fr; max-height: 12; }
 #perf { height: 1fr; min-height: 5; }
 #perf-graph { height: auto; padding: 0 1; }
+#rconframes { height: auto; max-height: 12; }
 #health-bottom { height: 1fr; min-height: 12; }
 #host-box { width: 3fr; height: 1fr; padding: 0 1; }
 #host { height: auto; }

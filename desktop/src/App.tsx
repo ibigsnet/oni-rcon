@@ -17,6 +17,7 @@ import { Archive, Boot } from "./components/Boot";
 import { Setup } from "./components/Setup";
 import { useSize } from "./components/ui";
 import { targetOf, pick, type Dict } from "./lib/util";
+import { aboutText } from "./lib/about";
 import type { Opened } from "./components/Findings";
 
 const NAMES: Record<Tab, string> = { assets: "ASSETS", intercepts: "INTERCEPTS", operations: "OPERATIONS", blacklist: "BLACKLIST", console: "CONSOLE", forge: "FORGE", health: "HEALTH", plugins: "PLUG-INS" };
@@ -81,6 +82,7 @@ function palette(onSetup: () => void) {
       }],
     ["Health: read the reports now", "crashes, memory and the workaround service  (F7, Ctrl+R)", () => invoke("health_now")],
     ["Help: field manual", "what everything does, in plain words  (?)", () => oni.ask("help", {})],
+    ["About ONI RCON", "who made it, its licence and where its source is", () => oni.ask("confirm", { title: "ABOUT ONI RCON", body: aboutText(oni.version), verb: "OK", danger: false, notice: true })],
     ["Add a server", "open the setup screen", () => import("./actions").then((a) => a.addServer(onSetup))],
     ["Forge: Load API key", "your own ReclaimerForge key, for F6", () => forgeAction("key")],
     ["Forge: Refresh catalog", "fetch the catalog again", () => forgeLoad(false, true)],

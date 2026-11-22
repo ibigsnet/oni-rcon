@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AMBER, CYAN, DIM, TEAM_COLOR, WHITE } from "../art/palette";
 import { emblem } from "../art/archive";
 import { oni, useV, type Dialog } from "../engine";
+import { aboutLine } from "../lib/about";
 import { CREDIT } from "../lib/forge";
 import { everyone, rankedPlayers, type Found } from "../lib/search";
 import { plain, redactAddr, targetOf, type Dict, type Line } from "../lib/util";
@@ -188,12 +189,16 @@ const GUIDE: [string, [string, string][]][] = [
     ["Credit", "When the map or gametype playing came from ReclaimerForge, the sitrep's FORGE line names it and whoever made it."],
     ["Capacity", "PLAYER CAPACITY saves how many players the server takes in its dedicated.toml (the one beside content_dir), then has a 0.9.18 or later server reload it (no restart) or offers to restart an older one."],
     ["Camera", "CAMERA sets how players see their own character on foot (first person, players choose, or third person) in the server's dedicated.toml. Server 0.9.20 or later applies it from the next game."],
+    ["Sandbox", "SANDBOX plays the server's maps with Halo 3's or Halo: Reach's weapons and vehicles instead of the map's own (a Battle Rifle becomes a DMR, a Hornet a Falcon), saved in its dedicated.toml. Players need that game installed. Server 0.10.5 or later."],
+    ["Networking", "NETWORKING picks enhanced networking (the default) or Halo 3's classic networking for the server, saved in its dedicated.toml as network_model. Server 0.10.4 or later."],
+    ["Other games", "A server of another community project that speaks Project Reclaimer's RCON (docs/OTHER-GAMES.md) names itself when it signs in: its card shows the game (H2 for Project Gravemind, REACH for Reach Renaissance) and the sitrep's GAME line says which. What is Reclaimer's alone (its dedicated.toml settings, playlists and game types, ReclaimerForge, its release and version warnings) is turned off for it; players, chat, bans, maps, modes, votes and plug-ins work as they do for Halo 3."],
+    ["Character mods", "CHARACTER MODS sets which character mods (cosmetic mods: a folder with a customization.json in the content folder's Mods) the server's games include, whether players must accept them to join, whether everyone plays as one of their characters instead of Halo 3's, and whether players can download mods they're missing from it. It lists the ones it finds, saves to its dedicated.toml only what differs from [defaults], and has the server reload. Server 0.9.18 or later, with all 27 Halo 3 multiplayer maps in its game folder."],
     ["Playlist", "SWITCH PLAYLIST sets which playlist the server plays (one in the server folder's playlists/, or one installed from F6) in its dedicated.toml, in place of a fixed map and game, then has a 0.9.18 or later server reload it or offers to restart an older one."],
     ["Content browser", "CHANGE MAP, CHANGE MODE, LOAD and QUEUE NEXT list what the server can load in groups. Type to filter, order by name, install date, downloads or rating (click again to turn it round); a ● marks what is playing. With a ReclaimerForge key, the last group offers ones the server doesn't have yet: choosing one installs it."],
     ["Automation", "F9 (or Ctrl+P, Automation rules) lists rules of WHEN something happens, ONLY IF it holds, THEN DO these: say in chat, message a player or the admins, cancel a vote, shuffle the teams, post to Discord or Telegram, wait. NEW builds one step by step, TEMPLATE starts from a ready-made one, TEST shows what a rule would do (and can really do it), ROLES says who counts as an ADMIN, VIP or MOD, DISCORD adds the webhooks and TELEGRAM adds bot chats (their URLs and tokens are kept by the app and shown hidden). Every rule is limited by a cooldown and a per-hour count, chat is held to 20 lines a minute per server, and each run is written to the command log as AUTO. Rules run while this console is open. docs/AUTOMATION.md has the long version."],
     ["Playlists", "PLAYLISTS lists the server folder's playlists and the ones installed from F6: NEW and EDIT open the editor (name, vote seconds, games with weights; three at least, each map and game type once, Ctrl+S saves), USE ON THIS SERVER puts the server on one. NEW PLAYLIST goes straight to an empty editor and offers to switch to it once saved. A playlist this console didn't make is edited as a copy."],
     ["New game type", "NEW GAME TYPE builds one on a base mode (Slayer, Capture the Flag, Oddball, King of the Hill, VIP, Juggernaut, Territories, Assault, Infection, Escalation Slayer) with its score, teams, time limit, rounds, lives, respawn delay and shields; blank fields keep the mode's own. It's saved in the server's content folder, Game Modes, and played with CHANGE MODE once the server lists it."],
-    ["Restart", "RESTART SERVER runs the server's restart_cmd from the config (setup writes it): everyone is dropped and the console reconnects once it's back."],
+    ["Restart", "RESTART SERVER runs the server's restart_cmd from the config (setup writes it): everyone is dropped and the console reconnects once it's back. While a game is on it offers AFTER THIS GAME: players are told in chat, the card shows ↻ AFTER GAME, and it restarts once the game ends or everyone leaves. RESTART SERVER again calls it off; a dropped link calls it off too. The console has to stay open for it."],
     ["Remove", "REMOVE SERVER takes the selected server out of the config file, offline or not; the server itself is untouched. The console reloads without it, and ADD SERVER brings it back."],
   ]],
   ["F4  BLACKLIST  ·  bans", [["Lists", "Every ban by player, address and device, who may join through a VPN, and the admins. Pick a row, then UNBAN, REVOKE or REMOVE ADMIN."],
@@ -210,7 +215,8 @@ const GUIDE: [string, [string, string][]][] = [
     ["Your key", "Forge takes your own API key: k loads one. It's only ever sent to reclaimerforge.net, and it never reaches the window."],
     ["Thanks", CREDIT],
   ]],
-  ["F7  HEALTH  ·  crashes and memory", [
+  ["F7  HEALTH  ·  crashes, frame rate and memory", [
+    ["Frame rate over RCON", "Reclaimer 0.10+ servers report their own frame rate over RCON health, read every 15 s with no health_cmd: FPS (60 is keeping up, amber under 54, red under 40; idle in an empty lobby), the median (P50), 99th-percentile (P99) and longest frame in ms, and the server's upload and download. A server whose log is read shows in FRAME RATE above instead."],
     ["Crashes", "Each server's last crashes, read from its log: SIGNATURE is the known crash (an exception with its code and RVA), BARE is the engine probe failing with no exception, OOM-KILL is a container killed for memory, and CONTAINER-RESTART is one that started again. PLAYERS is how many were on. DROPPED means the RCON connection fell at the same moment."],
     ["Host", "Free memory (amber under twice health_min_free_mb, red under it), swap, the kernel's oom_kill counter, and each container's start time and OOMKilled flag."],
     ["Workaround", "Whether the named systemd service is running, when it last moved a tag, and any warning that the build isn't the pinned one. Hidden without health_service."],
@@ -241,7 +247,7 @@ function Help({ d }: { d: Dialog }) {
       <div ref={body} tabIndex={0} style={{ overflowY: "auto", flex: 1, outline: "none" }}>
         <div style={{ display: "flex", gap: 24, alignItems: "center", marginBottom: 14 }}>
           <Pixel pic={emblem(48)} width={96} />
-          <div><div style={{ color: AMBER }}>OFFICE OF NAVAL INTELLIGENCE</div><div style={{ color: DIM }}>SECTION THREE  ·  REMOTE CONSOLE TERMINAL</div><br /><div>Every key, button and readout, in plain words.</div></div>
+          <div><div style={{ color: AMBER }}>OFFICE OF NAVAL INTELLIGENCE</div><div style={{ color: DIM }}>SECTION THREE  ·  REMOTE CONSOLE TERMINAL</div><br /><div>Every key, button and readout, in plain words.</div><div style={{ color: DIM }}>{aboutLine()}  ·  About ONI RCON in Ctrl+P</div></div>
         </div>
         {GUIDE.map(([section, rows]) => (
           <div key={section} style={{ marginBottom: 14 }}>

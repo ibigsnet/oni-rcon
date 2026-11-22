@@ -22,12 +22,18 @@ const WEAPONS: &[&str] = &["battle rifle", "sniper rifle", "shotgun", "energy sw
 const CHAT: &[&str] = &["gg", "nice shot", "who has sniper?", "lag on blue base", "rematch?", "ez", "push top mid",
     "anyone up for MLG after?", "wp all"];
 const CALLS: &[&str] = &["admin someone is spawn camping", "is there a mod on? red is hacking"];
-pub const SERVERS: &[(&str, i64, usize)] = &[("Demo Ops | Slayer", 16, 9), ("Demo Ops | Big Team Battle", 32, 17), ("Demo Ops | MLG 4v4", 8, 6)];
+/// Halo 2's, for the pretend Project Gravemind server: a server of another project that speaks Reclaimer's RCON.
+const H2_MAPS: &[&str] = &["lockout", "midship", "ivory_tower", "beaver_creek", "zanzibar", "coagulation", "ascension", "warlock",
+    "sanctuary", "headlong", "burial_mounds", "foundation"];
+/// (name, most players, crowd, project): the project is "" for Project Reclaimer, which doesn't name itself.
+pub const SERVERS: &[(&str, i64, usize, &str)] = &[("Demo Ops | Slayer", 16, 9, ""), ("Demo Ops | Big Team Battle", 32, 17, ""),
+    ("Demo Ops | Halo 2 MLG", 8, 6, "gravemind")];
 
 type Clients = Vec<(u64, mpsc::UnboundedSender<Message>)>;
 
 pub struct Fake {
     password: String,
+    project: &'static str,
     clients: Clients,
     next_client: u64,
     engine: i64,
@@ -49,16 +55,18 @@ fn hex128() -> String {
 }
 
 impl Fake {
-    fn new(name: &str, password: &str, max: i64, crowd: usize, content: Option<PathBuf>) -> Self {
+    fn new(name: &str, password: &str, max: i64, crowd: usize, content: Option<PathBuf>, project: &'static str) -> Self {
         let mut rng = rand::rng();
+        let maps = if project == "gravemind" { H2_MAPS } else { MAPS };
         let mut f = Fake {
             password: password.into(),
+            project,
             clients: vec![],
             next_client: 0,
             engine: 0,
             skill: HashMap::new(),
             content,
-            status: json!({"name": name, "address": "203.0.113.7:49176", "map": MAPS.choose(&mut rng).unwrap(), "mode": "Team Slayer",
+            status: json!({"name": name, "address": "203.0.113.7:49176", "map": maps.choose(&mut rng).unwrap(), "mode": "Team Slayer",
                 "phase": "in_game", "max_players": max, "players": 0, "password_required": false, "max_ping": 0, "hidden": false,
                 "anti_cheat": "enforce", "anti_cheat_active": true, "block_vpn": true, "text_chat": true, "voice": true,
                 "vote": null, "votes": true, "next": null, "playlist_vote": true}),
@@ -98,6 +106,10 @@ impl Fake {
             p["number"] = json!(i + 1);
         }
         self.status["players"] = json!(self.players.len());
+    }
+
+    fn maps(&self) -> &'static [&'static str] {
+        if self.project == "gravemind" { H2_MAPS } else { MAPS }
     }
 
     fn installed(&self, suffix: &str) -> Vec<Value> {
@@ -159,7 +171,7 @@ impl Fake {
             "players" => ok("players: see data".into(), Some(json!({"count": self.players.len(), "max_players": self.status["max_players"], "players": self.players}))),
             "status" => ok("status: see data".into(), Some(self.status.clone())),
             "maps" => {
-                let mut e: Vec<Value> = MAPS.iter().map(|m| json!({"kind": "map", "name": titled(m), "reference": m})).collect();
+                let mut e: Vec<Value> = self.maps().iter().map(|m| json!({"kind": "map", "name": titled(m), "reference": m})).collect();
                 e.extend(self.installed(".map"));
                 ok("maps: see data".into(), Some(json!({"entries": e})))
             }
@@ -185,7 +197,7 @@ impl Fake {
                 Some(json!({"address": a0, "local": false, "listed": false, "list": null, "allowed": false, "refused": false, "fail_closed": false}))),
             "vote" => ok("vote: see data".into(), Some(json!({"vote": self.vote, "playlist": null, "subjects": ["kick", "endround", "endgame", "shuffle", "playlist"]}))),
             "nextmap" if args.is_empty() => {
-                let rot: Vec<Value> = MAPS[..6].iter().map(|m| json!({"map": m, "mode": MODES.choose(&mut rng).unwrap()})).collect();
+                let rot: Vec<Value> = self.maps()[..6].iter().map(|m| json!({"map": m, "mode": MODES.choose(&mut rng).unwrap()})).collect();
                 ok("nextmap: see data".into(), Some(json!({"next": self.status["next"], "rotation": rot})))
             }
             "say" => {
@@ -488,15 +500,19 @@ async fn handle(fake: Arc<Mutex<Fake>>, stream: tokio::net::TcpStream) {
     let (mut sink, mut read) = ws.split();
     let Some(Ok(Message::Text(first))) = read.next().await else { return };
     let msg: Value = serde_json::from_str(&first).unwrap_or_default();
-    let (good, name) = {
+    let (good, name, project) = {
         let f = fake.lock();
-        (msg["type"] == "auth" && msg["password"].as_str() == Some(f.password.as_str()), f.status["name"].clone())
+        (msg["type"] == "auth" && msg["password"].as_str() == Some(f.password.as_str()), f.status["name"].clone(), f.project)
     };
     if !good {
         let _ = sink.send(Message::text(json!({"type": "auth", "ok": false, "error": "Wrong password."}).to_string())).await;
         return;
     }
-    let _ = sink.send(Message::text(json!({"type": "auth", "ok": true, "protocol": 1, "server": name, "version": "0.9.7-demo"}).to_string())).await;
+    let mut hello = json!({"type": "auth", "ok": true, "protocol": 1, "server": name, "version": "0.9.7-demo"});
+    if !project.is_empty() {
+        (hello["project"], hello["game"], hello["version"]) = (json!(project), json!("Halo 2"), json!("0.4.2-demo")); // docs/OTHER-GAMES.md
+    }
+    let _ = sink.send(Message::text(hello.to_string())).await;
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     let id = {
         let mut f = fake.lock();
@@ -620,6 +636,11 @@ impl FakeHost {
         }
     }
 
+    /// A setting `set` saved for server `i`, off when never set.
+    pub fn flag(&self, i: usize, key: &str) -> bool {
+        self.fakes.get(i).is_some_and(|(_, f)| f.lock().status[key].as_bool() == Some(true))
+    }
+
     /// Everyone dropped, and five seconds later as many back.
     async fn bounce(&self, i: usize) {
         let fake = &self.fakes[i].1;
@@ -653,8 +674,8 @@ impl FakeHost {
 /// Start the fake servers; returns (ports, the box). Their tasks run until the handles are aborted.
 pub async fn serve_fakes(password: &str, content: &[PathBuf], tasks: &mut Vec<tokio::task::JoinHandle<()>>) -> (Vec<u16>, Arc<FakeHost>) {
     let mut fakes = vec![];
-    for (i, (name, max, crowd)) in SERVERS.iter().enumerate() {
-        let fake = Arc::new(Mutex::new(Fake::new(name, password, *max, *crowd, content.get(i).cloned())));
+    for (i, (name, max, crowd, project)) in SERVERS.iter().enumerate() {
+        let fake = Arc::new(Mutex::new(Fake::new(name, password, *max, *crowd, content.get(i).cloned(), project)));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("a local port for the demo");
         let port = listener.local_addr().unwrap().port();
         let f = fake.clone();
@@ -696,7 +717,7 @@ mod tests {
 
     #[test]
     fn admins_add_and_remove_like_the_server() {
-        let mut f = Fake::new("T", "pw", 16, 4, None);
+        let mut f = Fake::new("T", "pw", 16, 4, None, "");
         let run = |f: &mut Fake, args: &[&str]| f.command("admin", &args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), "me");
         let p = f.players[0]["name"].as_str().unwrap().to_string();
         let was = f.players[0]["admin"] == true;

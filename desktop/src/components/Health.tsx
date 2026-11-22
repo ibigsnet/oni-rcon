@@ -4,7 +4,7 @@ import { useState } from "react";
 import { AMBER, CYAN, DIM, GREEN, RED, WHITE } from "../art/palette";
 import { oni, useV } from "../engine";
 import { age, redactText, when, type Dict, type Line } from "../lib/util";
-import { LEVEL_COLOR, SLOW, TARGET, TARGET_MS, advice, level, scaleTop } from "../lib/perf";
+import { LEVEL_COLOR, SLOW, TARGET, TARGET_MS, advice, level, rate, rconFrames, scaleTop } from "../lib/perf";
 import { L, Panel, Table, type Row } from "./ui";
 
 const CRASH_COLOR: Record<string, string> = { SIGNATURE: RED, BARE: AMBER, "OOM-KILL": RED, "CONTAINER-RESTART": CYAN };
@@ -94,12 +94,30 @@ function Frames() {
   );
 }
 
+/** Reclaimer 0.10+ servers' own frame rate over RCON `health`: no health_cmd needed. `skip` holds the servers whose log
+ *  is read (FRAME RATE above), which say more. */
+function RconFrames({ skip }: { skip: Dict }) {
+  const ms = (v: number | null): Line => [[v ? `${v.toFixed(1)} ms` : "—", v && v > 50 ? AMBER : DIM]];
+  const rows: Row[] = oni.stations.flatMap((s, i) => {
+    const f = s.online && !skip[String(i)] ? rconFrames(s.data.health) : null;
+    if (!f) return [];
+    return [{ id: String(i), cells: [[[s.label, WHITE]], f.fps === null ? [["idle", DIM]] : [[String(Math.round(f.fps)), LEVEL_COLOR[level(f.fps)]]],
+      ms(f.p50), ms(f.p99), ms(f.max), rate(f.up), [[rate(f.down), DIM]], f.players === null ? "—" : String(f.players)] }];
+  });
+  if (!rows.length) return null;
+  return (
+    <Panel title="FRAME RATE · RCON health, every 15 s" sub={<span style={{ color: DIM }}>60 is keeping up; under {SLOW} players notice, under 40 it's choppy</span>}>
+      <Table id="rconframes" cols={["SERVER", "FPS", "P50", "P99", "LONGEST", "UPLOAD", "DOWNLOAD", "PLAYERS"]} rows={rows} cursor={false} />
+    </Panel>
+  );
+}
+
 export function Health() {
   useV((s) => s.health);
   useV((s) => s.mast); // the ages move
   const [sel, setSel] = useState<string | null>(null);
   const h: Dict = oni.health, now = Date.now() / 1000;
-  if (!h.on) return <Howto />;
+  if (!h.on) return <div className="vsplit grow"><Howto /><RconFrames skip={{}} /></div>;
   const label = (key: string) => (key ? oni.stations[Number(key)]?.label ?? key : "HOST");
   const rows: Row[] = (h.crashes ?? []).map((e: Dict) => ({ id: `${e.key}:${e.cls}:${Math.floor(e.ts)}`, cells: [
     `${when(e.ts)}  ${age(now - e.ts)} ago`, [[label(e.key), WHITE]], [[e.cls, CRASH_COLOR[e.cls] ?? WHITE]],
@@ -150,6 +168,7 @@ export function Health() {
         <Table id="crashes" cols={["WHEN", "SERVER", "CLASS", "PLAYERS", "DETAIL", "RCON"]} rows={rows} selected={sel} onSelect={setSel} />
       </Panel>
       <Frames />
+      <RconFrames skip={h.frames ?? {}} />
       <div className="hsplit grow" style={{ minHeight: 220 }}>
         <Panel title={`HOST${oneHost}`} style={{ flex: 3 }}>
           <Facts rows={hosts} />

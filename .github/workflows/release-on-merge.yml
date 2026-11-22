@@ -1,0 +1,39 @@
+name: release on merge
+# Merging staging into main releases the desktop version staging carries: desktop-v<version> is tagged on the merge
+# commit and the desktop workflow is started on that tag, which builds, signs and publishes it. When that tag is already
+# there (a merge with no version bump), nothing is released. Bump with `npm run release -- X.Y.Z` in desktop/ and
+# rewrite RELEASE-NOTES.md, on staging, before the merge.
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+permissions:
+  contents: write  # push the tag
+  actions: write   # start the desktop workflow on it
+jobs:
+  tag:
+    if: github.event.pull_request.merged && github.event.pull_request.head.ref == 'staging'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - name: Tag desktop-v<version> and start its release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./desktop/package.json').version")
+          tag="desktop-v$v"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "$tag is already released: nothing to do"
+            exit 0
+          fi
+          # the desktop workflow checks these on the tag too; checked here so a bad one is never tagged
+          grep -q "\"version\": \"$v\"" desktop/src-tauri/tauri.conf.json
+          grep -q "^version = \"$v\"" desktop/src-tauri/Cargo.toml
+          [[ "$(head -1 RELEASE-NOTES.md | tr -d '\r')" == *" $v" ]] || { echo "::error::RELEASE-NOTES.md's heading must end with $v"; exit 1; }
+          git tag "$tag"
+          git push origin "refs/tags/$tag"
+          # a tag pushed with this workflow's token starts no workflow by itself, so the build is started on it here
+          gh workflow run desktop.yml --ref "$tag"
+          echo "::notice::Tagged $tag and started its release build"

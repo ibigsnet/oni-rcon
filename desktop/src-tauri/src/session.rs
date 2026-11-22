@@ -16,6 +16,8 @@ use tokio::sync::{mpsc, oneshot};
 
 const MAX_LINE: u64 = 1 << 20; // bytes of one line it writes; the rest of a longer one is read as a line that won't parse
 const BACKOFF_MAX: f64 = 60.0; // seconds between restarts at most; a run this long resets the wait to 1 s
+const QUEUE: usize = 256; // lines waiting for it to read; past that, while it isn't reading, the rest are dropped
+const VIEW_EVERY: Duration = Duration::from_millis(200); // pushed views are drawn at most this often, the latest always
 
 /// Where what it says goes: the window's "oni" event in the app, a list in the tests.
 pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
@@ -25,7 +27,7 @@ struct Session {
     tx: mpsc::UnboundedSender<String>, // lines for its stdin
     waiting: Waiting,                  // asks not yet answered, by ref
     up: Arc<AtomicBool>,
-    task: tokio::task::JoinHandle<()>,
+    task: tauri::async_runtime::JoinHandle<()>,
 }
 
 /// What every run of one plug-in shares.
@@ -45,7 +47,7 @@ static REF: AtomicU64 = AtomicU64::new(1);
 /// Start its process, and keep it going, unless it already is. `servers` are `{index, name}` for each server.
 pub fn start(m: Manifest, servers: Vec<Value>, emit: Emit) {
     let mut all = SESSIONS.lock();
-    if all.get(&m.id).is_some_and(|s| !s.task.is_finished()) {
+    if all.get(&m.id).is_some_and(|s| !s.task.inner().is_finished()) {
         return;
     }
     let (tx, rx) = mpsc::unbounded_channel();
@@ -55,7 +57,8 @@ pub fn start(m: Manifest, servers: Vec<Value>, emit: Emit) {
     let names = servers.iter().filter_map(|s| s["name"].as_str().map(String::from)).collect();
     let id = m.id.clone();
     let c = Ctx { m, hello, names, tx: tx.clone(), waiting: waiting.clone(), up: up.clone(), emit };
-    all.insert(id, Session { tx, waiting, up, task: tokio::spawn(supervise(c, rx)) });
+    // the app's runtime, not tokio::spawn: a sync command calls this from the main thread, where there's no runtime
+    all.insert(id, Session { tx, waiting, up, task: tauri::async_runtime::spawn(supervise(c, rx)) });
 }
 
 /// Stop one, so the next start runs it afresh (after an update).
@@ -140,25 +143,57 @@ async fn run(c: &Ctx, rx: &mut mpsc::UnboundedReceiver<String>) -> String {
             }
         }
     });
+    let mut writer = None;
     if stdin.write_all(format!("{}\n", c.hello).as_bytes()).await.is_ok() {
         c.up.store(true, Ordering::Relaxed);
         (c.emit)(json!({"kind": "plugin-session", "id": c.m.id, "state": "running", "detail": "", "retry_in": 0}));
+        // its stdin is written by a task of its own, so one that stops reading never stops this loop hearing it
+        let (wtx, mut wrx) = mpsc::channel::<String>(QUEUE);
+        writer = Some(tokio::spawn(async move {
+            while let Some(line) = wrx.recv().await {
+                if stdin.write_all(line.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        }));
+        let mut dropped = 0u64;
+        let mut held: Option<Value> = None; // the latest view it pushed, not drawn yet
+        let mut drawn = Instant::now().checked_sub(VIEW_EVERY).unwrap_or_else(Instant::now);
         loop {
-            // ponytail: one that never reads its stdin stalls this loop once the pipe fills; a writer task if that bites
+            let due = tokio::time::sleep_until((drawn + VIEW_EVERY).into());
             tokio::select! {
                 out = rx.recv() => match out {
-                    Some(line) if stdin.write_all(line.as_bytes()).await.is_ok() => {}
-                    _ => break,
+                    Some(line) => match wtx.try_send(line) {
+                        Ok(()) => dropped = 0,
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            if dropped % 1000 == 0 {
+                                (c.emit)(json!({"kind": "plugin-log", "id": c.m.id, "warn": true,
+                                    "text": format!("isn't reading what Oni sends it: {QUEUE} messages wait, newer ones are dropped")}));
+                            }
+                            dropped += 1;
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => break, // its stdin closed
+                    },
+                    None => break,
                 },
                 line = lines.recv() => match line {
-                    Some(l) => handle(c, &l),
+                    Some(l) => held = handle(c, &l).or(held),
                     None => break, // its stdout closed: it's exiting
                 },
+                _ = due, if held.is_some() => {
+                    draw(c, held.take().unwrap_or_default());
+                    drawn = Instant::now();
+                }
             }
+        }
+        if let Some(v) = held {
+            draw(c, v); // its last word before it stopped
         }
     }
     c.up.store(false, Ordering::Relaxed);
-    drop(stdin);
+    if let Some(w) = writer {
+        w.abort(); // drops its stdin, the sign to exit, even mid-write to one that isn't reading
+    }
     let code = match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
         Ok(Ok(s)) => s.code().unwrap_or(-1),
         _ => {
@@ -171,23 +206,26 @@ async fn run(c: &Ctx, rx: &mut mpsc::UnboundedReceiver<String>) -> String {
     plugins::last_err(&err, format!("exited {code}"))
 }
 
-/// One line it wrote. A line that isn't a JSON object is ignored, like a stray print.
-fn handle(c: &Ctx, line: &[u8]) {
-    let Ok(v @ Value::Object(_)) = serde_json::from_slice::<Value>(line) else { return };
+/// A view it pushed, shaped and drawn.
+fn draw(c: &Ctx, v: Value) {
+    let mut view = plugins::normalise_view(&v);
+    plugins::stash(&c.m.id, &mut view);
+    (c.emit)(json!({"kind": "plugin-view", "id": c.m.id, "view": view}));
+}
+
+/// One line it wrote; a view it pushed is handed back, to be drawn when one is due. A line that isn't a JSON object
+/// is ignored, like a stray print.
+fn handle(c: &Ctx, line: &[u8]) -> Option<Value> {
+    let Ok(v @ Value::Object(_)) = serde_json::from_slice::<Value>(line) else { return None };
     if let Some(r) = v.get("ref").and_then(Value::as_u64) {
         if let Some(w) = c.waiting.lock().remove(&r) {
             let _ = w.send(v);
         }
-        return;
+        return None;
     }
     let (id, emit) = (&c.m.id, &c.emit);
-    // ponytail: no rate limit on pushes; one that floods views redraws F10 that often
     match v["type"].as_str().unwrap_or_default() {
-        "view" => {
-            let mut view = plugins::normalise_view(&v);
-            plugins::stash(id, &mut view);
-            emit(json!({"kind": "plugin-view", "id": id, "view": view}));
-        }
+        "view" => return Some(v),
         "notify" => {
             let level = match v["level"].as_str() {
                 Some("warn" | "warning") => "warning",
@@ -215,6 +253,7 @@ fn handle(c: &Ctx, line: &[u8]) {
         }
         _ => {}
     }
+    None
 }
 
 #[cfg(test)]
@@ -270,5 +309,66 @@ for line in sys.stdin:
         until(&seen, |v| v["kind"] == "plugin-view").await; // back after its second
         stop_all();
         assert!(send("echo-session", &json!({})).is_err());
+    }
+
+    #[tokio::test]
+    async fn one_that_stops_reading_is_still_heard() {
+        // it never reads its stdin: once the pipe filled, writing to it blocked the loop that reads its stdout as well
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("deaf.py"), "import json, time\ni = 0\nwhile True:\n    print(json.dumps({\"type\": \"log\", \"text\": str(i)}), flush=True)\n    i += 1\n    time.sleep(0.01)\n").unwrap();
+        let py = if crate::util::which("python").is_some() { "python" } else { "python3" };
+        let m = Manifest { id: "deaf".into(), name: "D".into(), mode: "session".into(), exec: format!("{py} deaf.py"),
+            folder: Some(d.path().to_path_buf()), ..Default::default() };
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let s2 = seen.clone();
+        start(m, vec![], Arc::new(move |v| s2.lock().push(v)));
+        until(&seen, |v| v["kind"] == "plugin-log").await;
+        let pad = "x".repeat(1000);
+        for _ in 0..3000 {
+            let _ = send("deaf", &json!({"type": "event", "ev": {"pad": pad}})); // 3 MB: far past any pipe's buffer
+        }
+        let heard = || seen.lock().iter().filter(|v| v["kind"] == "plugin-log" && v["warn"].is_null()).count();
+        let before = heard();
+        until(&seen, |v| v["warn"] == true && v["text"].as_str().is_some_and(|t| t.contains("isn't reading"))).await;
+        for _ in 0..200 {
+            if heard() > before + 50 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(heard() > before + 50, "its log stopped at {} after {before}", heard());
+        stop("deaf");
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_views_is_drawn_a_few_times_ending_with_the_last() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("burst.py"), "import json, sys\nfor i in range(200):\n    print(json.dumps({\"type\": \"view\", \"title\": str(i)}), flush=True)\nfor line in sys.stdin:\n    pass\n").unwrap();
+        let py = if crate::util::which("python").is_some() { "python" } else { "python3" };
+        let m = Manifest { id: "burst".into(), name: "B".into(), mode: "session".into(), exec: format!("{py} burst.py"),
+            folder: Some(d.path().to_path_buf()), ..Default::default() };
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let s2 = seen.clone();
+        start(m, vec![], Arc::new(move |v| s2.lock().push(v)));
+        until(&seen, |v| v["view"]["title"] == "199").await;
+        let views = seen.lock().iter().filter(|v| v["kind"] == "plugin-view").count();
+        assert!(views <= 10, "{views} redraws for 200 views");
+        stop("burst");
+    }
+
+    #[tokio::test]
+    async fn starts_from_a_thread_with_no_runtime() {
+        // a sync command runs on the main thread, outside any runtime: a bare tokio::spawn there panicked, and the
+        // release build's panic = "abort" took the whole console down the moment a session plug-in was approved
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("echo.py"), ECHO).unwrap();
+        let py = if crate::util::which("python").is_some() { "python" } else { "python3" };
+        let m = Manifest { id: "no-runtime".into(), name: "E".into(), mode: "session".into(), exec: format!("{py} echo.py"),
+            folder: Some(d.path().to_path_buf()), ..Default::default() };
+        let seen = Arc::new(Mutex::new(Vec::<Value>::new()));
+        let s2 = seen.clone();
+        std::thread::spawn(move || start(m, vec![json!({"index": 0, "name": "A"})], Arc::new(move |v| s2.lock().push(v)))).join().unwrap();
+        until(&seen, |v| v["kind"] == "plugin-view").await;
+        stop("no-runtime");
     }
 }

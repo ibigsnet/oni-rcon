@@ -51,10 +51,11 @@ pub struct Server {
     pub ping_log: String,
     pub health_cmd: String,
     pub restart_cmd: String,
+    pub protocol: String, // "source": Valve's Source RCON over TCP (Reach Renaissance); else Project Reclaimer's WebSocket
 }
 
 const SERVER_KEYS: &[&str] =
-    &["port", "host", "name", "ssh", "url", "password", "password_env", "password_command", "content_dir", "restart_cmd"];
+    &["port", "host", "name", "ssh", "url", "password", "password_env", "password_command", "content_dir", "restart_cmd", "protocol"];
 
 impl Server {
     pub fn new(host: &str, port: u16) -> Self {
@@ -74,14 +75,19 @@ impl Server {
         }
     }
 
-    /// The WebSocket URL for a direct connection.
+    /// ws, or source for a Source RCON server: the scheme of the URL Rcon::run is given.
+    pub fn scheme(&self) -> &'static str {
+        if self.protocol == "source" { "source" } else { "ws" }
+    }
+
+    /// The URL for a direct connection.
     pub fn direct_url(&self) -> String {
         if !self.url.is_empty() {
             self.url.clone()
         } else if self.host.contains(':') {
-            format!("ws://[{}]:{}", self.host, self.port)
+            format!("{}://[{}]:{}", self.scheme(), self.host, self.port)
         } else {
-            format!("ws://{}:{}", self.host, self.port)
+            format!("{}://{}:{}", self.scheme(), self.host, self.port)
         }
     }
 
@@ -116,8 +122,12 @@ impl Server {
             password_command: Cmd::from_toml(t.get("password_command"))?,
             content_dir: s("content_dir")?,
             restart_cmd: s("restart_cmd")?.replace("{port}", &port.to_string()),
+            protocol: s("protocol")?,
             ..Default::default()
         };
+        if !["", "reclaimer", "source"].contains(&srv.protocol.as_str()) {
+            return Err("protocol must be \"reclaimer\" or \"source\"".into());
+        }
         if srv.url.is_empty() && srv.port == 0 {
             return Err("every server needs a port or a url".into());
         }
@@ -125,9 +135,12 @@ impl Server {
     }
 }
 
-/// PORT, HOST:PORT, [IPv6]:PORT or a ws(s):// URL.
+/// PORT, HOST:PORT, [IPv6]:PORT or a ws(s):// URL; source://HOST:PORT for a Source RCON server.
 pub fn parse_target(target: &str, ssh: &str, name: &str) -> Result<Server, String> {
     let target = target.trim();
+    if let Some(t) = target.strip_prefix("source://") {
+        return parse_target(t, ssh, name).map(|s| Server { protocol: "source".into(), ..s });
+    }
     if target.contains("://") {
         return Ok(Server { url: target.into(), host: "127.0.0.1".into(), ssh: ssh.into(), name: name.into(), ..Default::default() });
     }

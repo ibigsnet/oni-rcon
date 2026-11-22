@@ -49,6 +49,11 @@ def behind(have, latest) -> str:
     return ".".join(map(str, l)) if h and l and h < l else ""
 
 
+def since(version, least) -> bool:
+    """Whether a server's version is known and at least `least` ("0.10.0")."""
+    return bool(semver(version)) and not behind(version, least)
+
+
 def mixed_versions(stations: list[tuple[str, object]]) -> str:
     """"0.9.17 on F1 · 0.9.18 on F2, F3", oldest first, when (label, version) pairs disagree; empty when they agree.
     Unknown versions don't count."""

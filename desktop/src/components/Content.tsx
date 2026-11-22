@@ -7,6 +7,7 @@ import { oni, type Dialog } from "../engine";
 import { GROUP_HELP, SORTS, arrange, catalogItems, checkPlaylist, gameLabel, itemsFor, type Game, type Group, type Item, type Playlist } from "../lib/content";
 import { norm } from "../lib/forge";
 import { type Dict, type Line } from "../lib/util";
+import { projectOf, reclaimerOnly } from "../lib/projects";
 import { L, Table, type Row } from "./ui";
 
 const Keys = ({ hints }: { hints: string[] }) => <div className="keys">{hints.join("   ·   ")}</div>;
@@ -30,6 +31,7 @@ export function ContentBrowser({ d }: { d: Dialog }) {
   const [cat, setCat] = useState<{ items: Item[]; note: string }>({ items: [], note: oni.forgeStatus.key ? "Fetching the ReclaimerForge catalog…" : "Load your ReclaimerForge key (F6) to see more here." });
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (!projectOf(st.info).reclaimer) return setCat({ items: [], note: reclaimerOnly(st.info, "ReclaimerForge content") });
     if (!oni.forgeStatus.key) return;
     let live = true;
     invoke<Dict>("forge_listings", { sort: "latest", window: "7d", q: "", more: null, fresh: false }).then((r) => {

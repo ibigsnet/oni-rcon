@@ -1,17 +1,17 @@
 [project]
 name = "oni-rcon"
 dynamic = ["version"]
-description = "An ONI-themed terminal admin console for Project Reclaimer (Halo 3) dedicated servers, over RCON."
+description = "An ONI-themed terminal admin console for community Halo dedicated servers over RCON: Project Reclaimer (Halo 3), and other projects that speak its remote console."
 readme = "README.md"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Arche Labs" }, { name = "ibigs, LLC" }]
+authors = [{ name = "Arche Labs (viik)" }, { name = "ibigs, LLC" }]
 requires-python = ">=3.11"
 dependencies = ["textual>=8.0", "websockets>=15"]
-keywords = ["halo", "reclaimer", "rcon", "tui", "textual", "server-admin"]
+keywords = ["halo", "reclaimer", "gravemind", "rcon", "tui", "textual", "server-admin"]
 classifiers = [
     "Environment :: Console",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
     "Programming Language :: Python :: 3",
     "Topic :: Games/Entertainment",
 ]
