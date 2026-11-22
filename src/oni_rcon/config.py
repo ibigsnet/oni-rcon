@@ -29,6 +29,9 @@ class Server:
     # IBIGS 2026-10-17: the server's data folder on this machine. Its newest rcon-host.key lets oni take the spot
     # Reclaimer keeps for a console on the server's own machine, so it gets in even when 4 tools fill the rest.
     host_key_dir: str = ""
+    # IBIGS 2026-11-14: the server's dedicated.toml, for SERVER SETTINGS (Ctrl+E). Empty = found beside host_key_dir
+    # (up to two folders up) or beside content_dir. Local servers only (no ssh, no url).
+    dedicated_toml: str = ""
     # not a [[server]] key (older versions refuse unknown ones): set from the top-level ping_log by load_config
     ping_log: list[str] = field(default_factory=list, init=False)
     health_cmd: list[str] = field(default_factory=list, init=False)

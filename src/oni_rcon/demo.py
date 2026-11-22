@@ -243,6 +243,8 @@ class Fake:
         if cmd == "reload":
             await self.emit("control", action="reload", ok=True, text="Nothing changed.")
             return ok("Nothing changed.")
+        if cmd == "bots" and not args:  # 0.10: the bots in (allow_bots)
+            return ok("No bots are in.", [])
         if cmd in ("map", "mode", "load", "nextmap"):
             self.status["next"] = " / ".join(args)
             if cmd != "nextmap":

@@ -249,3 +249,15 @@ WidePick .dialog { width: 130; max-width: 96%; }
 /* IBIGS 2026-10-15: Notice (helper output) and the F3 'why are these off' line */
 .notice-body { height: auto; max-height: 24; }
 #ops-offline { height: auto; margin-bottom: 1; }
+
+/* server settings (settings_ui.py) */
+.dialog.settings { width: 140; max-width: 96%; height: 94%; }
+#set-head { height: auto; max-height: 5; }
+#set-tabs { height: 1fr; }
+#set-tabs TabPane { padding: 0; }
+.set-intro { height: auto; color: $text-muted; }
+#set-tabs DataTable { height: 1fr; min-height: 5; border: round $primary 35%; }
+#set-botlist { height: auto; max-height: 8; margin-top: 1; }
+#set-hint { height: auto; min-height: 3; max-height: 6; margin-top: 1; }
+.set-buttons { height: auto; }
+.set-buttons Button { margin-right: 1; min-width: 0; }
