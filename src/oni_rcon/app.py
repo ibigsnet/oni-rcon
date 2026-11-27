@@ -530,17 +530,35 @@ def public_host(host: str) -> bool:
 _OWN_NAME: list[str] = []
 
 
+NAT_ENV = "/var/lib/ibigs/nat.env"  # IBIGS servers: PUBLIC=<the shared address players use>, kept by ibigs-address
+
+
+def ibigs_nat_public(path: str | None = None) -> str:
+    """The public address an IBIGS server's own setup verified and saved (only a public one counts), else ""."""
+    path = path or NAT_ENV
+    try:
+        for ln in open(path, encoding="utf-8"):
+            if ln.startswith("PUBLIC="):
+                v = ln.split("=", 1)[1].strip()
+                return v if public_host(v) and _is_ip(v) else ""
+    except OSError:
+        pass
+    return ""
+
+
 def own_public_name() -> str:
-    """This machine's DNS name when it is a public one that resolves to a public address (an IBIGS server is named
-    like halo-xxxx.ibigs.us), else "". Looked up once; no outside service is asked."""
+    """This machine's public address for players: an IBIGS server's saved NAT address (IBIGS 2026-11-27: customer
+    consoles still said "your public IP" with no address), else its DNS name when that is a public one resolving
+    to a public address, else "". Looked up once; no outside service is asked."""
     if not _OWN_NAME:
-        name = ""
-        try:
-            fqdn = socket.getfqdn().rstrip(".")
-            if public_host(fqdn) and not _is_ip(fqdn) and public_host(socket.gethostbyname(fqdn)):
-                name = fqdn
-        except OSError:
-            pass
+        name = ibigs_nat_public()
+        if not name:
+            try:
+                fqdn = socket.getfqdn().rstrip(".")
+                if public_host(fqdn) and not _is_ip(fqdn) and public_host(socket.gethostbyname(fqdn)):
+                    name = fqdn
+            except OSError:
+                pass
         _OWN_NAME.append(name)
     return _OWN_NAME[0]
 

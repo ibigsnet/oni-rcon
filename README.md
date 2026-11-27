@@ -1,4 +1,4 @@
-## IBIGS fork: current release 0.9.0+ibigs.32 (27 November 2026)
+## IBIGS fork: current release 0.9.0+ibigs.33 (27 November 2026)
 
 This is IBIGS's public fork of [viik2k/oni-rcon](https://github.com/viik2k/oni-rcon) 0.9.0 (GPL-3.0), the console
 behind the IBIGS fleet and every IBIGS customer server. `main` is the maintained source. Customer servers don't
@@ -6,6 +6,9 @@ pull from GitHub: they get signed releases through IBIGS's update channel (**F9*
 
 ### Latest releases
 
+- **0.9.0+ibigs.33** (27 Nov): **SHARE / JOIN shows the real address on IBIGS servers.** It now reads the public
+  address the server's own IBIGS setup verified (/var/lib/ibigs/nat.env), so customers see e.g. `203.0.113.7:20061`
+  instead of "your public IP, port 20061".
 - **0.9.0+ibigs.32** (27 Nov): **no more 127.0.0.1 as a server's address.** When the server reports a local
   address, F3's SHARE / JOIN now gives only the port and points to the IP in your hosting panel, or shows this
   machine's own public name when it has one. CONSOLE LINK says "this machine, port N" instead of 127.0.0.1.
