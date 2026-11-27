@@ -206,6 +206,7 @@ def test_the_machines_public_name_fills_in_a_local_report(monkeypatch):
 
 
 def test_own_public_name_rejects_local_and_unresolvable_names(monkeypatch):
+    monkeypatch.setattr(app_mod, "NAT_ENV", "/nonexistent/nat.env")
     for fqdn, ip in (("localhost", "127.0.0.1"), ("box.local", "192.168.1.2"), ("halo.example.com", "10.0.0.5")):
         monkeypatch.setattr(app_mod, "_OWN_NAME", [])
         monkeypatch.setattr(app_mod.socket, "getfqdn", lambda f=fqdn: f)
@@ -215,3 +216,18 @@ def test_own_public_name_rejects_local_and_unresolvable_names(monkeypatch):
     monkeypatch.setattr(app_mod.socket, "getfqdn", lambda: "halo-x.example.com.")
     monkeypatch.setattr(app_mod.socket, "gethostbyname", lambda n: "203.0.113.20")
     assert app_mod.own_public_name() == "halo-x.example.com"
+
+
+def test_an_ibigs_servers_saved_nat_address_comes_first(tmp_path, monkeypatch):
+    env = tmp_path / "nat.env"
+    env.write_text("PUBLIC=203.0.113.44\nGWMAC=aa:bb\nAT=1\n")
+    assert app_mod.ibigs_nat_public(str(env)) == "203.0.113.44"
+    monkeypatch.setattr(app_mod, "NAT_ENV", str(env))
+    monkeypatch.setattr(app_mod, "_OWN_NAME", [])
+    monkeypatch.setattr(app_mod.socket, "getfqdn", lambda: "halo-x.example.com")
+    monkeypatch.setattr(app_mod.socket, "gethostbyname", lambda n: "203.0.113.20")
+    assert app_mod.own_public_name() == "203.0.113.44"
+    assert share_address("[::]:20061", app_mod.own_public_name()) == ("203.0.113.44:20061", "")
+    env.write_text("PUBLIC=10.60.0.5\n")  # a local address saved there never counts
+    assert app_mod.ibigs_nat_public(str(env)) == ""
+    assert app_mod.ibigs_nat_public(str(tmp_path / "missing")) == ""
