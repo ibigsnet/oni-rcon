@@ -7,6 +7,7 @@ import ipaddress
 import json
 import re
 import shlex
+import socket
 import subprocess
 import threading
 import time
@@ -526,6 +527,40 @@ def public_host(host: str) -> bool:
     return not any(ip in n for n in NOT_PUBLIC if n.version == ip.version)
 
 
+_OWN_NAME: list[str] = []
+
+
+def own_public_name() -> str:
+    """This machine's DNS name when it is a public one that resolves to a public address (an IBIGS server is named
+    like halo-xxxx.ibigs.us), else "". Looked up once; no outside service is asked."""
+    if not _OWN_NAME:
+        name = ""
+        try:
+            fqdn = socket.getfqdn().rstrip(".")
+            if public_host(fqdn) and not _is_ip(fqdn) and public_host(socket.gethostbyname(fqdn)):
+                name = fqdn
+        except OSError:
+            pass
+        _OWN_NAME.append(name)
+    return _OWN_NAME[0]
+
+
+def _is_ip(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
+def console_where(server) -> str:
+    """The CONSOLE LINK text: a loopback RCON address reads "this machine" so nobody mistakes it for a join address."""
+    host, port = split_host_port(server.where) if not (server.url or server.ssh) else ("", None)
+    if port and host in ("127.0.0.1", "localhost", "::1", "0.0.0.0", ""):
+        return f"this machine, port {port}"
+    return server.where
+
+
 def share_address(reported, override: str = "") -> tuple[str, str]:
     """(the address players join, or "" when it isn't known; why not, in plain words). The port is always the one the
     server reports, its game port: on a NAT-shared address that's the same public port, one of its block."""
@@ -535,7 +570,9 @@ def share_address(reported, override: str = "") -> tuple[str, str]:
     if not public_host(host):
         o_host = split_host_port(override)[0] if override else ""
         if not public_host(o_host):
-            return "", f"your public IP, port {port} (the server reports {host or 'no address'}:{port})"
+            # IBIGS 2026-11-27: a customer joined 127.0.0.1:PORT taken from this line. Never show a machine's own or
+            # local-network address here: only the port, and where the real address is.
+            return "", f"your server's public IP, port {port} (the IP in your hosting panel, not this machine's)"
         host = o_host
     return (f"[{host}]:{port}" if ":" in host else f"{host}:{port}"), ""
 
@@ -3319,7 +3356,7 @@ class OniApp(App):
         g.add_column()
         for a, b in [("STATION", Text(str(s.get("name") or info.get("server") or st.label), AMBER)),
                      ("SHARE / JOIN", self.share_text(st)),
-                     ("CONSOLE LINK", Text.assemble((st.server.where, DIM), ("  RCON · not for players", DIM),
+                     ("CONSOLE LINK", Text.assemble((console_where(st.server), DIM), ("  RCON · not for players", DIM),
                                                     (f"   v{info.get('version', '?')}", WHITE))),
                      *[("UPDATE", Text(f"▲ {lag} out", AMBER)) for lag in [self.lag(st)] if lag],
                      ("PHASE", Text(str(s.get("phase") or "—").replace("_", " ").upper(), CYAN)
@@ -3366,7 +3403,9 @@ class OniApp(App):
     def share(self, st=None) -> tuple[str, str]:
         """(the address players join this server at, or ""; why not). See share_address."""
         st = st or self.cur
-        return share_address(st.data.get("status", {}).get("address"), environ.get(PUBLIC_ENV, ""))
+        local = not (st.server.url or st.server.ssh)  # the server runs here: this machine's public name is its own
+        return share_address(st.data.get("status", {}).get("address"),
+                             environ.get(PUBLIC_ENV, "") or (own_public_name() if local else ""))
 
     def share_text(self, st) -> Text:
         """F3's SHARE / JOIN line: the address to paste into a chat, unless addresses are hidden for a stream (x)."""
